@@ -1,0 +1,31 @@
+FROM denoland/deno:2.3.3
+
+WORKDIR /app
+
+# clone plan98 and cache deps in one layer
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
+RUN git clone https://github.com/tylerchilds/plan98 /app/plan98
+
+WORKDIR /app/plan98/client
+
+# cache remote deps so the image is self-contained
+RUN deno cache server.js
+
+EXPOSE 1024
+
+# port is negotiable — clownbot will find the next free one if 1024 is taken.
+# you didn't ask for that. it happened anyway. see TRAITS.md.
+ENV PLAN98_PORT=1024
+
+# optional wiring to the rest of the distributed system (all have sane defaults)
+# PLAN98_WAS_HOST       — wallet-attached storage  (default: http://localhost:8080)
+# PLAN98_REALTIME       — multiplayer relay         (default: none)
+# PLAN98_PROXY          — outbound proxy            (default: none)
+# BRAID_TEXT_PROXY      — braid-text sync server    (default: none)
+# PLAN98_PASSPHRASE     — admin/stream gate         (default: none)
+# PLAN98_SIGNER         — Ed25519 key JSON          (default: generated at boot)
+# PLAN98_SPACE_ID       — persistent space UUID     (default: generated at boot)
+# PLAN98_ALLOWED_ORIGINS — CORS origins csv         (default: none)
+
+CMD ["deno", "run", "-A", "server.js"]

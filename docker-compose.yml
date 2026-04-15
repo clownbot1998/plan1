@@ -1,0 +1,86 @@
+name: plan98
+
+# the full distributed system plan98 assumes.
+# peer is the only thing you need to run locally.
+# everything else is optional — peer degrades gracefully without it.
+#
+# ports from Caddyfile + pup.json:
+#   1024  peer           (the web client / file server)
+#   8080  was            (wallet-attached storage)
+#   9208  relay          (multiplayer / geckos.io)
+#   8888  version-control (braid-text CRDT sync)
+
+services:
+  peer:
+    build:
+      context: .
+      dockerfile: Dockerfile.peer
+    ports:
+      - "1024:1024"
+    environment:
+      PLAN98_PORT: 1024
+      PLAN98_WAS_HOST: http://was:8080
+      PLAN98_REALTIME: ws://relay:9208
+      BRAID_TEXT_PROXY: http://version-control:8888
+      PLAN98_ALLOWED_ORIGINS: "localhost"
+    depends_on:
+      - was
+      - relay
+      - version-control
+    restart: unless-stopped
+
+  was:
+    # wallet-attached storage — did-coop/wallet-attached-storage-server
+    # node + better-sqlite3; needs native rebuild on non-x86
+    image: node:22-bookworm-slim
+    working_dir: /app
+    environment:
+      PORT: 8080
+      CORS_ALLOW_ALL_ORIGINS: "TRUE"
+    ports:
+      - "8080:8080"
+    volumes:
+      - was-data:/app/db
+    command: >
+      sh -c "
+        apt-get update && apt-get install -y curl python3 make g++ &&
+        curl -L https://github.com/did-coop/wallet-attached-storage-server/archive/main.tar.gz | tar xz --strip-components=1 &&
+        npm install &&
+        npm rebuild better-sqlite3 &&
+        npm run dev
+      "
+    restart: unless-stopped
+
+  relay:
+    # geckos.io + braid-http multiplayer relay
+    image: node:22-bookworm-slim
+    working_dir: /app
+    ports:
+      - "9208:9208"
+    command: >
+      sh -c "
+        npm install @geckos.io/server braid-http braid-text express quickjs-emscripten ws &&
+        node index.mjs
+      "
+    volumes:
+      - type: bind
+        source: /home/clownbot/.plan98/server/multiplayer
+        target: /app
+    restart: unless-stopped
+
+  version-control:
+    # braid-text CRDT sync server
+    image: node:22-bookworm-slim
+    working_dir: /app
+    ports:
+      - "8888:8888"
+    command: >
+      sh -c "
+        curl -L https://github.com/braid-org/braid-text/archive/master.tar.gz | tar xz --strip-components=1 &&
+        npm install &&
+        node server-demo.js
+      "
+    restart: unless-stopped
+
+volumes:
+  was-data:
