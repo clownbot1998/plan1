@@ -10,7 +10,7 @@
 
 ## flip-book cleanup (v2 base)
 
-[ ] replace flip-book.js with v2 (multiplayer, stroke-based, chromakey, video import)
-[ ] fix: fp-span — solid #d79921 background, not gradient
-[ ] fix: undo stack comment — they are module vars, not whisper state
-[ ] fix: chromakey CPU path — gate at 2MP, skip + warn above threshold
+[x] replace flip-book.js with v2 (multiplayer, stroke-based, chromakey, video import)
+[x] fix: fp-span — solid #d79921 background, not gradient
+[x] fix: undo stack comment — they are module vars, not whisper state
+[x] fix: chromakey CPU path — gate at 2MP, skip + warn above threshold
