@@ -7,3 +7,10 @@
 [x] generate new ssh keys to be able to operate as a silly sysadmin
 [x] make a git repo with this plan.md and call it plan1 and in the initial readme just say "we considered could, should, and would and landed on could" with no other context; get it ready to publish to github
 [ ] learn plan98-isms and prefer to 9p them for windows subsystem for linux sub sub sub sub system interop
+
+## flip-book cleanup (v2 base)
+
+[ ] replace flip-book.js with v2 (multiplayer, stroke-based, chromakey, video import)
+[ ] fix: fp-span — solid #d79921 background, not gradient
+[ ] fix: undo stack comment — they are module vars, not whisper state
+[ ] fix: chromakey CPU path — gate at 2MP, skip + warn above threshold
