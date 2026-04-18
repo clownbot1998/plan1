@@ -33,3 +33,9 @@ client: deno 1.42.4 couldn't read lockfile v5 (deno 2.x format). bumped to denol
 all 5 containers green. plan98.sh build|up|down|logs as the dev interface. three clean commits: security (ignores), docker (infrastructure), docs (readme + script).
 
 pushed to tangled.org under clowncode.bsky.social/plan98.
+
+---
+
+idea: edit tangled.sh from thumb drive
+
+the full loop — plan98.sh mount serves client/ from the host via 9p. vs code opens ~/thumb-drive. edits land live in the running docker container via volume mount. no rebuild. the files are the git repo. commit and push to tangled from the same path. the thumb drive IS the repo IS the container.
