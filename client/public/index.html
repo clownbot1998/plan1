@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover" />
+    <title>bios demo 4 kids</title>
+    <style>
+      :root {
+        --shadow: 0px 0px 2px 2px rgba(0,0,0,.25),
+                  0px 0px 6px 6px rgba(0,0,0,.15),
+                  0px 0px 2rem 2rem rgba(0,0,0,.05);
+        --red: firebrick;
+        --orange: darkorange;
+        --yellow: gold;
+        --green: mediumseagreen;
+        --blue: dodgerblue;
+        --indigo: slateblue;
+        --purple: mediumpurple;
+        --violet: mediumpurple;
+        --gray: sienna;
+      }
+      html, body {
+        height: 100%;
+        background: rgba(255,255,255,.85);
+        overscroll-behavior: none;
+        transform: translateZ(0);
+      }
+      @media screen {
+        body { overflow: auto; }
+      }
+      body > * {
+        position: relative;
+        z-index: 2;
+      }
+      main {
+        position: relative;
+        height: 100%;
+      }
+      img {
+        max-width: 100%;
+        max-height: 100%;
+        margin: auto;
+      }
+      button * {
+        pointer-events: none;
+      }
+    </style>
+    <link href="/public/styles/system.css" rel="stylesheet">
+    <script async src="/public/vendor/es-module-shims.js"></script>
+    <script async src="/public/plan98-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "@codemirror/state": "https://esm.sh/@codemirror/state@6.5.0",
+          "@codemirror/view": "https://esm.sh/@codemirror/view@6.39.0?deps=@codemirror/state@6.5.0",
+          "@codemirror/lang-javascript": "https://esm.sh/@codemirror/lang-javascript@6.2.3?deps=@codemirror/state@6.5.0,@codemirror/view@6.39.0",
+          "@codemirror/lang-html": "https://esm.sh/@codemirror/lang-html@6.4.9?deps=@codemirror/state@6.5.0,@codemirror/view@6.39.0",
+          "@codemirror/lang-css": "https://esm.sh/@codemirror/lang-css@6.3.1?deps=@codemirror/state@6.5.0,@codemirror/view@6.39.0",
+          "@replit/codemirror-vim": "https://esm.sh/@replit/codemirror-vim@6.3.0?deps=@codemirror/state@6.5.0,@codemirror/view@6.39.0",
+          "@uiw/codemirror-theme-gruvbox-dark": "https://esm.sh/@uiw/codemirror-theme-gruvbox-dark@4.23.10?deps=@codemirror/state@6.5.0,@codemirror/view@6.39.0",
+          "codemirror": "https://esm.sh/codemirror@6.0.1?deps=@codemirror/state@6.5.0,@codemirror/view@6.39.0",
+          "diffhtml": "https://esm.sh/diffhtml@1.0.0-beta.30",
+          "lunr": "https://esm.sh/lunr@2.3.9",
+          "marked": "https://esm.sh/marked@11.1.0",
+          "natsort": "https://esm.sh/natsort@2.0.3",
+          "quickjs-emscripten": "https://esm.sh/quickjs-emscripten@0.31.0",
+          "tone@next": "https://esm.sh/tone@next",
+          "@silly/tag": "/public/plan98.js",
+          "@silly/elf": "/public/plan98.js",
+          "@sillonious/saga": "/public/saga.js",
+          "@plan98/types": "/public/types.js",
+          "@plan98/elf": "/public/plan98.js",
+          "@plan98/modal": "/public/elves/plan98-modal.js",
+          "@plan4/as2": "/public/as2.js",
+          "eruda": "https://esm.sh/eruda@3.4.0"
+        }
+      }
+    </script>
+    <script type="module" src="/public/main.js"></script>
+    <script type="module" src="/public/elves/ur-shell.js"></script>
+    <script type="module" src="/public/elves/multi-task.js"></script>
+    <script type="module" src="/public/elves/source-code.js"></script>
+    <script type="module" src="/public/elves/flip-book.js"></script>
+    <script type="module" src="/public/elves/lore-baby.js"></script>
+  </head>
+  <script>document.write(`<body pathname="${window.location.pathname}">`)</script>
+    <main id="main">
+      <multi-task></multi-task>
+    </main>
+    <script>
+      if (window.self !== window.top) {
+        window.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            const escapeEvent = new KeyboardEvent('keydown', {
+              key: 'Escape',
+              code: 'Escape',
+              keyCode: 27,
+              which: 27,
+              bubbles: true,
+              cancelable: true
+            });
+            window.parent.document.dispatchEvent(escapeEvent);
+          }
+        });
+      }
+    </script>
+  </body>
+</html>
