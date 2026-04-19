@@ -81,9 +81,28 @@ case "$CMD" in
     }' | grep -vE '\[(data-modal-close|data-tray|data-url|data-focused|data-direction|data-bind|data-search|data-index|data-menu|data-mode|data-title)\]' | sort)
     if [ -n "$DATA_CONFLICTS" ]; then echo "$DATA_CONFLICTS"; PASS=false; else echo "ok"; fi
 
+    echo "── stale /public/ paths ──"
+    PUBLIC_PATHS=$(grep -rn "'/public/\|src: /public/\|\"/public/" elves/*.js cdn/ sagas/ 2>/dev/null | grep -v '^\s*//' || true)
+    if [ -n "$PUBLIC_PATHS" ]; then echo "$PUBLIC_PATHS"; PASS=false; else echo "ok"; fi
+
+    echo "── $.teach in lifecycle hooks ──"
+    TEACH_IN_HOOKS=$(for f in elves/*.js; do
+      elf=$(basename "$f" .js)
+      awk '
+        /function (beforeUpdate|afterUpdate)\b/ { in_hook=1; depth=0 }
+        in_hook { depth += gsub(/{/, "{"); depth -= gsub(/}/, "}") }
+        in_hook && /\$\.teach\(/ { print FILENAME ":" NR ": " $0 }
+        in_hook && depth <= 0 && NR > 1 { in_hook=0 }
+      ' "$f"
+    done || true)
+    if [ -n "$TEACH_IN_HOOKS" ]; then echo "$TEACH_IN_HOOKS"; PASS=false; else echo "ok"; fi
+
     $PASS && echo "── all checks passed ──"
     ;;
+  build)
+    qjs --std "$SCRIPT_DIR/build.js"
+    ;;
   *)
-    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint]"
+    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build]"
     ;;
 esac

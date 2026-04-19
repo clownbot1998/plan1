@@ -47,7 +47,7 @@ $.draw((target) => {
       style="--theme: ${theme}; --image: ${image}">
       <div class="action-wrapper">
         <button data-close class="standard-button bias-generic -small -round" type="reset">
-          <sl-icon name="x-lg"></sl-icon>
+          ✕
         </button>
       </div>
       <div class="modal">
