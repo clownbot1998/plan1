@@ -1,14 +1,46 @@
 import elf from '@plan98/elf'
 import diffHTML from 'diffhtml'
+import lunr from 'lunr'
 
 function tagFromUrl(url) {
   return url.replace('/app/', '').split('?')[0]
 }
 
+function trayContent(url) {
+  if (!url.startsWith('/app/')) return `<iframe src="${url}" style="width:100%;height:100%;border:none;display:block;"></iframe>`
+  const [path, qs] = url.split('?')
+  const tag = path.replace('/app/', '')
+  const attrs = qs ? qs.split('&').map(p => {
+    const [k, v] = p.split('=')
+    return `${k}="${decodeURIComponent(v || '')}"`
+  }).join(' ') : ''
+  return `<${tag} ${attrs}></${tag}>`
+}
+
 import $paperPocket, { sideEffects, systemMenu, getTheme, afterUpdateTheme } from './paper-pocket.js'
+
+const allApps = Object.values(systemMenu).flatMap(g => g.list)
+
+const TYPE_PRIORITY = ['app', 'media', 'saga', 'js', 'html']
+let searchIdx = null
+let searchDocs = {}
+
+fetch('/search-manifest.json')
+  .then(r => r.json())
+  .then(docs => {
+    docs.forEach(d => { searchDocs[d.ref] = d })
+    searchIdx = lunr(function() {
+      this.ref('ref')
+      this.field('name', { boost: 10 })
+      this.field('type', { boost: 5 })
+      this.field('keywords')
+      docs.forEach(d => this.add(d))
+    })
+  })
 
 const initial = {
   systemPane: Object.keys(systemMenu)[0],
+  launcherQuery: '',
   startX: null,
   startY: null,
   x: null,
@@ -28,41 +60,35 @@ const initial = {
 const $ = elf('multi-task', initial)
 
 function renderSystemMenu() {
-  const {
-    systemPane
-  } = $.learn()
-  const groups = Object.keys(systemMenu).map(key => ({ key, ...systemMenu[key] }))
+  const { launcherQuery = '' } = $.learn()
+  const q = launcherQuery.trim()
+
+  let results
+  if (!q) {
+    results = allApps.map(a => ({ label: a.label, url: a.url, type: 'app' }))
+  } else if (searchIdx) {
+    const hits = searchIdx.search(q + '~1').map(h => searchDocs[h.ref]).filter(Boolean)
+    hits.sort((a, b) => TYPE_PRIORITY.indexOf(a.type) - TYPE_PRIORITY.indexOf(b.type))
+    results = hits.map(d => ({ label: d.name, url: d.ref, type: d.type }))
+  } else {
+    results = allApps.filter(a => a.label.toLowerCase().includes(q.toLowerCase()))
+      .map(a => ({ label: a.label, url: a.url, type: 'app' }))
+  }
 
   return `
-    <div class="mt-system">
-      <div class="unified-results">
-        ${groups.map((x) => {
-          return `
-            <div class="pane-select ${systemPane === x.key?'active':''}" data-pane="${x.key}">
-              <div>
-                ${systemMenu[x.key].label}
-              </div>
-              <div class="button-group">
-                ${systemMenu[systemPane].list.filter(x => x.url).map(({ label, url }) => {
-                  return `
-                    <button class="app-select" data-url="${url}" data-title="${label}">
-                      <div class="iconography">
-                      </div>
-                      <span class="app-label">
-                        ${label}
-                      </span>
-                    </button>
-                  `
-                }).join('')}
-              </div>
-
-            </div>
-          `
-        }).join('')}
-      </div>
+    <div class="mt-launcher">
+      <input class="launcher-input" type="text" placeholder="search…" value="${launcherQuery}" autocomplete="off" />
+      <ul class="launcher-list">
+        ${results.map(({ label, url, type }) => `
+          <li>
+            <button class="app-select" data-url="${url}" data-title="${label}">
+              <span class="app-type">${type}</span>${label}
+            </button>
+          </li>
+        `).join('')}
+      </ul>
     </div>
   `
-
 }
 
 function engine(target) {
@@ -116,7 +142,7 @@ function render(target) {
             </div>
           </div>
           <div class="tray-body">
-            <${tagFromUrl(url)}></${tagFromUrl(url)}>
+            ${trayContent(url)}
           </div>
           <div class="resize-actions">
             <button aria-label="resize" data-direction="sw" class="tray-resize minimizable resize-left-bottom" data-tray="${tray}">
@@ -151,8 +177,7 @@ function render(target) {
 
       if(trayNode.dataset.url !== url) {
         trayNode.dataset.url = url
-        const tag = tagFromUrl(url)
-        diffHTML.innerHTML(trayNode.querySelector('.tray-body'), `<${tag}></${tag}>`)
+        diffHTML.innerHTML(trayNode.querySelector('.tray-body'), trayContent(url))
       }
 
       trayNode.dataset.grabbed = grabbed
@@ -217,19 +242,24 @@ $.draw((target) => {
       const taskbarHeight = target.querySelector('.taskbar')?.offsetHeight || 0
       const w = Math.floor(window.innerWidth / 2)
       const h = Math.floor((window.innerHeight - taskbarHeight) / 2)
+      const hero = self.crypto.randomUUID()
       const apps = [
-        { tray: self.crypto.randomUUID(), url: '/app/ur-shell',     title: 'shell',  x: 0, y: 0, w, h },
-        { tray: self.crypto.randomUUID(), url: '/app/flip-book',     title: 'art',    x: w, y: 0, w, h },
-        { tray: self.crypto.randomUUID(), url: '/app/paper-pocket',  title: 'music',  x: 0, y: h, w, h },
-        { tray: self.crypto.randomUUID(), url: '/app/lore-baby',     title: 'coding', x: w, y: h, w, h },
+        { tray: self.crypto.randomUUID(), url: '/app/ur-shell',    title: 'shell',  x: 0, y: 0, width: w, height: h },
+        { tray: self.crypto.randomUUID(), url: '/app/flip-book',    title: 'art',    x: w, y: 0, width: w, height: h },
+        { tray: self.crypto.randomUUID(), url: '/app/paper-pocket', title: 'music',  x: 0, y: h, width: w, height: h },
+        { tray: self.crypto.randomUUID(), url: '/app/lore-baby',    title: 'coding', x: w, y: h, width: w, height: h },
       ]
-      $.teach(apps, (state, payload) => {
+      $.teach({ hero, apps, heroUrl: '/blog/' }, (state, { hero, apps, heroUrl }) => {
         const newState = { ...state }
-        payload.forEach(({ tray, url, title, x, y, w, h }) => {
+        apps.forEach(({ tray, url, title, x, y, width, height }) => {
           newState.trays[tray] = true
           newState.trayZ += 1
-          newState[tray] = { width: w, height: h, x, y, z: newState.trayZ, url, title, minimized: false, maximized: false }
+          newState[tray] = { width, height, x, y, z: newState.trayZ, url, title, minimized: false, maximized: false }
         })
+        newState.trays[hero] = true
+        newState.trayZ += 1
+        newState.focusedTray = hero
+        newState[hero] = { width: apps[0].width, height: apps[0].height, x: 0, y: 0, z: newState.trayZ, url: heroUrl, title: 'clownbot', maximized: true }
         return newState
       })
     })
@@ -254,7 +284,7 @@ $.draw((target) => {
       <div class="center tasks"></div>
       <div class="right">
         <button class="to-social taskbar-button">
-          <sl-icon name="people-fill"></sl-icon>
+          👥
         </button>
       </div>
     </div>
@@ -327,16 +357,18 @@ function afterUpdate(target) {
     if(target.startState !== showStart) {
       target.startState = showStart
       target.dataset.menu = showStart
+      if(showStart) {
+        requestAnimationFrame(() => target.querySelector('.launcher-input')?.focus())
+      }
     }
   }
 
   {
-    const { systemPane } = $.learn()
-
-    if(systemPane && target.lastPane !== systemPane) {
-      target.lastPane = systemPane
+    const { launcherQuery, showStart } = $.learn()
+    if(showStart && target.lastQuery !== launcherQuery) {
+      target.lastQuery = launcherQuery
       const sysMen = target.querySelector(".system-menu")
-      diffHTML.innerHTML(sysMen, renderSystemMenu(systemPane))
+      diffHTML.innerHTML(sysMen, renderSystemMenu())
     }
   }
 
@@ -714,16 +746,17 @@ $.style(`
   & .system-menu {
     display: none;
     position: absolute;
-    overflow: hidden;
     inset: 0;
     z-index: 100;
-    background: rgba(0,0,0,.85);
-    backdrop-filter: blur(2px);
+    background: rgba(0,0,0,.6);
+    backdrop-filter: blur(4px);
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 10vh;
   }
 
   &[data-menu="true"] .system-menu {
-    display: grid;
-    place-items: center;
+    display: flex;
   }
 
   & [data-snap] {
@@ -1236,90 +1269,70 @@ $.style(`
     background: var(--green);
   }
 
-  & .mt-system {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    border: 3px solid var(--root-theme, mediumseagreen);
-    background: rgba(0,0,0,.85);
-    border: 1px rgba(255,255,255,.15);
-    border-radius: 1rem;
-    overflow: hidden;
-    height: 100%;
-    max-height: 80%;
-  }
-
-  & .groups {
-    overflow: hidden;
-    padding: .5rem;
-    max-height: 100%;
-    justify-content: end;
-  }
-
-  & .pane-select {
-    color: rgba(255,255,255,.85);
-    border: 0;
-    padding: .5rem 1rem;
-    text-align: left;
-    border-radius: 1rem;
-  }
-
-  & .unified-results {
-    height: 100%;
-    overflow: auto;
-  }
-
-  & .pane-select.active {
-  }
-
-  & .group-list,
-  & .application-list {
-    gap: .5rem;
+  & .mt-launcher {
+    width: min(40rem, 90vw);
     display: flex;
-    flex-direction: column-reverse;
-    overflow: auto;
-    height: 100%;
+    flex-direction: column;
   }
 
-  & .applications {
-    overflow: hidden;
-    padding: .5rem;
+  & .launcher-input {
+    display: block;
+    width: 100%;
+    background: rgba(255,255,255,.12);
+    border: 1px solid rgba(255,255,255,.2);
+    border-radius: .75rem;
+    color: white;
+    font-size: 1.8rem;
+    padding: 1rem 1.4rem;
+    outline: none;
+    box-shadow: 0 4px 24px rgba(0,0,0,.4);
   }
 
-  & .iconography {
-    background: lemonchiffon;
-    aspect-ratio: 1;
-    min-width: 2rem;
+  & .launcher-input::placeholder {
+    color: rgba(255,255,255,.35);
+  }
+
+  & .launcher-list {
+    list-style: none;
+    margin: .5rem 0 0;
+    padding: 0;
+    max-height: 55vh;
+    overflow-y: auto;
+    mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+  }
+
+  & .launcher-list li {
+    padding: 0;
   }
 
   & .app-select {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    width: 100%;
     border: none;
     background: transparent;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    text-align: left;
-    gap: .5rem;
-    border-radius: 0;
-    align-items: center;
-  }
-
-  & .app-label {
-    background: rgba(0,0,0,.25);
     color: rgba(255,255,255,.85);
-    border: 0;
-    position: relative;
-    z-index: 2;
-    max-height: 3.5rem;
-    overflow: hidden;
+    font-size: 1.4rem;
+    text-align: left;
+    padding: .6rem .8rem;
+    border-radius: .5rem;
+    cursor: pointer;
   }
 
-  & .app-label {
-    background: linear-gradient(135deg, rgba(255,255,255,.55), rgba(255,255,255,.95)), var(--root-theme, mediumseagreen);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+  & .app-select:hover,
+  & .app-select:focus {
+    background: rgba(255,255,255,.12);
+    color: white;
   }
 
-  & .pane-select {
-    
+  & .app-type {
+    font-size: 1rem;
+    opacity: .45;
+    min-width: 4rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
   }
 
   & .settings-menu:empty {
@@ -1352,7 +1365,8 @@ $.style(`
 `)
 
 $.when('click', '[data-start-menu]', () => {
-  $.teach({ showStart: !$.learn().showStart, showSocial: false })
+  const showStart = !$.learn().showStart
+  $.teach({ showStart, showSocial: false, launcherQuery: '' })
 })
 
 $.when('click', '.tray-wake', wake)
@@ -1559,8 +1573,10 @@ $.when('click', '.tray-min', toggleMin)
 $.when('click', '.tray-max', toggleMax)
 
 $.when('click', '.system-menu', closeSystemMenu)
-$.when('click', '.pane-select', selectPane)
 $.when('click', '.app-select', selectApp)
+$.when('input', '.launcher-input', (event) => {
+  $.teach({ launcherQuery: event.target.value })
+})
 
 const WINDOW_MANAGER_ALLOW_LIST = ['ur-shell', 'paper-pocket', 'lore-baby']
 
