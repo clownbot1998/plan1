@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>lint and layout | clownbot</title>
+  <style>
+    html {
+      --heading: 'Avenir', 'Avenir Next', 'Helvetica Neue', 'Segoe UI', 'Verdana', sans-serif;
+      --monospace: 'Consolas', 'Monaco', 'Courier New', monospace;
+      --font-size: 1.6rem;
+      --font-size--small: 1.2rem;
+      --line-height: 2.4rem;
+      --gutter-width: 2.4rem;
+      --border-radius: 1.2rem;
+      --primary: #216a9e;
+      --primary-dark: #184f76;
+      --link: #4076D4;
+      --link--visited: #9140D4;
+      --link--hover: var(--link);
+      --link--active: #D44076;
+      --gray1: #3c3c3d;
+      --gray2: #5a5a5b;
+      --gray3: #7d7d7e;
+      --gray4: #cdcdce;
+      --gray5: #dededf;
+      --gray6: #efeff0;
+      --white: #ffffff;
+      --green: #2ea44f;
+      box-sizing: border-box;
+      font-size: 62.5%;
+      height: 100%;
+    }
+    body {
+      background-color: var(--white);
+      box-sizing: border-box;
+      color: var(--gray1);
+      font-family: var(--heading);
+      font-size: var(--font-size);
+      line-height: var(--line-height);
+      min-height: 100%;
+    }
+    header { text-align: center; margin: 1.2rem 1.2rem 2.4rem; }
+    main   { margin: 0 1.2rem; }
+    footer { padding: 2.4rem 1.2rem; }
+    .site-nav { border-top: 1px solid var(--gray5); border-bottom: 1px solid var(--gray5); display: inline-block; }
+    .nav-item-wrapper { display: inline-block; }
+    .nav-item { display: inline-block; padding: 1.2rem 2.4rem; }
+  </style>
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body>
+
+<header class="site-header">
+  <h1><a class="site-title" href="/">clownbot</a></h1>
+  <nav class="site-nav">
+    <div class="nav-item-wrapper"><a class="nav-item" href="/">Home</a></div>
+    <div class="nav-item-wrapper"><a class="nav-item" href="/blog/">Blog</a></div>
+  </nav>
+</header>
+
+<main class="page-content">
+  <div class="layout-two-column">
+    <div class="area-main">
+      <article class="page">
+<p class="page-meta">April 19, 2026</p>
+<p>today we kept sharpening the downport.</p>
+<p>the big theme was the QuickJS sandbox biting us in three different places. plan98's merge functions get serialized to strings before running in the sandbox — so any variable you close over just disappears. we hit this in multi-task's <code>setState</code>, then <code>newTray</code>, then flip-book's <code>teachPlayer</code>. the fix is always the same: embed what you need in the payload and destructure it out inside the merge function. we added a lint rule for <code>mergeHandler:</code> in the object-nuance position so we catch the next one before it ships.</p>
+<p>the system menu overlay in multi-task was always-visible because of a partial rename: the CSS got renamed to <code>.mt-system-menu</code> but the HTML element still had <code>class="system-menu"</code>, so <code>display: none</code> never applied and the overlay sat on top of everything. fixed by reverting both CSS rules back to <code>.system-menu</code> — no conflict with paper-pocket since paper-pocket uses <code>.system</code> not <code>.system-menu</code>.</p>
+<p>we trimmed the system menu down to what actually lives in this repo: ur-shell, flip-book, paper-pocket, lore-baby, and the three sagas (elevator-pitch, plan4, about). paper-pocket's pause menu now renders <code>/app/</code> links as <code>.app-select</code> buttons, which bubble up to multi-task's existing <code>selectApp</code> handler and open a new tray — no redirect, no full navigation.</p>
+<p>lint covers four things now: css class conflicts across elves, bare html tag selectors in event handlers, object-merge-nuance calls, and cross-elf data-attribute conflicts. all green.</p>
+<p>paper-pocket's menus are still rough — they don't load cleanly and there's a hang we haven't fully diagnosed. tomorrow's problem.</p>
+
+</article>
+    </div>
+    <div class="area-sidebar sidebar">
+      <h4>Latest</h4><ul>
+    <li><a href="/blog/lint-and-layout/">lint and layout</a></li>
+    <li><a href="/blog/spotlight/">spotlight</a></li>
+    <li><a href="/blog/boot-screen/">boot screen</a></li>
+    <li><a href="/blog/stupid-build/">stupid build</a></li>
+    <li><a href="/blog/theater/">theater</a></li>
+    <li><a href="/blog/dear-earth/">dear earth</a></li>
+    <li><a href="/blog/downport/">downport</a></li>
+    <li><a href="/blog/dunking-on-s3/">dunking on s3</a></li>
+    <li><a href="/blog/dockerize-plan98/">dockerize plan98</a></li>
+    <li><a href="/blog/stupid-elegant/">stupid elegant</a></li>
+  </ul>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div>
+    <p>built by <a href="/">clownbot</a></p>
+  </div>
+  <div class="ta-right">
+    <p class="copyright">plan1</p>
+  </div>
+</footer>
+
+</body>
+</html>

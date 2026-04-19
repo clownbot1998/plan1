@@ -1,0 +1,326 @@
+/*
+  1. General
+*/
+
+h1 a,
+h2 a,
+h3 a,
+h4 a,
+h5 a,
+h6 a {
+  text-decoration: none;
+}
+
+.sidebar a {
+  text-decoration: none;
+}
+
+nav a {
+  text-decoration: none;
+}
+
+/*
+  1.1 Page Styles
+*/
+
+.page-header{
+  padding: 4.8rem 0;
+  text-align: center;
+}
+
+.page-header h1 {
+  font-weight: 100;
+  letter-spacing: 2px;
+  padding: 0;
+}
+
+@media (min-width: 55rem) {
+  .page-header h1 {
+    font-size: 9.6rem;
+    font-weight: bold;
+    letter-spacing: 0;
+    line-height: 11rem;
+  }  
+}
+
+.page-meta {
+  color: var(--gray3);
+}
+
+.page-navigation {
+  display: grid;
+  column-gap: var(--gutter-width);
+  grid-template-columns: repeat(2, 1fr);
+  margin-bottom: 2.4rem;
+}
+
+.page-previous {
+  text-align: right;
+}
+
+/*
+  2: Layout
+*/
+
+body {
+  margin: auto;
+  max-width: initial;
+}
+
+footer {
+  display: grid;
+  column-gap: var(--gutter-width);
+  grid-template-columns: repeat(2, 1fr);
+  background-color: var(--gray6);
+}
+
+/*
+  2.1: Header
+*/
+
+.site-title:link,
+.site-title:visited,
+.site-title:hover,
+.site-title:focus,
+.site-title:active {
+  color: var(--gray1);
+  font-family: monospace;
+  text-decoration: none;
+}
+
+/*
+  2.2 Sidebar
+*/
+
+.sidebar h4 {
+  color: var(--gray3);
+  text-transform: uppercase;
+  padding: 0 0 1.2rem;
+}
+
+.sidebar ul {
+  list-style-type: none;
+  padding-bottom: 1.2rem;
+  margin-left: 0;
+}
+
+@media (min-width: 55rem) {
+  .sidebar h4 {
+    font-size: var(--font-size);
+  }
+}
+
+.sidebar a {
+  display: inline-block;
+  margin-bottom: 1.2rem;
+}
+
+/*
+  2.3: Homepage Layout
+*/
+
+.layout-homepage {
+  display: grid;
+  grid-template-areas: "promoted promoted recent"
+                       "featured basics categories";
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.area-promoted {
+  grid-area: promoted;
+}
+
+.area-recent {
+  grid-area: recent;
+}
+
+.area-featured {
+  grid-area: featured;
+}
+
+.area-basics {
+  grid-area: basics;
+}
+
+.area-categories {
+  grid-area: categories;
+}
+
+/*
+  2.4: Two Column Layout
+*/
+
+.layout-two-column {
+  display: grid;
+  grid-template-areas:  "title"
+                        "main"
+                        "sidebar";
+  max-width: 85rem;
+  margin: 0 auto;
+}
+
+@media (min-width: 55rem) {
+  .layout-two-column {
+    grid-template-areas: "sidebar main";
+    grid-template-columns: minmax(20rem, auto) minmax(60vw, 65rem);
+    column-gap: var(--gutter-width);
+    row-gap: var(--gutter-width);
+  }
+}
+
+.area-sidebar {
+  grid-area: sidebar;
+  padding: 2.4rem 0 4.8rem;
+}
+
+@media (min-width: 55rem) {
+  .area-sidebar {
+    text-align: right;
+    border-right: 1px solid var(--gray5);
+    padding-right: var(--gutter-width);
+  }
+}
+
+.area-main {
+  grid-area: main;
+  width: 100%;
+  max-width: 65rem;
+  padding-top: 2.4rem;
+  padding-bottom: 4.8rem;
+}
+
+/*
+  3: Post Lists
+*/  
+
+.snippet {
+  margin-bottom: 2.4rem;
+  position: relative;
+}
+
+.snippet:last-child {
+  margin-bottom: 0;
+}
+
+.snippet::after {
+  border-bottom: 1px solid var(--gray5);
+  content: '';
+  display: block;
+  position: absolute;
+  bottom: 0;
+  left: calc(-1 * var(--gutter-width));
+  right: 0;
+}
+
+.snippet:last-child::after {
+  content: none;
+}
+
+/*
+  4: Posts
+*/
+
+.post {
+  margin-bottom: 4.8rem;
+}
+
+/*
+  5: Examples
+*/
+
+.example {
+  --example-spacing: .6rem;
+  --example-inner-radius: calc(var(--border-radius) - var(--example-spacing));
+
+  background-color: var(--gray6);
+  border-radius: var(--border-radius);
+  margin: 0 2.4rem 2.4rem;
+  border: 1px solid var(--gray4);
+}
+
+.example-tab-list {
+  background-color: var(--primary);
+  border-radius: var(--border-radius) var(--border-radius) 0 0;
+  padding-top: var(--example-spacing);
+  position: relative;
+}
+
+.example-tab {
+  background-color: var(--gray6);
+  border-radius: var(--example-spacing) var(--example-spacing) 0 0;
+  box-shadow: inset 0 -8px 6px -6px rgba(0,0,0,.4);
+  cursor: pointer;
+  display: inline-block;
+  margin-left: var(--example-spacing);
+  padding: .6rem 1.2rem;
+  opacity: .85;
+}
+.example-tab.-active {
+  box-shadow: none;
+  cursor: default;
+  opacity: 1;
+}
+
+.example-tab-content {
+  display: none;
+}
+
+.example-tab-content.-active {
+  display: block;
+}
+
+.example-address {
+  background-color: var(--white);
+  border: 1px solid var(--gray4);
+  color: var(--gray2);
+  margin: var(--example-spacing) var(--example-spacing) 0;
+  padding: var(--example-spacing) calc(2 * var(--example-spacing));
+}
+
+.example-address input {
+  width: 100%;
+}
+
+.example-iframe {
+  padding: var(--example-spacing);
+}
+
+.example-iframe iframe {
+  background-color: var(--white);
+  box-sizing: border-box;
+  border: 1px solid var(--gray4);
+  border-radius: 0 0 var(--example-inner-radius) var(--example-inner-radius);
+}
+
+.example-link {
+  font-size: var(--font-size--small);
+  text-align: center;
+  margin-bottom: var(--example-spacing);
+}
+
+/*
+  6: Author
+*/
+
+.author-detail {
+  background-color: var(--gray6);
+  border: 1px solid var(--gray4);
+  border-radius: var(--border-radius);
+  padding: 2.4rem;
+}
+
+.author-bio {
+  padding-bottom: 0;
+}
+
+/*
+  7: Archive
+*/
+
+/*
+  8: Utilities
+*/
+
+.ta-right {
+  text-align: right;
+}
