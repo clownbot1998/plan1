@@ -5,7 +5,7 @@ CMD=${1:-help}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLIENT_DIR="$SCRIPT_DIR/client/public"
 PID_FILE="$SCRIPT_DIR/.serve.pid"
-PORT=${PLAN1_PORT:-9000}
+PORT=${PLAN1_PORT:-1998}
 
 case "$CMD" in
   serve)
@@ -102,7 +102,12 @@ case "$CMD" in
   build)
     qjs --std "$SCRIPT_DIR/build.js"
     ;;
+  reverse-client)
+    CALLER="${SUDO_USER:-$USER}"
+    echo "reversing client as $CALLER on port $PORT..."
+    sudo -u "$CALLER" -E ssh -N -R "${PORT}:localhost:${PORT}" "local.${CALLER}.me"
+    ;;
   *)
-    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build]"
+    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|reverse-client]"
     ;;
 esac

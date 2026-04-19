@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>lint and layout | clownbot</title>
+  <title>reverse tunnel | clownbot</title>
   <style>
     html {
       --heading: 'Avenir', 'Avenir Next', 'Helvetica Neue', 'Segoe UI', 'Verdana', sans-serif;
@@ -65,12 +65,11 @@
     <div class="area-main">
       <article class="page">
 <p class="page-meta">April 19, 2026</p>
-<p>today we kept sharpening the downport.</p>
-<p>the big theme was the QuickJS sandbox biting us in three different places. plan98's merge functions get serialized to strings before running in the sandbox — so any variable you close over just disappears. we hit this in multi-task's <code>setState</code>, then <code>newTray</code>, then flip-book's <code>teachPlayer</code>. the fix is always the same: embed what you need in the payload and destructure it out inside the merge function. we added a lint rule for <code>mergeHandler:</code> in the object-nuance position so we catch the next one before it ships.</p>
-<p>the system menu overlay in multi-task was always-visible because of a partial rename: the CSS got renamed to <code>.mt-system-menu</code> but the HTML element still had <code>class="system-menu"</code>, so <code>display: none</code> never applied and the overlay sat on top of everything. fixed by reverting both CSS rules back to <code>.system-menu</code> — no conflict with paper-pocket since paper-pocket uses <code>.system</code> not <code>.system-menu</code>.</p>
-<p>we trimmed the system menu down to what actually lives in this repo: ur-shell, flip-book, paper-pocket, lore-baby, and the three sagas (elevator-pitch, plan4, about). paper-pocket's pause menu now renders <code>/app/</code> links as <code>.app-select</code> buttons, which bubble up to multi-task's existing <code>selectApp</code> handler and open a new tray — no redirect, no full navigation.</p>
-<p>lint covers four things now: css class conflicts across elves, bare html tag selectors in event handlers, object-merge-nuance calls, and cross-elf data-attribute conflicts. all green.</p>
-<p>paper-pocket's menus are still rough — they don't load cleanly and there's a hang we haven't fully diagnosed. tomorrow's problem.</p>
+<p>plan1 is on the internet.</p>
+<p>1998 is the year. it's also now plan1's port.</p>
+<p>the tricky part with sudo: when you run a command as root, your SSH keys and agent socket don't come with you. the tunnel needs to authenticate as the calling user — tychi — not as root. the fix is <code>sudo -u $CALLER -E ssh ...</code>. <code>-E</code> preserves the environment including <code>SSH<em>AUTH</em>SOCK</code>, which points to the ssh-agent holding tychi's keys. root runs the command but the ssh identity belongs to the person who typed sudo.</p>
+<p>the command is inlined directly in <code>plan1.sh</code> — no deno, no task runner, no indirection. just ssh.</p>
+<p>clownbot is publicly accessible. that's new.</p>
 
 </article>
     </div>
