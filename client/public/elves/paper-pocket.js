@@ -3,7 +3,7 @@ import { consoleShow, consoleHide } from './plan98-console.js'
 import { render } from '@sillonious/saga'
 import diffHTML from 'diffhtml'
 import * as Tone from 'tone@next'
-import { SampleLibrary } from '/public/cdn/attentionandlearninglab.com/Tonejs-Instruments.js'
+import { SampleLibrary } from '/cdn/attentionandlearninglab.com/Tonejs-Instruments.js'
 import { BUTTON_CODES, overrideButton, checkButton, checkAxis } from './debug-gamepads.js'
 
 export const elves = {
@@ -92,246 +92,23 @@ const modes = {
 }
 
 export const systemMenu = {
-  favorites: {
-    label: "Favorites",
-    list: [
-      {
-        label: 'On Software Authoship',
-        url: '/app/paper-pocket?src=/public/cdn/sillyz.computer/en-us/on-software-authorship.saga&rom=silly-script'
-      },
-      {
-        label: 'Plan98:Memex',
-        url: '/app/paper-pocket?src=/public/cdn/sillyz.computer/en-us/memex.saga&rom=silly-script'
-      },
-      {
-        label: 'Wallet',
-        url: '/app/plan98-wallet'
-      },
-      {
-        label: 'Hyper Text',
-        url: '/app/paper-pocket?src=/public/cdn/sillyz.computer/en-us/hyper-text.saga&rom=silly-script'
-      },
-      {
-        label: 'Blue Sky',
-        url: '/app/blue-sky'
-      },
-      {
-        label: 'Six Modalities',
-        url: '/app/paper-pocket?src=/public/cdn/sillyz.computer/en-us/six-modalities.saga&rom=silly-script'
-      },
-      {
-        label: "Java's Crypt",
-        url: '/app/js-repl'
-      },
-      {
-        label: 'Cool Chat',
-        url: '/app/cool-chat'
-      },
-      {
-        label: 'Song Wave',
-        url: '/app/couch-coop?rom=song-wave'
-      },
-      {
-        label: 'Final Boss',
-        url: '/app/paper-pocket?rom=final-boss'
-      },
-    ]
-  },
-  deeplinks: {
-    label: "Deeplinks",
-    list: [
-      {
-        label: 'Tamashika',
-        url: 'steam://rungameid/2996080'
-      },
-      {
-        label: 'Tamashika (Demo)',
-        url: 'steam://rungameid/3788220'
-      },
-      {
-        label: 'Stardew Valley',
-        url: 'steam://rungameid/413150'
-      },
-    ]
-  },
-
-  office: {
-    label: "Office",
-    list: [
-      {
-        label: 'Secure Mail',
-        url: '/app/secure-mail'
-      },
-      {
-        label: 'Cool Chat',
-        url: '/app/cool-chat'
-      },
-    ]
-  },
   apps: {
     label: "Apps",
     list: [
-      {
-        label: 'Map',
-        url: '/app/world-map'
-      },
-      {
-        label: 'Secure Messenger',
-        url: '/app/secure-messenger'
-      },
-      {
-        label: 'Bulletin Board',
-        url: `/app/bulletin-board?src=/private/boards/${self.crypto.randomUUID()}.json&group=${self.crypto.randomUUID()}`
-      },
-      {
-        label: 'Public TV',
-        url: '/app/public-broadcast'
-      },
-      {
-        label: 'Draw Term 98',
-        url: '/app/draw-term'
-      },
+      { label: 'Shell',        url: '/app/ur-shell' },
+      { label: 'Flip Book',    url: '/app/flip-book' },
+      { label: 'Paper Pocket', url: '/app/paper-pocket' },
+      { label: 'Lore Baby',    url: '/app/lore-baby' },
     ]
   },
-  art: {
-    label: "Art",
+  docs: {
+    label: "Docs",
     list: [
-      {
-        label: 'Sketch Pad',
-        url: '/app/sketch-pad'
-      },
-      {
-        label: 'Chalk Board',
-        url: '/app/chalk-board'
-      },
-      {
-        label: 'Paint',
-        url: '/app/paint-app'
-      },
-      {
-        label: 'Silly Script',
-        url: '/app/paper-pocket?rom=silly-script'
-      },
+      { label: 'Elevator Pitch', url: '/app/lore-baby?src=/cdn/sillyz.computer/en-us/elevator-pitch.saga' },
+      { label: 'Plan 4',         url: '/app/lore-baby?src=/sagas/sillyz.computer/plan4.saga' },
+      { label: 'About',          url: '/app/lore-baby?src=/sagas/sillyz.computer/about.saga' },
     ]
   },
-  music: {
-    label: "Music",
-    list: [
-      {
-        label: 'Final Boss',
-        url: '/app/final-boss'
-      },
-      {
-        label: 'GDC 2025',
-        url: '/app/gdc-2025'
-      },
-      {
-        label: 'Jam Session',
-        url: '/app/paper-pocket?rom=jam-session'
-      },
-      {
-        label: 'Dial Tone',
-        url: '/app/dial-tone'
-      },
-      {
-        label: 'Sillyz Ocarina',
-        url: '/app/sillyz-ocarina'
-      },
-      {
-        label: 'Music Walk',
-        url: '/app/music-walk'
-      },
-      {
-        label: 'Jam Band',
-        url: '/app/couch-coop?rom=jam-band&variation=pro'
-      },
-      {
-        label: 'Rookie Mistakes',
-        url: '/app/couch-coop?rom=jam-band&variation=elegant'
-      },
-      {
-        label: 'Paper Nautiloids',
-        url: '/app/paper-pocket?rom=paper-nautiloids'
-      },
-    ]
-  },
-  code: {
-    label: "Coding",
-    list: [
-      {
-        label: 'Camera Desktop',
-        url: '/app/camera-desktop'
-      },
-      {
-        label: 'Irix Launcher',
-        url: '/app/irix-launcher'
-      },
-      {
-        label: 'Code Module',
-        url: '/app/code-module?src=/public/elves/code-module.js'
-      },
-      {
-        label: 'Hyper Script',
-        url: '/app/hyper-script'
-      },
-      {
-        label: 'Generic Park',
-        url: '/app/generic-park'
-      },
-      {
-        label: 'Collaborative Text',
-        url: `/app/simpleton-client?src=/private/text/${new Date().toISOString()}/${self.crypto.randomUUID()}.saga`
-      },
-      {
-        label: 'File System',
-        url: '/app/file-system'
-      },
-      {
-        label: 'UR Shell',
-        url: '/app/ur-shell'
-      },
-    ]
-  },
-  games: {
-    label: "Games",
-    list: [
-      {
-        label: 'Tamashika',
-        url: '/app/paper-pocket?rom=silly-script&src=/public/cdn/quicktequila.com/tamashika/3-24-25.saga'
-      },
-      {
-        label: 'Typo Hero',
-        url: '/app/paper-pocket?rom=typo-hero'
-      },
-      {
-        label: 'Sonic &amp; Knuckles',
-        url: '/app/sonic-knuckles'
-      },
-    ]
-  },
-  unfinished: {
-    label: "Unfinished",
-    list: [
-      {
-        label: 'Tamashika',
-        url: '/app/paper-pocket?rom=silly-script&src=/public/cdn/quicktequila.com/tamashika/3-24-25.saga'
-      },
-      {
-        label: 'Typo Hero',
-        url: '/app/paper-pocket?rom=typo-hero'
-      },
-    ]
-
-  },
-  templates: {
-    label: "Templates",
-    list: [
-      {
-        label: 'Swipe Swipe',
-        url: '/app/swipe-swipe'
-      },
-    ]
-  }
 }
 
 const searchEngines = ['google', 'archive', 'wikipedia', 'duckduckgo', 'yahoo']
@@ -481,7 +258,7 @@ const $ = elf('paper-pocket', {
   mode: startMode(),
   backMode: startMode(),
   settingsKey: 'instrument',
-  pauseKey: 'favorites',
+  pauseKey: 'apps',
   pauseIndex: 0,
   tutorialIndex: 0,
   tutorial: Object.keys(tutorialModes),
@@ -999,8 +776,9 @@ export function renderPauseMenu(menu, pauseIndex, pauseKey) {
 
   const items = list.map((item, i) => {
     const { label, mode, url } = item
+    const isApp = url && url.startsWith('/app/')
     return `
-      <button ${url? `data-href="${url}"`:''} ${mode ? `data-mode="${mode}"`:''} data-index="${i}" class="menu-link ${pauseIndex === i ? 'active':''}">
+      <button ${isApp ? `data-url="${url}" data-title="${label}"` : url ? `data-href="${url}"` : ''} ${mode ? `data-mode="${mode}"`:''} data-index="${i}" class="${isApp ? 'app-select' : 'menu-link'} ${pauseIndex === i ? 'active':''}">
         ${label}
       </button>
     `

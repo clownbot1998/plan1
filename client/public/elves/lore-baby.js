@@ -48,7 +48,7 @@ const $ = Self('lore-baby', {
   url: null,
   suggestIndex: null,
   suggestions: [],
-  src: '/public/cdn/sillyz.computer/en-us/elevator-pitch.saga',
+  src: '/cdn/sillyz.computer/en-us/elevator-pitch.saga',
   output: saga.output,
   suggestionsLength: 0,
 })
@@ -198,20 +198,24 @@ $.e('click', '[data-print]', print)
 $.e('click', '[data-pitch]', pitch)
 $.e('click', '[data-search]', search)
 
-fetch('/plan98/about').then(res => res.json()).then((data) => {
-  p98 = data.plan98
-  const { sagaIndex } = p98
-  if(sagaIndex) {
-    idx = lunr.Index.load(sagaIndex.index)
-    sagaIndex.documents.forEach(x => {
-      documents.push(x)
-      docMap.set(x.path, x)
-    })
-    $.view(render, { beforeUpdate, afterUpdate })
-  }
-}).catch(() => {
-  $.view(() => `Failed to load index...`)
+const sagaDocs = [
+  { name: 'elevator-pitch', path: '/cdn/sillyz.computer/en-us/elevator-pitch.saga' },
+  { name: 'plan4', path: '/sagas/sillyz.computer/plan4.saga' },
+  { name: 'about', path: '/sagas/sillyz.computer/about.saga' },
+]
+
+idx = lunr(function() {
+  this.ref('path')
+  this.field('name')
+  sagaDocs.forEach(doc => this.add(doc))
 })
+
+sagaDocs.forEach(x => {
+  documents.push(x)
+  docMap.set(x.path, x)
+})
+
+$.view(render, { beforeUpdate, afterUpdate })
 
 function render(target) {
   const { ready } = $.model()

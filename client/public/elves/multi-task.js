@@ -34,7 +34,7 @@ function renderSystemMenu() {
   const groups = Object.keys(systemMenu).map(key => ({ key, ...systemMenu[key] }))
 
   return `
-    <div class="system">
+    <div class="mt-system">
       <div class="unified-results">
         ${groups.map((x) => {
           return `
@@ -334,7 +334,7 @@ function afterUpdate(target) {
 
     if(systemPane && target.lastPane !== systemPane) {
       target.lastPane = systemPane
-      const sysMen = target.querySelector('.system-menu')
+      const sysMen = target.querySelector(".system-menu")
       diffHTML.innerHTML(sysMen, renderSystemMenu(systemPane))
     }
   }
@@ -1235,7 +1235,7 @@ $.style(`
     background: var(--green);
   }
 
-  & .system {
+  & .mt-system {
     display: grid;
     grid-template-columns: auto 1fr;
     border: 3px solid var(--root-theme, mediumseagreen);
@@ -1389,30 +1389,23 @@ function focusTray (e) {
 
 function newTray(overrides) {
   const tray = self.crypto.randomUUID()
-  $.teach(tray, {
-    mergeHandler: mergeNewTray,
-    parameters: [tray, overrides]
-  })
-}
-
-function mergeNewTray(tray, overrides) {
-  return (state, payload) => {
-    const newState = {...state}
+  $.teach({ tray, overrides }, (state, { tray, overrides }) => {
+    const newState = { ...state }
     newState.trays ||= {}
-    newState.trays[payload] = true
+    newState.trays[tray] = true
     newState.trayZ += 1
     newState.focusedTray = tray
-    newState[payload] = {
+    newState[tray] = {
       width: 300,
       height: 150,
       z: newState.trayZ,
       ...overrides
     }
     return newState
-  }
+  })
 }
 
-$.when('pointerdown', 'canvas', start)
+$.when('pointerdown', '.terminal-canvas', start)
 
 function start(e) {
   e.preventDefault()
@@ -1436,7 +1429,7 @@ function start(e) {
   $.teach({ startX, startY, isMouseDown: true, x, y })
 }
 
-$.when('pointermove', 'canvas', move)
+$.when('pointermove', '.terminal-canvas', move)
 
 function move (e) {
   e.preventDefault()
@@ -1458,7 +1451,7 @@ function move (e) {
   $.teach({ x, y, invertX: x < 0, invertY: y < 0 })
 }
 
-$.when('pointerup', 'canvas', end)
+$.when('pointerup', '.terminal-canvas', end)
 function end (e) {
   e.preventDefault()
   const { grabbing } = $.learn()

@@ -648,7 +648,7 @@ $.style(`
     cursor: pointer;
   }
 
-  & .title {
+  & .ur-title {
     color: var(--root-theme, #E83FB8);
     --v-font-wght: 800;
     --v-font-slnt: -15;

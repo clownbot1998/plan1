@@ -326,14 +326,14 @@ $.style(`
   & .reel-badge { position: absolute; top: 1px; left: 3px; font-size: .4rem; pointer-events: none; }
 
   /* ── CORNER TASKBARS ── */
-  & .taskbar {
+  & .fb-taskbar {
     position: absolute; left: 0; right: 0; z-index: 5; padding: .5rem;
     display: grid; grid-template-columns: 1fr auto 1fr; gap: .5rem; pointer-events: none;
   }
-  & .taskbar.-top { top: 0; }
-  & .taskbar.-bottom { bottom: 0; }
-  & .taskbar button, & .taskbar .right { pointer-events: all; }
-  & .taskbar .right { display: flex; justify-content: flex-end; align-items: center; }
+  & .fb-taskbar.-top { top: 0; }
+  & .fb-taskbar.-bottom { bottom: 0; }
+  & .fb-taskbar button, & .fb-taskbar .right { pointer-events: all; }
+  & .fb-taskbar .right { display: flex; justify-content: flex-end; align-items: center; }
 
   & .corner-btn {
     background: rgba(29,32,33,.75); border: 1px solid #3c3836; color: #a89984;
@@ -547,7 +547,7 @@ function mount(target) {
           <div class="import-label" data-import-label>extracting frames…</div>
           <div class="import-bar-outer"><div class="import-bar-inner" data-import-bar></div></div>
         </div>
-        <div class="taskbar -top">
+        <div class="fb-taskbar -top">
           <div class="left"><button class="corner-btn" data-open-view="settings">⚙ settings</button></div>
           <div class="center"></div>
           <div class="right">
@@ -562,7 +562,7 @@ function mount(target) {
             </div>
           </div>
         </div>
-        <div class="taskbar -bottom">
+        <div class="fb-taskbar -bottom">
           <div class="left"><button class="corner-btn" data-new-frame>+ frame</button></div>
           <div class="center" data-capture-slot></div>
           <div class="right"><button class="corner-btn" data-darkroom-open>▶ play</button></div>
@@ -850,10 +850,16 @@ teachPlayer — shorthand for player-namespaced $.teach.
 */
 
 function teachPlayer(payload) {
-  $.teach(payload,
-    { mergeHandler: mergePlayer, parameters: [playerId] },
-    { bypassSecurity: true }
-  )
+  $.teach({ pid: playerId, ...payload }, (state, payload) => {
+    const { pid, ...rest } = payload
+    return {
+      ...state,
+      players: {
+        ...state.players,
+        [pid]: { ...state.players[pid], ...rest }
+      }
+    }
+  })
 }
 
 /*
