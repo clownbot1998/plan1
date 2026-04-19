@@ -212,7 +212,7 @@ Press 'Options' or control on a keyboard or the select/options button on your ga
 To configure the Paper Pocket with more granularity, the code is below.
 
 <code-module
-src: /public/elves/paper-pocket.js
+src: /elves/paper-pocket.js
 key: code-1
     `
   },
@@ -224,7 +224,7 @@ Press 'Start' or alt/options on a keyboard or the start/pause button on your gam
 Write your own applications using the SDK provided below.
 
 <code-module
-src: /public/elf.js
+src: /plan98.js
 key: code-2
     `
   },
@@ -556,18 +556,10 @@ $.draw((target) => {
           <button key="b" class="red" data-press="b">B</button>
           <button key="x" class="blue" data-press="x">X</button>
           <button key="y" class="yellow" data-press="y">Y</button>
-          <button key="up" class="gray" data-press="up">
-            <sl-icon name="caret-up-fill"></sl-icon>
-          </button>
-          <button key="down" class="gray" data-press="down">
-            <sl-icon name="caret-down-fill"></sl-icon>
-          </button>
-          <button key="left" class="gray" data-press="left">
-            <sl-icon name="caret-left-fill"></sl-icon>
-          </button>
-          <button key="right" class="gray" data-press="right">
-            <sl-icon name="caret-right-fill"></sl-icon>
-          </button>
+          <button key="up" class="gray" data-press="up">▲</button>
+          <button key="down" class="gray" data-press="down">▼</button>
+          <button key="left" class="gray" data-press="left">◀</button>
+          <button key="right" class="gray" data-press="right">▶</button>
         </fieldset>
       </div>
     </div>
@@ -1040,7 +1032,7 @@ export function ai(operation) {
       <div class="search-bar">
         <input class="standard-input" name="prompt" data-bind="synthia" value="${operation}" />
         <button class="standard-button bias-positive" data-search="${encodeURIComponent(operation)}">
-          <sl-icon name="search"></sl-icon>
+          🔍
         </button>
       </div>
 

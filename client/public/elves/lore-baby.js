@@ -225,15 +225,15 @@ function render(target) {
     target.innerHTML = `
       <div class="action-bar">
         <button data-search class="minimal-button">
-          <sl-icon name="search"></sl-icon>
+          🔍
         </button>
         <div class="library">
         </div>
         <button data-pitch class="minimal-button">
-          <sl-icon name="projector"></sl-icon>
+          📽
         </button>
         <button data-print class="minimal-button">
-          <sl-icon name="printer"></sl-icon>
+          🖨
         </button>
       </div>
       <div class="irix"></div>
@@ -379,7 +379,17 @@ function display(target) {
     if (target.lastUrl !== url) {
       target.lastUrl = url
       target.dataset.mode = 'browser'
-      innerHTML(irix, `<iframe src="${url}" frameborder="0"></iframe>`)
+      if (url.startsWith('/app/')) {
+        const [path, qs] = url.split('?')
+        const tag = path.replace('/app/', '')
+        const attrs = qs ? qs.split('&').map(p => {
+          const [k, v] = p.split('=')
+          return `${k}="${decodeURIComponent(v || '')}"`
+        }).join(' ') : ''
+        innerHTML(irix, `<${tag} ${attrs}></${tag}>`)
+      } else {
+        innerHTML(irix, `<iframe src="${url}" frameborder="0"></iframe>`)
+      }
     }
     return
   }

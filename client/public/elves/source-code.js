@@ -13,6 +13,6 @@ $.draw((t) => {
   });
 
   return `
-    <was-code src="${t.getAttribute('src')|| '/public/plan98.js'}" stack="${[...new Set(['/public/index.html', ...nautiloids])]}"></was-code>
+    <was-code src="${t.getAttribute('src')|| '/plan98.js'}" stack="${[...new Set(['/index.html', ...nautiloids])]}"></was-code>
   `
 })

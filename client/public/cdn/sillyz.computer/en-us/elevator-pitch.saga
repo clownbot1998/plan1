@@ -33,10 +33,10 @@ src: /private/beerdogusa.com/queen-we-are-the-champions/manifest.m3u8
 
 <iframe
 style: background: white
-src: /public/types.js
+src: /types.js
 
 <was-code
-src: /public/plan98.js
+src: /plan98.js
 
 <ur-shell
 
