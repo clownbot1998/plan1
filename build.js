@@ -202,9 +202,11 @@ function collectPosts() {
       const slug = f.replace(/\.md$/, '').replace(/^\d{4}-\d{2}-\d{2}-/, '')
       const dateStr = f.slice(0, 10)
       const title = meta.title || slug.replace(/-/g, ' ')
-      return { slug, date: new Date(dateStr + 'T12:00:00Z'), title, body, meta }
+      const [st] = os.stat(join(BLOG, f))
+      const mtime = st ? st.mtime : 0
+      return { slug, date: new Date(dateStr + 'T12:00:00Z'), mtime, title, body, meta }
     })
-    .sort((a, b) => b.date - a.date)
+    .sort((a, b) => (b.date - a.date) || (b.mtime - a.mtime))
 }
 
 // ── build ─────────────────────────────────────────────────────────────────────
