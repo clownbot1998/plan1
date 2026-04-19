@@ -483,18 +483,21 @@ $.style(`
   & .ck-color-row { display: flex; gap: .5rem; align-items: center; }
   & .ck-preview { width: 28px; height: 28px; border-radius: 3px; border: 1px solid #504945; flex-shrink: 0; }
 
-  & .darkroom { display: none; position: fixed; inset: 0; background: rgba(29,32,33,.97); z-index: 100; flex-direction: column; align-items: center; justify-content: center; gap: 1.25rem; }
+  & .darkroom { display: none; position: absolute; inset: 0; background: rgba(29,32,33,.97); z-index: 100; overflow: hidden; align-items: center; justify-content: center; }
   & .darkroom.open { display: flex; }
-  & .dr-canvas { image-rendering: pixelated; cursor: zoom-in; max-width: 88vw; max-height: 65vh; }
+  & .dr-canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; image-rendering: pixelated; cursor: zoom-in; }
   & .dr-canvas.zoomed { cursor: zoom-out; transform: scale(var(--dr-zoom, 1)); }
-  & .dr-controls { display: flex; align-items: center; gap: .75rem; }
+  & .dr-controls { position: absolute; bottom: 1.5rem; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: .75rem; transition: opacity .4s; white-space: nowrap; }
+  & .dr-controls.fade { opacity: 0; pointer-events: none; }
   & .dr-btn { background: #3c3836; border: 1px solid #504945; color: #a89984; font-family: 'DM Mono', monospace; font-size: .7rem; padding: .3rem .65rem; cursor: pointer; border-radius: 2px; transition: all 80ms; }
   & .dr-btn:hover { border-color: #d79921; color: #fabd2f; }
   & .dr-btn.active { background: #d79921; color: #282828; border-color: #d79921; }
   & .dr-counter { font-size: .65rem; color: #665c54; min-width: 4rem; text-align: center; }
-  & .dr-close { position: absolute; top: .75rem; right: .75rem; background: transparent; border: 1px solid #504945; color: #665c54; width: 28px; height: 28px; border-radius: 2px; cursor: pointer; font-size: .9rem; display: grid; place-items: center; }
+  & .dr-close { position: absolute; top: .75rem; right: .75rem; background: transparent; border: 1px solid #504945; color: #665c54; width: 28px; height: 28px; border-radius: 2px; cursor: pointer; font-size: .9rem; display: grid; place-items: center; transition: opacity .4s; }
+  & .dr-close.fade { opacity: 0; pointer-events: none; }
   & .dr-close:hover { color: #ebdbb2; border-color: #928374; }
-  & .dr-title { font-size: .65rem; color: #928374; letter-spacing: .08em; }
+  & .dr-title { position: absolute; top: .75rem; left: 50%; transform: translateX(-50%); font-size: .65rem; color: #928374; letter-spacing: .08em; transition: opacity .4s; }
+  & .dr-title.fade { opacity: 0; }
 
   & .sub-overlay { position: fixed; inset: 0; background: rgba(29,32,33,.95); z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; }
   & .sub-title { font-size: .65rem; color: #fe8019; letter-spacing: .1em; }
@@ -1851,18 +1854,37 @@ Darkroom — self-contained playback cursor, doesn't touch _localCurrent.
 
 */
 
-let _drPlaying=false,_drInterval=null,_drZoomed=false,_drDir=1,_drCurrent=0
+let _drPlaying=false,_drInterval=null,_drZoomed=false,_drDir=1,_drCurrent=0,_drFadeTimer=null
+
+function drShowControls(target){
+  const els=[target._darkroom.querySelector('.dr-controls'),target._darkroom.querySelector('.dr-close'),target._darkroom.querySelector('.dr-title')]
+  els.forEach(el=>el&&el.classList.remove('fade'))
+  clearTimeout(_drFadeTimer)
+  _drFadeTimer=setTimeout(()=>els.forEach(el=>el&&el.classList.add('fade')),2000)
+}
+
 function openDarkroom(target){
   const{canvasW,canvasH}=$.learn(),dc=target._drCanvas
-  _drCurrent = target._localCurrent ?? 0
+  _drCurrent=target._localCurrent??0
+  const trayBody=target.closest('.tray-body')
+  if(trayBody) trayBody.style.overflow='hidden'
   target._darkroom.classList.add('open')
   dc.width=canvasW;dc.height=canvasH
-  const scale=Math.min((window.innerWidth*.85)/canvasW,(window.innerHeight*.62)/canvasH)
-  dc.style.width=(canvasW*scale)+'px';dc.style.height=(canvasH*scale)+'px';dc.style.setProperty('--dr-zoom',scale*2)
   if(!dc._zoomWired){dc._zoomWired=true;dc.addEventListener('click',()=>{_drZoomed=!_drZoomed;dc.classList.toggle('zoomed',_drZoomed)})}
-  drRenderFrame(target);drStart(target)
+  if(!target._darkroom._activityWired){
+    target._darkroom._activityWired=true
+    target._darkroom.addEventListener('pointermove',()=>drShowControls(target))
+    target._darkroom.addEventListener('touchstart',()=>drShowControls(target))
+  }
+  drRenderFrame(target);drStart(target);drShowControls(target)
 }
-function closeDarkroom(target){target._darkroom.classList.remove('open');drStop(target);_drZoomed=false;target._drCanvas.classList.remove('zoomed')}
+
+function closeDarkroom(target){
+  target._darkroom.classList.remove('open')
+  const trayBody=target.closest('.tray-body')
+  if(trayBody) trayBody.style.overflow=''
+  drStop(target);_drZoomed=false;target._drCanvas.classList.remove('zoomed');clearTimeout(_drFadeTimer)
+}
 function drRenderFrame(target){
   const{frames,canvasW,canvasH,fps,loopMode}=$.learn(),dc=target._drCanvas,ctx=dc.getContext('2d')
   ctx.clearRect(0,0,dc.width,dc.height)

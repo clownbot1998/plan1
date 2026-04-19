@@ -214,8 +214,9 @@ $.draw((target) => {
     })
   } else {
     requestIdleCallback(() => {
+      const taskbarHeight = target.querySelector('.taskbar')?.offsetHeight || 0
       const w = Math.floor(window.innerWidth / 2)
-      const h = Math.floor(window.innerHeight / 2)
+      const h = Math.floor((window.innerHeight - taskbarHeight) / 2)
       const apps = [
         { tray: self.crypto.randomUUID(), url: '/app/ur-shell',     title: 'shell',  x: 0, y: 0, w, h },
         { tray: self.crypto.randomUUID(), url: '/app/flip-book',     title: 'art',    x: w, y: 0, w, h },
@@ -239,12 +240,12 @@ $.draw((target) => {
       <div class="trays"></div>
       <div class="cursor"></div>
       <canvas class="terminal-canvas"></canvas>
-      <div class="system-menu">
-        ${renderSystemMenu()}
-      </div>
-      <div class="settings-menu">
-        ${settingsMenu(target)}
-      </div>
+    </div>
+    <div class="system-menu">
+      ${renderSystemMenu()}
+    </div>
+    <div class="settings-menu">
+      ${settingsMenu(target)}
     </div>
     <div class="taskbar">
       <div class="left">
@@ -1389,18 +1390,22 @@ function focusTray (e) {
 
 function newTray(overrides) {
   const tray = self.crypto.randomUUID()
-  $.teach({ tray, overrides }, (state, { tray, overrides }) => {
+  const taskbarHeight = document.querySelector(`${$.link} .taskbar`)?.offsetHeight || 0
+  const w = Math.floor(window.innerWidth / 2)
+  const h = Math.floor((window.innerHeight - taskbarHeight) / 2)
+  const defaults = {
+    width: w,
+    height: h,
+    x: Math.floor(window.innerWidth / 4),
+    y: Math.floor((window.innerHeight - taskbarHeight) / 4),
+  }
+  $.teach({ tray, overrides: { ...defaults, ...overrides } }, (state, { tray, overrides }) => {
     const newState = { ...state }
     newState.trays ||= {}
     newState.trays[tray] = true
     newState.trayZ += 1
     newState.focusedTray = tray
-    newState[tray] = {
-      width: 300,
-      height: 150,
-      z: newState.trayZ,
-      ...overrides
-    }
+    newState[tray] = { z: newState.trayZ, ...overrides }
     return newState
   })
 }
@@ -1556,3 +1561,11 @@ $.when('click', '.tray-max', toggleMax)
 $.when('click', '.system-menu', closeSystemMenu)
 $.when('click', '.pane-select', selectPane)
 $.when('click', '.app-select', selectApp)
+
+const WINDOW_MANAGER_ALLOW_LIST = ['ur-shell', 'paper-pocket', 'lore-baby']
+
+$.when('open-app', WINDOW_MANAGER_ALLOW_LIST.join(','), (event) => {
+  const { url, title } = event.detail
+  newTray({ url, title })
+  $.teach({ showStart: false })
+})

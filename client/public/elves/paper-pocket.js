@@ -776,9 +776,8 @@ export function renderPauseMenu(menu, pauseIndex, pauseKey) {
 
   const items = list.map((item, i) => {
     const { label, mode, url } = item
-    const isApp = url && url.startsWith('/app/')
     return `
-      <button ${isApp ? `data-url="${url}" data-title="${label}"` : url ? `data-href="${url}"` : ''} ${mode ? `data-mode="${mode}"`:''} data-index="${i}" class="${isApp ? 'app-select' : 'menu-link'} ${pauseIndex === i ? 'active':''}">
+      <button ${url ? `data-href="${url}"` : ''} ${mode ? `data-mode="${mode}"`:''} data-index="${i}" class="menu-link ${pauseIndex === i ? 'active':''}">
         ${label}
       </button>
     `
@@ -1416,7 +1415,14 @@ function launchItem(event) {
   const { url, mode } = list[pauseIndex]
 
   if(url) {
-    window.location.href = url
+    if(url.startsWith('/app/')) {
+      document.querySelector($.link).dispatchEvent(new CustomEvent('open-app', {
+        detail: { url, title: url },
+        bubbles: true
+      }))
+    } else {
+      window.location.href = url
+    }
     return
   }
 
@@ -1438,7 +1444,14 @@ $.when('click', '.menu-link', (event) => {
   }
 
   if(href) {
-    window.location.href = href
+    if(href.startsWith('/app/')) {
+      event.target.dispatchEvent(new CustomEvent('open-app', {
+        detail: { url: href, title: event.target.textContent.trim() },
+        bubbles: true
+      }))
+    } else {
+      window.location.href = href
+    }
     $.teach({ pauseIndex })
     return
   }
