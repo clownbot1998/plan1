@@ -110,8 +110,8 @@ function shell({ title, content, sidebar }) {
   <title>${title} | clownbot</title>
   <style>
     html {
-      --heading: 'Avenir', 'Avenir Next', 'Helvetica Neue', 'Segoe UI', 'Verdana', sans-serif;
-      --monospace: 'Consolas', 'Monaco', 'Courier New', monospace;
+      --heading: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
+      --monospace: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
       --font-size: 1.6rem;
       --font-size--small: 1.2rem;
       --line-height: 2.4rem;
@@ -317,4 +317,26 @@ for (const f of readdir(PUB)) {
 
 writeFile(join(PUB, 'search-manifest.json'), JSON.stringify(docs))
 print('write: search-manifest.json (' + docs.length + ' docs)')
+
+// ── file manifest (full client walk) ─────────────────────────────────────────
+
+const FILE_SKIP = ['vendor', 'fonts', 'blog', 'css']
+
+function walkAll(dir, urlBase, files) {
+  for (const f of readdir(dir)) {
+    if (FILE_SKIP.includes(f)) continue
+    const full = join(dir, f)
+    const url = urlBase + '/' + f
+    if (isDir(full)) { walkAll(full, url, files); continue }
+    const ext = extname(f)
+    const name = basename(f)
+    const stem = name.replace(/\.[^.]+$/, '') || name
+    files.push({ name: stem, file: name, path: url, ext })
+  }
+}
+
+const fileManifest = []
+walkAll(PUB, '', fileManifest)
+writeFile(join(PUB, 'file-manifest.json'), JSON.stringify(fileManifest))
+print('write: file-manifest.json (' + fileManifest.length + ' files)')
 print('done')
