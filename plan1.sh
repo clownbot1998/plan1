@@ -4,6 +4,7 @@ set -e
 CMD=${1:-help}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLIENT_DIR="$SCRIPT_DIR/client/public"
+DIST_DIR="$SCRIPT_DIR/dist"
 PID_FILE="$SCRIPT_DIR/.serve.pid"
 PORT=${PLAN1_PORT:-1998}
 
@@ -13,7 +14,7 @@ case "$CMD" in
       echo "already serving on port $PORT (pid $(cat "$PID_FILE"))"
       exit 0
     fi
-    cd "$CLIENT_DIR"
+    cd "$DIST_DIR"
     python3 -m http.server "$PORT" &
     echo $! > "$PID_FILE"
     echo "serving $CLIENT_DIR on http://localhost:$PORT (pid $!)"
@@ -101,6 +102,7 @@ case "$CMD" in
     ;;
   build)
     qjs --std "$SCRIPT_DIR/build.js"
+    qjs --std "$SCRIPT_DIR/vendor.js"
     ;;
   bootstrap)
     MEMORY_SRC="$SCRIPT_DIR/memory"
@@ -130,5 +132,7 @@ case "$CMD" in
     ;;
   *)
     echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|reverse-client|bootstrap]"
+    echo "  build  — generates blog pages + vendors deps into dist/"
+    echo "  serve  — serves dist/ on port $PORT"
     ;;
 esac
