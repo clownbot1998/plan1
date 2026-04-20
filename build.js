@@ -147,17 +147,46 @@ function shell({ title, content, sidebar }) {
     header { text-align: center; margin: 1.2rem 1.2rem 2.4rem; }
     main   { margin: 0 1.2rem; }
     footer { padding: 2.4rem 1.2rem; }
-    .site-nav { border-top: 1px solid var(--gray5); border-bottom: 1px solid var(--gray5); display: inline-block; }
+    .site-nav { display: inline-block; }
     .nav-item-wrapper { display: inline-block; }
     .nav-item { display: inline-block; padding: 1.2rem 2.4rem; }
   </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "diffhtml": "https://esm.sh/diffhtml@1.0.0-beta.30",
+      "lunr": "https://esm.sh/lunr@2.3.9",
+      "marked": "https://esm.sh/marked@11.1.0",
+      "natsort": "https://esm.sh/natsort@2.0.3",
+      "quickjs-emscripten": "https://esm.sh/quickjs-emscripten@0.31.0",
+      "@silly/tag": "/plan98.js",
+      "@silly/elf": "/plan98.js",
+      "@silly/cache": "/cache.js",
+      "@sillonious/saga": "/saga.js",
+      "@plan98/types": "/types.js",
+      "@plan98/elf": "/plan98.js",
+      "@plan98/modal": "/elves/plan98-modal.js",
+      "@plan4/as2": "/as2.js"
+    }
+  }
+  </script>
   <link rel="stylesheet" href="/css/base.css">
   <link rel="stylesheet" href="/css/main.css">
+  <script type="module" src="/elves/hypertext-action.js"></script>
+  <script type="module" src="/elves/hypertext-address.js"></script>
+  <script type="module" src="/elves/hypertext-blankline.js"></script>
+  <script type="module" src="/elves/hypertext-comment.js"></script>
+  <script type="module" src="/elves/hypertext-effect.js"></script>
+  <script type="module" src="/elves/hypertext-parenthetical.js"></script>
+  <script type="module" src="/elves/hypertext-puppet.js"></script>
+  <script type="module" src="/elves/hypertext-quote.js"></script>
+  <script type="module" src="/elves/title-page.js"></script>
+  <script type="module" src="/elves/blog-search.js"></script>
 </head>
 <body>
 
 <header class="site-header">
-  <h1><a class="site-title" href="/">clownbot</a></h1>
+  <blog-search></blog-search>
   <nav class="site-nav">
     <div class="nav-item-wrapper"><a class="nav-item" href="/">Home</a></div>
     <div class="nav-item-wrapper"><a class="nav-item" href="/blog/">Blog</a></div>

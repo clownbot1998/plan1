@@ -108,6 +108,7 @@ async function print(event) {
       @page { size: letter portrait; margin: 1in; }
       @media print {
         .print-banner { display: none; }
+        .screenplay { padding-top: 0; }
       }
     </style>
   `

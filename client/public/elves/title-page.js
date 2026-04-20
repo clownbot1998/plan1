@@ -34,40 +34,43 @@ function markup(string) {
 
 $.style(`
   & {
+    display: block;
+    position: relative;
     height: 9in;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  & [name="cover"] {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  & [name="main"] {
+    text-align: center;
+  }
+
+  & [name="title"] {
+    display: block;
+    margin-bottom: 1rem;
+  }
+
+  & [name="author"] {
     display: block;
   }
-	& [name="cover"] {
-		display: grid;
-		grid-template-areas:
-			"main main"
-			"contact agent";
-		grid-template-columns: 1fr 1fr;
-		grid-template-rows: 1fr auto;
-		width: 100%;
-		height: 100%;
-	}
 
-	& [name="main"] {
-		place-self: center;
-		grid-area: main;
-		text-align: center;
-	}
+  & [name="contact"] {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+  }
 
-	& [name="title"] {
-		margin-bottom: 1rem;
-	}
-
-	& [name="author"],
-	& [name="title"] {
-		display: block;
-	}
-
-	& [name="contact"] {
-		grid-area: contact;
-	}
-
-	& [name="agent"] {
-		grid-area: agent;
-	}
+  & [name="agent"] {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+  }
 `)
