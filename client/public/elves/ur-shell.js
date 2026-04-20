@@ -199,6 +199,7 @@ const commands = {
 \`art\` — flip-book animation
 \`music\` — paper-pocket sequencer
 \`coding\` — lore-baby storytelling
+\`js\` — quickjs repl
 \`exit\` / \`quit\` — close current modal
 
 **filesystem (unix basics)**
@@ -264,6 +265,13 @@ Type \`<elf-name>\` to load a custom element.
     loadPath('/app/lore-baby')
     return 'opening lore-baby...'
   },
+  'js': () => {
+    import('./js-repl.js').then((module) => {
+      imports.runJs = module.runJs
+      $.teach({ modality: 'js' })
+    }).catch(e => console.error(e))
+    return `Entering JS modality. Type 'exit' to leave.`
+  },
 }
 
 
@@ -328,8 +336,7 @@ $.draw((target) => {
             value="${escapeHyperText(messageText)}"
           ></textarea>
         `}
-      </div>
-    </div>
+      </form>
   `
 }, {
   beforeUpdate,
@@ -361,7 +368,7 @@ function afterUpdate(target) {
       target.lastIndex = messages.length - 1
       const lastChild = target.querySelector('.messages .message:last-child')
       if(lastChild) {
-        document.querySelector('.scroll-back').scrollTop = lastChild.offsetTop
+        target.querySelector('.scroll-back').scrollTop = lastChild.offsetTop
       }
     }
   }
@@ -670,10 +677,13 @@ $.style(`
     position: relative;
     margin: 0;
     opacity: .85;
-    white-space: pre-wrap;
     overflow-wrap: break-word;
     word-wrap: break-word;
     max-width: 100%;
+  }
+
+  & .message pre, & .message code {
+    white-space: pre-wrap;
   }
 
   & .message.-human {
