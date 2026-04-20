@@ -10,20 +10,23 @@ PORT=${PLAN1_PORT:-1998}
 
 case "$CMD" in
   serve)
+    [ "$(id -u)" = "0" ] && echo "error: do not run serve as root" && exit 1
     if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
       echo "already serving on port $PORT (pid $(cat "$PID_FILE"))"
       exit 0
     fi
-    cd "$DIST_DIR"
+    SERVE_DIR="$DIST_DIR"
+    [ ! -f "$DIST_DIR/index.html" ] && SERVE_DIR="$CLIENT_DIR"
+    cd "$SERVE_DIR"
     python3 -m http.server "$PORT" &
     echo $! > "$PID_FILE"
-    echo "serving $CLIENT_DIR on http://localhost:$PORT (pid $!)"
+    echo "serving $SERVE_DIR on http://localhost:$PORT (pid $!)"
     echo "open http://localhost:$PORT/index.html"
     ;;
   stop)
     if [ -f "$PID_FILE" ]; then
       kill "$(cat "$PID_FILE")" 2>/dev/null && echo "stopped" || true
-      rm "$PID_FILE"
+      rm "$PID_FILE" 2>/dev/null || sudo rm "$PID_FILE"
     else
       echo "not running"
     fi
