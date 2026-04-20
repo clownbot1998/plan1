@@ -191,6 +191,67 @@ const modalities = {
 
 const commands = {
   ...killCommandHandlers,
+
+  'help': () => `
+**clownbot shell**
+
+**apps**
+\`art\` — flip-book animation
+\`music\` — paper-pocket sequencer
+\`coding\` — lore-baby storytelling
+\`exit\` / \`quit\` — close current modal
+
+**filesystem (unix basics)**
+\`pwd\` — print working directory (where am I?)
+\`ls\` — list contents of current directory
+\`cd <path>\` — change directory (\`cd ..\` to go up)
+
+**shell**
+\`↑ / ↓\` — navigate command history
+\`Tab\` — autocomplete command
+\`Ctrl+C\` — interrupt / cancel
+
+**tips**
+Click any \`code\` snippet to run it.
+Type \`<elf-name>\` to load a custom element.
+`,
+
+  'pwd': function() {
+    const { cwd } = $.learn()
+    return cwd || '/'
+  },
+
+  'ls': function() {
+    const { cwd } = $.learn()
+    const entries = Object.keys(fileSystem || {})
+      .filter(k => {
+        const rel = k.startsWith(cwd) ? k.slice(cwd.length) : null
+        return rel && !rel.includes('/')
+      })
+    if (!entries.length) return `${cwd || '/'}\n(empty)`
+    return entries.join('  ')
+  },
+
+  'cd': function(path) {
+    if (!path || path === '~') {
+      $.teach({ cwd: '/' })
+      return '/'
+    }
+    const { cwd } = $.learn()
+    let next
+    if (path === '..') {
+      const parts = (cwd || '/').replace(/\/$/, '').split('/')
+      parts.pop()
+      next = parts.join('/') || '/'
+    } else if (path.startsWith('/')) {
+      next = path
+    } else {
+      next = ((cwd || '/').replace(/\/$/, '') + '/' + path)
+    }
+    $.teach({ cwd: next })
+    return next
+  },
+
   'art': () => {
     loadPath('/app/flip-book')
     return 'opening flip-book...'
@@ -586,9 +647,11 @@ $.style(`
     max-height: 35vh;
   }
 
-  & textarea:focus {
+  & textarea:focus,
+  & input:focus {
     outline-offset: -2px;
     outline-color: transparent;
+    caret-color: var(--root-theme, mediumseagreen);
   }
 
   & .scroll-back {
@@ -650,14 +713,9 @@ $.style(`
 
   & .ur-title {
     color: var(--root-theme, #E83FB8);
-    --v-font-wght: 800;
-    --v-font-slnt: -15;
-    --v-font-crsv: 1;
-    --v-font-casl: 1;
-    --v-font-mono: 1;
     font-size: 2rem;
-    font-variation-settings: "MONO" var(--v-font-mono), "CASL" var(--v-font-casl), "wght" var(--v-font-wght), "slnt" var(--v-font-slnt), "CRSV" var(--v-font-crsv);
-    font-family: "Recursive" !important;
+    font-weight: 800;
+    font-family: 'BerkeleyMono', monospace;
   }
 
   & .message p {
