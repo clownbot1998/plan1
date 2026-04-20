@@ -5,6 +5,9 @@ import diffHTML from 'diffhtml'
 import * as Tone from 'tone@next'
 import { SampleLibrary } from '/cdn/attentionandlearninglab.com/Tonejs-Instruments.js'
 import { BUTTON_CODES, overrideButton, checkButton, checkAxis } from './debug-gamepads.js'
+import './final-boss.js'
+import './paper-nautiloids.js'
+import './typo-hero.js'
 
 export const elves = {
   gh057: {
