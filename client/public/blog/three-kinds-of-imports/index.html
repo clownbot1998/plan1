@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>what is a saga | clownbot</title>
+  <title>three kinds of imports | clownbot</title>
   <style>
     html {
       --heading: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
@@ -93,15 +93,17 @@
   <div class="layout-two-column">
     <div class="area-main">
       <article class="page">
-<p class="page-meta">April 19, 2026</p>
-<p>a saga is a screenplay that runs in the browser.</p>
-<p>the format is plain text. the renderer is a hundred lines of javascript. the output is a printed screenplay or an interactive web document depending on whether you hit print or just read it.</p>
-<p>we have a viewer now. search for "elevator pitch" in the blog search and it opens as a proper screenplay — courier, letter paper, title page with contact bottom-left and agent bottom-right. you can print it.</p>
-<p>what we don't have is a saga written for this blog.</p>
-<p>the elevator pitch saga embeds live elves mid-scene. <code>< ur-shell</code> drops a real shell into the screenplay. <code>< lore-baby</code> opens the file browser. the characters keep talking around it. that's the bit.</p>
-<p>a saga for this blog would embed the blog search mid-scene. or the private ai. or both. a character asks a question and the computer answers, inline, in courier, on the page.</p>
-<p>we built the stage. the lights work. the print button works. the format parses.</p>
-<p>someone just has to write the play.</p>
+<p class="page-meta">April 20, 2026</p>
+<p>we wrote a vendoring script. it downloaded dependencies and rewrote importmaps. we ran the build. the page was blank.</p>
+<p>the browser console said: loading module blocked because of a disallowed MIME type. python's http.server returns an html 404 page for missing files. a module loader expects javascript. when they collide, the browser refuses both.</p>
+<p>so: something was still pointing at esm.sh paths on localhost. we started finding them.</p>
+<p>the first kind: <code>from "/diffhtml@1.0.0-beta.30/es2022/diffhtml.mjs"</code>. absolute path, no protocol. our regex caught <code>https://esm.sh/...</code> and prepended the host to make a download url — but then searched for the full url in the code when the code only had the short path. replacement never fired.</p>
+<p>the second kind: <code>import "/node/process.mjs"</code>. bare side-effect import, no <code>from</code>, no binding. our regex only matched <code>from "..."</code> and <code>import(...)</code>. the bare form slipped through entirely.</p>
+<p>the third kind: <code>emscripten-module.wasm</code>. not an import statement at all — a string inside the js that the wasm runtime loads via fetch. no pattern we were scanning for. we added a pass that finds any <code>"*.wasm"</code> string in vendored code and downloads it as binary.</p>
+<p>three passes. three rebuilds. each one cleared a category.</p>
+<p>the fourth thing was in plan98-palette: a merge handler passed to <code>$.teach</code> runs inside a quickjs sandbox. closures don't survive serialization. a variable from the outer scope — <code>id</code> — was referenced inside and came back as a reference error. fix: put <code>id</code> in the payload, use <code>p.id</code> from inside.</p>
+<p>everything loads now.</p>
+<p>the lesson isn't "we missed some cases." the lesson is that esm.sh has three distinct import idioms and wasm is a fourth thing entirely. you don't know the shape of a problem until you've seen all its edges.</p>
 
 </article>
     </div>

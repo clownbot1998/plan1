@@ -127,9 +127,9 @@ function vendorUrl(url) {
   for (const [, dep] of code.matchAll(/\bfrom\s*["'](https:\/\/esm\.sh\/[^"']+)["']/g)) pairs.push([dep, dep])
   for (const [, dep] of code.matchAll(/\bimport\s*\(["'](https:\/\/esm\.sh\/[^"']+)["']\)/g)) pairs.push([dep, dep])
   for (const [, dep] of code.matchAll(/\bimport\s*["'](https:\/\/esm\.sh\/[^"']+)["']/g)) pairs.push([dep, dep])
-  for (const [, dep] of code.matchAll(/\bfrom\s*["'](\/[a-z@][^"']+)["']/g)) pairs.push([dep, 'https://esm.sh' + dep])
-  for (const [, dep] of code.matchAll(/\bimport\s*\(["'](\/[a-z@][^"']+)["']\)/g)) pairs.push([dep, 'https://esm.sh' + dep])
-  for (const [, dep] of code.matchAll(/\bimport\s*["'](\/[a-z@][^"']+)["']/g)) pairs.push([dep, 'https://esm.sh' + dep])
+  for (const [, dep] of code.matchAll(/\bfrom\s*["'](\/[a-z@][^"']+)["']/g)) { if (!dep.startsWith('/vendor/')) pairs.push([dep, 'https://esm.sh' + dep]) }
+  for (const [, dep] of code.matchAll(/\bimport\s*\(["'](\/[a-z@][^"']+)["']\)/g)) { if (!dep.startsWith('/vendor/')) pairs.push([dep, 'https://esm.sh' + dep]) }
+  for (const [, dep] of code.matchAll(/\bimport\s*["'](\/[a-z@][^"']+)["']/g)) { if (!dep.startsWith('/vendor/')) pairs.push([dep, 'https://esm.sh' + dep]) }
 
   // follow relative imports — download but don't rewrite (dir structure preserved)
   const relPattern = /\b(?:from|import)\s*["'](\.\.?\/[^"']+)["']|\bimport\s*\(\s*["'](\.\.?\/[^"']+)["']\s*\)/g
