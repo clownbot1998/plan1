@@ -1,28 +1,15 @@
 @font-face {
   font-family: 'BerkeleyMono';
-  src: url('/public/fonts/BerkeleyMonoVariable-Regular.ttf') format("truetype-variations");
+  src: url('/fonts/BerkeleyMonoVariable-Regular.ttf') format("truetype-variations");
   font-weight: 100 700;
 }
 
 @font-face {
   font-family: 'BerkeleyMono';
-  src: url('/public/fonts/BerkeleyMonoVariable-Italic.ttf') format("truetype-variations");
+  src: url('/fonts/BerkeleyMonoVariable-Italic.ttf') format("truetype-variations");
   font-style: italic;
 }
 
-@font-face {
-  font-family: 'Sono';
-  src: url('/public/fonts/sono.ttf') format("truetype-variations");
-  font-weight: 200 800;
-}
-
-@font-face {
-  font-family: 'Recursive';
-  font-style: oblique 0deg 15deg;
-  font-weight: 300 1000;
-  font-display: swap;
-  src: url('/public/fonts/Recursive_VF_1.085--subset-GF_latin_basic.woff2') format('woff2');
-}
 
 :focus {
   position: relative;
@@ -152,11 +139,7 @@ button:-moz-focusring,
   --wheel-11-5: rgb(100% 64.101% 98.597%);
   --wheel-11-6: rgb(100% 91.07% 100%);
 
-  --v-font-mono: 0;
-  --v-font-casl: 0.5;
   --v-font-wght: 400;
-  --v-font-slnt: 0;
-  --v-font-crsv: 0.5;
 
   /* cutestrap variables */
   --border-radius: 0;
@@ -195,7 +178,6 @@ button:-moz-focusring,
 * {
   text-rendering: geometricPrecision;
   box-sizing: border-box;
-  transition: font-variation-settings 500ms ease-in-out;
 
   /* cutestrap */
   --rhythm: 2rem;
@@ -214,7 +196,7 @@ button:-moz-focusring,
 }
 
 html {
-  font-family: 'Recursive';
+  font-family: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
   overflow-x: hidden;
 }
 
@@ -251,12 +233,7 @@ h6 {
   margin: 2rem 0 1rem;
   padding: 0;
   line-height: 1;
-  --v-font-mono: 0;
-  --v-font-casl: 0;
-  --v-font-slnt: 0;
-  --v-font-crsv: 0;
-  font-variation-settings: "MONO" var(--v-font-mono), "CASL" var(--v-font-casl), "wght" var(--v-font-wght), "slnt" var(--v-font-slnt), "CRSV" var(--v-font-crsv);
-  font-family: "Recursive";
+  font-family: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
 }
 
 h1::after,
@@ -270,8 +247,7 @@ h6::after {
 
 h1 {
   font-size: 3rem;
-  --v-font-wght: 1000;
-  --v-font-mono: .1;
+  font-weight: 700;
 }
 
 h1::after {
@@ -280,21 +256,16 @@ h1::after {
 
 h2 {
   font-size: 2.5rem;
-  --v-font-wght: 800;
-  --v-font-mono: .2;
+  font-weight: 700;
 }
 
 h2::after {
   content: ' **';
 }
 
-
 h3 {
   font-size: 2.25rem;
-  --v-font-wght: 600;
-  --v-font-slnt: -3;
-  --v-font-crsv: 0.2;
-  --v-font-mono: .3;
+  font-weight: 600;
 }
 
 h3::after {
@@ -303,10 +274,7 @@ h3::after {
 
 h4 {
   font-size: 2rem;
-  --v-font-wght: 400;
-  --v-font-slnt: -7;
-  --v-font-crsv: 0.4;
-  --v-font-mono: .4;
+  font-weight: 500;
 }
 
 h4::after {
@@ -315,11 +283,7 @@ h4::after {
 
 h5 {
   font-size: 1.75rem;
-  --v-font-wght: 200;
-  font-weight: 200;
-  --v-font-slnt: -11;
-  --v-font-crsv: 0.6;
-  --v-font-mono: .5;
+  font-weight: 300;
 }
 
 h5::after {
@@ -328,11 +292,7 @@ h5::after {
 
 h6 {
   font-size: 1.5rem;
-  --v-font-wght: 100;
-  --v-font-slnt: -15;
-  --v-font-crsv: 1;
-  --v-font-casl: 1;
-  --v-font-mono: 1;
+  font-weight: 100;
 }
 
 h6::after {
@@ -355,13 +315,7 @@ pre,
 code {
   background: #282828;
   color: #ebdbb2;
-  --v-font-wght: 400;
-  --v-font-slnt: -15;
-  --v-font-crsv: 1;
-  --v-font-casl: 1;
-  --v-font-mono: 1;
-  font-variation-settings: "MONO" var(--v-font-mono), "CASL" var(--v-font-casl), "wght" var(--v-font-wght), "slnt" var(--v-font-slnt), "CRSV" var(--v-font-crsv);
-  font-family: "Recursive";
+  font-family: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
 }
 
 code {
@@ -748,13 +702,7 @@ button, input, optgroup, select, textarea {
   border: none;
   padding: .5rem;
   font-size: 1rem;
-  --v-font-mono: 1;
-  --v-font-casl: 0;
-  --v-font-wght: 400;
-  --v-font-slnt: 0;
-  --v-font-crsv: 0;
-  font-variation-settings: "MONO" var(--v-font-mono), "CASL" var(--v-font-casl), "wght" var(--v-font-wght), "slnt" var(--v-font-slnt), "CRSV" var(--v-font-crsv);
-  font-family: "Recursive";
+  font-family: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
   transition: background 200ms ease-in-out;
   height: 100%;
 }
@@ -1732,14 +1680,8 @@ sillonious-brand > xml-html {
   border-bottom: 1px solid #555;
   border-right: 1px solid #555;
   font-weight: 100;
-  --v-font-mono: 1;
-  --v-font-casl: 0;
-  --v-font-wght: 300;
-  --v-font-slnt: 0;
-  --v-font-crsv: 0;
   font-size: .9rem;
-  font-variation-settings: "MONO" var(--v-font-mono), "CASL" var(--v-font-casl), "wght" var(--v-font-wght), "slnt" var(--v-font-slnt), "CRSV" var(--v-font-crsv);
-  font-family: "Recursive";
+  font-family: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
   color: #222;
   border-radius: 0;
   display: inline-grid;
