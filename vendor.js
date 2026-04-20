@@ -88,6 +88,19 @@ function safeName(url) {
 
 const fetched = {}
 
+function resolveRelative(base, rel) {
+  // base: full URL of the file containing the import
+  // rel: relative specifier like ./ffi.mjs or ../dist/module.mjs
+  const baseDir = base.replace(/\/[^\/]+$/, '/')
+  const parts = (baseDir + rel).split('/')
+  const out = []
+  for (const p of parts) {
+    if (p === '..') out.pop()
+    else if (p !== '.') out.push(p)
+  }
+  return out.join('/')
+}
+
 function vendorUrl(url) {
   if (fetched[url]) return fetched[url]
 
@@ -108,18 +121,44 @@ function vendorUrl(url) {
 
   // rewrite internal esm.sh imports recursively
   let code = readFile(diskPath)
-  const rewrites = []
+  // pairs: [string_as_it_appears_in_code, full_url_to_vendor]
+  const pairs = []
 
-  for (const [, dep] of code.matchAll(/\bfrom\s*["'](https:\/\/esm\.sh\/[^"']+)["']/g)) rewrites.push(dep)
-  for (const [, dep] of code.matchAll(/\bimport\s*\(["'](https:\/\/esm\.sh\/[^"']+)["']\)/g)) rewrites.push(dep)
-  for (const [, dep] of code.matchAll(/\bfrom\s*["'](\/[a-z@][^"']+)["']/g)) rewrites.push('https://esm.sh' + dep)
-  for (const [, dep] of code.matchAll(/\bimport\s*\(["'](\/[a-z@][^"']+)["']\)/g)) rewrites.push('https://esm.sh' + dep)
+  for (const [, dep] of code.matchAll(/\bfrom\s*["'](https:\/\/esm\.sh\/[^"']+)["']/g)) pairs.push([dep, dep])
+  for (const [, dep] of code.matchAll(/\bimport\s*\(["'](https:\/\/esm\.sh\/[^"']+)["']\)/g)) pairs.push([dep, dep])
+  for (const [, dep] of code.matchAll(/\bimport\s*["'](https:\/\/esm\.sh\/[^"']+)["']/g)) pairs.push([dep, dep])
+  for (const [, dep] of code.matchAll(/\bfrom\s*["'](\/[a-z@][^"']+)["']/g)) pairs.push([dep, 'https://esm.sh' + dep])
+  for (const [, dep] of code.matchAll(/\bimport\s*\(["'](\/[a-z@][^"']+)["']\)/g)) pairs.push([dep, 'https://esm.sh' + dep])
+  for (const [, dep] of code.matchAll(/\bimport\s*["'](\/[a-z@][^"']+)["']/g)) pairs.push([dep, 'https://esm.sh' + dep])
+
+  // follow relative imports — download but don't rewrite (dir structure preserved)
+  const relPattern = /\b(?:from|import)\s*["'](\.\.?\/[^"']+)["']|\bimport\s*\(\s*["'](\.\.?\/[^"']+)["']\s*\)/g
+  for (const m of code.matchAll(relPattern)) {
+    const rel = m[1] || m[2]
+    const absUrl = resolveRelative(url, rel)
+    if (absUrl.startsWith('https://esm.sh/')) vendorUrl(absUrl)
+  }
+
+  // download binary assets (.wasm etc) referenced as strings
+  for (const [, wasmRef] of code.matchAll(/["']([^"']*\.wasm)["']/g)) {
+    if (wasmRef.startsWith('data:') || wasmRef.startsWith('blob:')) continue
+    const wasmUrl = resolveRelative(url, wasmRef.startsWith('.') ? wasmRef : './' + wasmRef.replace(/^\//, ''))
+    if (!wasmUrl.startsWith('https://esm.sh/')) continue
+    const wasmName = safeName(wasmUrl)
+    const wasmDisk = DEPS_DISK + '/' + wasmName
+    if (!exists(wasmDisk)) {
+      print('  [binary]', wasmUrl.replace('https://esm.sh/', ''))
+      fetch(wasmUrl, wasmDisk)
+    }
+  }
 
   let changed = false
-  for (const dep of [...new Set(rewrites)]) {
-    const depLocal = vendorUrl(dep)
-    const raw = dep.startsWith('https://esm.sh') ? dep : dep.replace('https://esm.sh', '')
-    if (code.includes(raw)) {
+  const seen = new Set()
+  for (const [raw, url] of pairs) {
+    if (seen.has(url)) continue
+    seen.add(url)
+    const depLocal = vendorUrl(url)
+    if (code.includes(`"${raw}"`) || code.includes(`'${raw}'`)) {
       code = code.split(`"${raw}"`).join(`"${depLocal}"`)
                  .split(`'${raw}'`).join(`'${depLocal}'`)
       changed = true
