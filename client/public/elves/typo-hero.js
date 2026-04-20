@@ -503,7 +503,7 @@ $.draw((target) => {
 }, {
   afterUpdate(target) {
     {
-      recoverElves(target, 'sl-icon')
+      // recoverElves(target, 'sl-icon')
       recoverElves(target, 'flying-disk')
     }
 
@@ -548,7 +548,7 @@ function drawChord(character) {
     return `
       ${buttons}
       <div class="strum-key">
-        <sl-icon name="arrow-${direction}"></sl-icon>
+        ${{ 'up': '↑', 'down': '↓', 'left': '←', 'right': '→' }[direction] || '↕'}
       </div>
     `
   }
@@ -939,10 +939,24 @@ $.style(`
 
   & .typo-menu-link {
     color: black;
+    display: block;
+    text-decoration: none;
+    padding: 4px 8px;
+    line-height: 1;
+    text-align: left;
+    background: transparent;
+    border: none;
+    font-weight: 600;
+    opacity: .65;
+    cursor: pointer;
+    width: 100%;
   }
 
   & .typo-menu-link.active {
     color: black;
+    transform: scale(1.2);
+    transform-origin: left center;
+    font-weight: bold;
     opacity: 1;
   }
 

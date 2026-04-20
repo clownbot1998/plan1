@@ -95,6 +95,14 @@ const modes = {
 }
 
 export const systemMenu = {
+  roms: {
+    label: "Roms",
+    list: [
+      { label: 'Typo Hero',        rom: 'typo-hero' },
+      { label: 'Final Boss',       rom: 'final-boss' },
+      { label: 'Paper Nautiloids', rom: 'paper-nautiloids' },
+    ]
+  },
   apps: {
     label: "Apps",
     list: [
@@ -539,9 +547,7 @@ $.draw((target) => {
             </button>
           </div>
           <div class="system"></div>
-          <div class="game">
-            <${rom} ${data?`data="${data}"`:''} ${src?`src="${src}"`:''}></${rom}>
-          </div>
+          <div class="game"></div>
           <div class="menu-items">
             <button key="options" class="clear" data-press="select">
               Settings
@@ -600,6 +606,16 @@ $.draw((target) => {
     {
       const chrome = target.querySelector('.chrome')
       chrome.dataset.full = $.learn().fullScreen
+    }
+    {
+      const { rom, src, data } = $.learn()
+      if(target.activeRom !== rom) {
+        target.activeRom = rom
+        const game = target.querySelector('.game')
+        if(game && rom) {
+          game.innerHTML = `<${rom} ${data ? `data="${data}"` : ''} ${src ? `src="${src}"` : ''}></${rom}>`
+        }
+      }
     }
 
     {
@@ -770,9 +786,9 @@ export function renderPauseMenu(menu, pauseIndex, pauseKey) {
   const { list, label } = menu[pauseKey]
 
   const items = list.map((item, i) => {
-    const { label, mode, url } = item
+    const { label, mode, url, rom } = item
     return `
-      <button ${url ? `data-href="${url}"` : ''} ${mode ? `data-mode="${mode}"`:''} data-index="${i}" class="menu-link ${pauseIndex === i ? 'active':''}">
+      <button ${url ? `data-href="${url}"` : ''} ${rom ? `data-rom="${rom}"` : ''} ${mode ? `data-mode="${mode}"`:''} data-index="${i}" class="menu-link ${pauseIndex === i ? 'active':''}">
         ${label}
       </button>
     `
@@ -1428,9 +1444,14 @@ function launchItem(event) {
 }
 
 $.when('click', '.menu-link', (event) => {
-  const { href, mode, index } = event.target.dataset
+  const { href, mode, index, rom } = event.target.dataset
 
   const pauseIndex = parseInt(index)
+
+  if(rom) {
+    $.teach({ rom, mode: modes.game, pauseIndex })
+    return
+  }
 
   if(mode) {
     triggerModeEffects(mode)
