@@ -353,13 +353,13 @@ function seed(target) {
 
 
 function updateInstance({ id }, payload) {
-  $.teach({...payload}, (s, p) => {
+  $.teach({ id, ...payload }, (s, p) => {
     return {
       ...s,
       instances: {
         ...s.instances,
-        [id]: {
-          ...s.instances[id],
+        [p.id]: {
+          ...s.instances[p.id],
           ...p
         }
       }
