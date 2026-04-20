@@ -17,13 +17,11 @@ function trayContent(url) {
   return `<${tag} ${attrs}></${tag}>`
 }
 
-import $paperPocket, { sideEffects, systemMenu, getTheme, afterUpdateTheme } from './paper-pocket.js'
-
-const allApps = Object.values(systemMenu).flatMap(g => g.list)
-
-const TYPE_PRIORITY = ['app', 'media', 'saga', 'js', 'html']
+const TYPE_PRIORITY = ['app', 'saga', 'html', 'js', 'audio', 'video', 'img', 'file']
 let searchIdx = null
 let searchDocs = {}
+let fileManifest = []
+let fileIdx = null
 
 fetch('/search-manifest.json')
   .then(r => r.json())
@@ -38,8 +36,37 @@ fetch('/search-manifest.json')
     })
   })
 
+fetch('/file-manifest.json')
+  .then(r => r.json())
+  .then(files => {
+    fileManifest = files
+    fileIdx = lunr(function() {
+      this.ref('path')
+      this.field('name', { boost: 10 })
+      this.field('ext', { boost: 3 })
+      files.forEach(f => this.add(f))
+    })
+  })
+
+function fileType(entry) {
+  const { ext, path } = entry
+  if (path.includes('/elves/') && ext === '.js') return 'app'
+  if (ext === '.saga') return 'saga'
+  if (ext === '.html') return 'html'
+  if (['.mp3', '.wav', '.ogg', '.m4a'].includes(ext)) return 'audio'
+  if (['.mp4', '.webm', '.m3u8'].includes(ext)) return 'video'
+  if (['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp'].includes(ext)) return 'img'
+  if (ext === '.js') return 'js'
+  return 'file'
+}
+
+function fileToResult(f) {
+  const type = fileType(f)
+  const url = type === 'app' ? '/app/' + f.name : f.path
+  return { label: f.name, url, type }
+}
+
 const initial = {
-  systemPane: Object.keys(systemMenu)[0],
   launcherQuery: '',
   startX: null,
   startY: null,
@@ -65,14 +92,20 @@ function renderSystemMenu() {
 
   let results
   if (!q) {
-    results = allApps.map(a => ({ label: a.label, url: a.url, type: 'app' }))
-  } else if (searchIdx) {
-    const hits = searchIdx.search(q + '~1').map(h => searchDocs[h.ref]).filter(Boolean)
-    hits.sort((a, b) => TYPE_PRIORITY.indexOf(a.type) - TYPE_PRIORITY.indexOf(b.type))
-    results = hits.map(d => ({ label: d.name, url: d.ref, type: d.type }))
+    const sorted = [...fileManifest].sort((a, b) => {
+      return TYPE_PRIORITY.indexOf(fileType(a)) - TYPE_PRIORITY.indexOf(fileType(b))
+    })
+    results = sorted.map(fileToResult)
+  } else if (fileIdx) {
+    try {
+      const hits = fileIdx.search(q + '~1').map(h => fileManifest.find(f => f.path === h.ref)).filter(Boolean)
+      hits.sort((a, b) => TYPE_PRIORITY.indexOf(fileType(a)) - TYPE_PRIORITY.indexOf(fileType(b)))
+      results = hits.map(fileToResult)
+    } catch(e) {
+      results = fileManifest.filter(f => f.name.toLowerCase().includes(q.toLowerCase())).map(fileToResult)
+    }
   } else {
-    results = allApps.filter(a => a.label.toLowerCase().includes(q.toLowerCase()))
-      .map(a => ({ label: a.label, url: a.url, type: 'app' }))
+    results = fileManifest.filter(f => f.name.toLowerCase().includes(q.toLowerCase())).map(fileToResult)
   }
 
   return `
@@ -249,7 +282,7 @@ $.draw((target) => {
         { tray: self.crypto.randomUUID(), url: '/app/paper-pocket', title: 'music',  x: 0, y: h, width: w, height: h },
         { tray: self.crypto.randomUUID(), url: '/app/lore-baby',    title: 'coding', x: w, y: h, width: w, height: h },
       ]
-      $.teach({ hero, apps, heroUrl: '/blog/' }, (state, { hero, apps, heroUrl }) => {
+      $.teach({ hero, apps, heroUrl: '/app/my-computer' }, (state, { hero, apps, heroUrl }) => {
         const newState = { ...state }
         apps.forEach(({ tray, url, title, x, y, width, height }) => {
           newState.trays[tray] = true
@@ -348,10 +381,6 @@ function recoverElves(target, tag) {
 
 function afterUpdate(target) {
   {
-    afterUpdateTheme($paperPocket, target)
-  }
-
-  {
     const { showStart } = $.learn()
 
     if(target.startState !== showStart) {
@@ -430,14 +459,6 @@ function afterUpdate(target) {
   }
 
   replaceCursor(target) // first things first
-
-  {
-    const theme = getTheme()
-    if(target.theme !== theme) {
-      target.theme = theme
-      document.body.style.setProperty('--root-theme', theme)
-    }
-  }
 }
 
 
@@ -1298,8 +1319,8 @@ $.style(`
     padding: 0;
     max-height: 55vh;
     overflow-y: auto;
-    mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,.2) transparent;
   }
 
   & .launcher-list li {
