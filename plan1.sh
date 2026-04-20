@@ -102,12 +102,33 @@ case "$CMD" in
   build)
     qjs --std "$SCRIPT_DIR/build.js"
     ;;
+  bootstrap)
+    MEMORY_SRC="$SCRIPT_DIR/memory"
+    MEMORY_DST="$HOME/.claude/projects/-home-clownbot/memory"
+    AGENT="$SCRIPT_DIR/AGENT.md"
+
+    # wire claude code memory to git-tracked memory dir
+    rm -rf "$MEMORY_DST"
+    ln -sf "$MEMORY_SRC" "$MEMORY_DST"
+    echo "linked: $MEMORY_DST -> $MEMORY_SRC"
+
+    # harness files — all point to AGENT.md
+    ln -sf "$AGENT" "$SCRIPT_DIR/CLAUDE.md"
+    ln -sf "$AGENT" "$SCRIPT_DIR/AGENTS.md"
+    ln -sf "$AGENT" "$SCRIPT_DIR/GEMINI.md"
+    ln -sf "$AGENT" "$SCRIPT_DIR/.cursorrules"
+    ln -sf "$AGENT" "$SCRIPT_DIR/.windsurfrules"
+    mkdir -p "$SCRIPT_DIR/.github"
+    ln -sf "$AGENT" "$SCRIPT_DIR/.github/copilot-instructions.md"
+    echo "linked: CLAUDE.md, AGENTS.md, GEMINI.md, .cursorrules, .windsurfrules, .github/copilot-instructions.md -> AGENT.md"
+    echo "bootstrap done"
+    ;;
   reverse-client)
     CALLER="${SUDO_USER:-$USER}"
     echo "reversing client as $CALLER on port $PORT..."
     sudo -u "$CALLER" -E ssh -N -R "${PORT}:localhost:${PORT}" "local.${CALLER}.me"
     ;;
   *)
-    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|reverse-client]"
+    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|reverse-client|bootstrap]"
     ;;
 esac
