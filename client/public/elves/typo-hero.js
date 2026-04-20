@@ -122,23 +122,23 @@ const $ = elf('typo-hero', {
       list: [
         {
           label: 'Vowels',
-          url: '/public/cdn/sillyz.computer/lyrics/vowels.txt'
+          url: '/cdn/sillyz.computer/lyrics/vowels.txt'
         },
         {
           label: 'Punctuation',
-          url: '/public/cdn/sillyz.computer/lyrics/punctuation.txt'
+          url: '/cdn/sillyz.computer/lyrics/punctuation.txt'
         },
         {
           label: 'Rad Calm',
-          url: '/public/cdn/sillyz.computer/lyrics/rad-calm.txt'
+          url: '/cdn/sillyz.computer/lyrics/rad-calm.txt'
         },
         {
           label: 'Wolf Guy Pub',
-          url: '/public/cdn/sillyz.computer/lyrics/wolf-guy-pub.txt'
+          url: '/cdn/sillyz.computer/lyrics/wolf-guy-pub.txt'
         },
         {
           label: 'Wonderwall',
-          url: '/public/cdn/sillyz.computer/lyrics/wonderwall.txt'
+          url: '/cdn/sillyz.computer/lyrics/wonderwall.txt'
         },
       ]
     },
@@ -147,27 +147,27 @@ const $ = elf('typo-hero', {
       list: [
         {
           label: 'Vowels',
-          url: '/public/cdn/sillyz.computer/lyrics/vowels.txt'
+          url: '/cdn/sillyz.computer/lyrics/vowels.txt'
         },
         {
           label: 'Punctuation',
-          url: '/public/cdn/sillyz.computer/lyrics/punctuation.txt'
+          url: '/cdn/sillyz.computer/lyrics/punctuation.txt'
         },
         {
           label: 'Teenage Shred',
-          url: '/public/cdn/sillyz.computer/lyrics/teenage-shred.txt'
+          url: '/cdn/sillyz.computer/lyrics/teenage-shred.txt'
         },
         {
           label: 'Rad Calm',
-          url: '/public/cdn/sillyz.computer/lyrics/rad-calm.txt'
+          url: '/cdn/sillyz.computer/lyrics/rad-calm.txt'
         },
         {
           label: 'Wolf Guy Pub',
-          url: '/public/cdn/sillyz.computer/lyrics/wolf-guy-pub.txt'
+          url: '/cdn/sillyz.computer/lyrics/wolf-guy-pub.txt'
         },
         {
           label: 'Viktor Jax Quartz',
-          url: '/public/cdn/sillyz.computer/lyrics/viktor-jax-quartz.txt'
+          url: '/cdn/sillyz.computer/lyrics/viktor-jax-quartz.txt'
         },
       ]
     },
@@ -177,19 +177,19 @@ const $ = elf('typo-hero', {
       list: [
         {
           label: 'Wonderwall',
-          url: '/public/cdn/sillyz.computer/lyrics/wonderwall.txt'
+          url: '/cdn/sillyz.computer/lyrics/wonderwall.txt'
         },
         {
           label: 'Freebird',
-          url: '/public/cdn/sillyz.computer/lyrics/freebird.txt'
+          url: '/cdn/sillyz.computer/lyrics/freebird.txt'
         },
         {
           label: 'Never Gonna Give You Up',
-          url: '/public/cdn/sillyz.computer/lyrics/never-gonna-give-you-up.txt'
+          url: '/cdn/sillyz.computer/lyrics/never-gonna-give-you-up.txt'
         },
         {
           label: 'Eye of the Tiger',
-          url: '/public/cdn/sillyz.computer/lyrics/eye-of-the-tiger.txt'
+          url: '/cdn/sillyz.computer/lyrics/eye-of-the-tiger.txt'
         },
 
       ]
@@ -200,35 +200,35 @@ const $ = elf('typo-hero', {
       list: [
         {
           label: 'Plan4',
-          url: '/public/sagas/sillyz.computer/plan4.saga'
+          url: '/sagas/sillyz.computer/plan4.saga'
         },
         {
           label: 'Rejected Juggler Script',
-          url: '/public/sagas/2024-02-24-time.saga'
+          url: '/sagas/2024-02-24-time.saga'
         },
         {
           label: 'Hello Wally',
-          url: '/public/sagas/sillyz.computer/en-us/index.saga'
+          url: '/sagas/sillyz.computer/en-us/index.saga'
         },
         {
           label: 'Handy Dandy',
-          url: '/public/sagas/sillyz.computer/en-us/start.saga'
+          url: '/sagas/sillyz.computer/en-us/start.saga'
         },
         {
           label: 'Ethnography',
-          url: '/public/sagas/sillyz.computer/ethnography.saga'
+          url: '/sagas/sillyz.computer/ethnography.saga'
         },
         {
           label: 'Saga Crawler',
-          url: '/public/cdn/sillyz.computer/en-us/saga-crawler.saga'
+          url: '/cdn/sillyz.computer/en-us/saga-crawler.saga'
         },
         {
           label: 'Pitch Deck',
-          url: '/public/sagas/sillyz.computer/en-us/pitch-deck.saga'
+          url: '/sagas/sillyz.computer/en-us/pitch-deck.saga'
         },
         {
           label: 'tychi',
-          url: '/public/sagas/sillyz.computer/en-us/1998.social/tychi.saga'
+          url: '/sagas/sillyz.computer/en-us/1998.social/tychi.saga'
         }
       ]
     },
@@ -427,7 +427,7 @@ $.draw((target) => {
     const items = list.map((item, i) => {
       const { label, mode, url } = item
       return `
-        <button ${url? `data-href="${url}"`:''} ${mode ? `data-mode="${mode}"`:''} data-index="${i}" class="menu-link ${menuIndex === i ? 'active':''}">
+        <button ${url? `data-href="${url}"`:''} ${mode ? `data-mode="${mode}"`:''} data-index="${i}" class="typo-menu-link ${menuIndex === i ? 'active':''}">
           ${label}
         </button>
       `
@@ -518,7 +518,7 @@ $.draw((target) => {
     }
 
     {
-      const active = target.querySelector('.menu-link.active')
+      const active = target.querySelector('.typo-menu-link.active')
       if(active) {
         active.scrollIntoView()
       }
@@ -937,11 +937,11 @@ $.style(`
     padding-bottom: 3px;
   }
 
-  & .menu-link {
+  & .typo-menu-link {
     color: black;
   }
 
-  & .menu-link.active {
+  & .typo-menu-link.active {
     color: black;
     opacity: 1;
   }
