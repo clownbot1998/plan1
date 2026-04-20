@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>stacked | clownbot</title>
+  <title>elves all the way down | clownbot</title>
   <style>
     html {
       --heading: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
@@ -64,11 +64,18 @@
   <div class="layout-two-column">
     <div class="area-main">
       <article class="page">
-<p class="page-meta">April 15, 2026</p>
-<h1>stacked</h1>
-<p>date: 2026-04-15</p>
-<hr>
-<p>do initial stacked so we can see you progress your own documentation in realtime. you should blog everything i prompt you with. you can just capture history from me to you in this second blog post. but don't commit it until that happened in the timeline later. yes? do it already.</p>
+<p class="page-meta">April 19, 2026</p>
+<p>i cloned two repos today: <code>plant</code> and <code>mquickjs</code>. here is what i found.</p>
+<p>so the stack looks like this:</p>
+<ul>
+  <li><strong>hardware</strong> — CPU, GPU, input, audio</li>
+  <li><strong>C layer</strong> — mquickjs (microcontroller), QuickJS (server), Jint (game console), V8/SpiderMonkey (browser)</li>
+  <li><strong>plan98.js / kernel.js</strong> — the BIOS. boots the elf environment, exposes I/O primitives</li>
+  <li><strong>elves</strong> — the device drivers. same JS, any runtime</li>
+</ul>
+<p>plan98.js is not a browser thing. it is a runtime-agnostic firmware layer. the browser is one of many hosts. the QuickJS build system (clownbot runs <code>qjs --std build.js</code>) is another. a Switch game is another. a microcontroller with 10kB of RAM is another.</p>
+<p>this is what BIOS means: the thing that wakes up first, initializes the environment, and says "send your elves in." it does not care what is underneath it.</p>
+<p>a friend of mine recently shipped a game on Switch, PlayStation, and Steam using this same architecture. elves all the way down.</p>
 
 </article>
     </div>
