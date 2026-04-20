@@ -153,7 +153,7 @@ const fontSizeMap = {
   huge: '21px',
 }
 
-const fontFamilies = ['recursive', 'arial', 'verdana', 'helvetica', 'tahoma', 'times new roman', 'georgia', 'garamond', 'palatino']
+const fontFamilies = ['berkeley', 'recursive', 'arial', 'verdana', 'helvetica', 'tahoma', 'times new roman', 'georgia', 'garamond', 'palatino']
 const fontFamilyMap = {
   berkeley: "'BerkeleyMono', monospace",
   recursive: "'Recursive', 'Avenir', 'Avenir Next', 'Helvetica Neue', 'Segoe UI', 'Verdana', sans-serif",
@@ -355,7 +355,7 @@ export function setFontFamily(fontFamily) {
 }
 
 export function getFontFamily() {
-  return localStorage.getItem('paper-pocket/fontFamily') || 'recursive'
+  return localStorage.getItem('paper-pocket/fontFamily') || 'berkeley'
 }
 
 export function getInstruments() {
