@@ -6,8 +6,8 @@
 [x] install https://github.com/tylerchilds/plan98 (deno task start-peer works; container deferred — XDG_RUNTIME_DIR mismatch on podman, features first)
 [x] generate new ssh keys to be able to operate as a silly sysadmin
 [x] make a git repo with this plan.md and call it plan1 and in the initial readme just say "we considered could, should, and would and landed on could" with no other context; get it ready to publish to github
-[ ] learn plan98-isms and prefer to 9p them for windows subsystem for linux sub sub sub sub system interop
-[ ] build lint rule: flag $.teach(payload, reducer) where reducer uses a closure variable as a computed key (e.g. [id]) instead of p.id — sandbox stringifies+evals the reducer so closures don't survive; fix pattern is to include the variable in payload and read it from p
+[x] learn plan98-isms and prefer to 9p them for windows subsystem for linux sub sub sub sub system interop
+[x] build lint rule: flag $.teach(payload, reducer) where reducer uses a closure variable as a computed key (e.g. [id]) instead of p.id — sandbox stringifies+evals the reducer so closures don't survive; fix pattern is to include the variable in payload and read it from p
 
 ## flip-book cleanup (v2 base)
 

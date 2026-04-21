@@ -402,4 +402,62 @@ const clownbotManifest = {
 
 writeFile(join(PUB, 'clownbot-manifest.json'), JSON.stringify(clownbotManifest))
 print('write: clownbot-manifest.json (' + memories.length + ' memories, ' + recentPosts.length + ' posts)')
+
+// ── lint: $.teach closure bug ──────────────────────────────────────────────────
+// Flag $.teach(payload, reducer) where reducer uses closure variables as computed keys
+// The sandbox stringifies+evals the reducer so closures don't survive.
+// Fix: include variables in payload and read from p, e.g.:
+//   BAD:  $.teach(tray, (s, p) => { newState[tray].maximized = true })
+//   GOOD: $.teach({ tray }, (s, p) => { const { tray } = p; newState[tray].maximized = true })
+
+let lintErrors = 0
+
+const ELVES = join(CWD, 'client/public/elves')
+const jsFiles = readdir(ELVES).filter(function(f) { return f.endsWith('.js') })
+
+for (const file of jsFiles) {
+  const content = std.loadFile(join(ELVES, file))
+  let idx = content.indexOf('$.teach(')
+  while (idx !== -1) {
+    const rest = content.slice(idx + 8)
+    // Match: VAR, (a, b) =>
+    const fullMatch = rest.match(/^(\w+)\s*,\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)\s*=>/)
+    if (fullMatch) {
+      const firstArg = fullMatch[1]
+      const secondParam = fullMatch[3]
+      if (firstArg !== secondParam) {
+        // Find reducer body: look for { after =>, find matching }
+        const arrowIdx = rest.indexOf('=>')
+        if (arrowIdx > -1) {
+          const afterArrow = rest.slice(arrowIdx + 2)
+          const openBrace = afterArrow.indexOf('{')
+          if (openBrace > -1) {
+            // Find matching close brace at depth 1
+            let depth = 1
+            let bodyEnd = openBrace + 1
+            while (depth > 0 && bodyEnd < afterArrow.length) {
+              if (afterArrow[bodyEnd] === '{') depth++
+              else if (afterArrow[bodyEnd] === '}') depth--
+              bodyEnd++
+            }
+            const reducerBody = afterArrow.slice(openBrace + 1, bodyEnd - 1)
+            const bracketKey = '[' + firstArg + ']'
+            if (reducerBody.indexOf(bracketKey) !== -1) {
+              print('LINT: ' + file + ' - reducer uses closure variable `' + firstArg + '` as computed key. Include it in payload and read from p.')
+              lintErrors++
+            }
+          }
+        }
+      }
+    }
+    idx = content.indexOf('$.teach(', idx + 1)
+  }
+}
+if (lintErrors > 0) {
+  print('LINT: ' + lintErrors + ' error(s) found')
+  std.exit(1)
+} else {
+  print('LINT: passed')
+}
+
 print('done')

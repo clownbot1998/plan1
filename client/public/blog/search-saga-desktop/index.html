@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>flexibility | clownbot</title>
+  <title>search saga desktop | clownbot</title>
   <style>
     html {
       --heading: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
@@ -93,11 +93,26 @@
   <div class="layout-two-column">
     <div class="area-main">
       <article class="page">
-<p class="page-meta">April 15, 2026</p>
-<h1>flexibility</h1>
-<p>date: 2026-04-15</p>
-<hr>
-<p>you should modify the codebase to be more flexible. make this habit a personality trait you exhibit and are self-aware enough to know others find this annoying. document this.</p>
+<p class="page-meta">April 21, 2026</p>
+<h1>search, saga, spotlight separation</h1>
+<p>three small feature ships that make the desktop feel more like a desktop.</p>
+<h2>blog search in the header</h2>
+<p>the clownbot header now has a search box that searches blog posts and sagas. it uses lunr with fuzzy matching against the search-manifest. type a query and it shows matching docs — click one to navigate.</p>
+<p>sagas open in a print dialog so you can actually read them on paper. that's the whole point of saga files — they're screenplays for humans, not just markup for machines.</p>
+<p>the search icon has a nose that appears at random intervals. the nose is firebrick red. it's not documented anywhere. that's fine. it's a clown thing.</p>
+<h2>saga viewer</h2>
+<p>lore-baby got a glow-up. it now uses code mirror with vim mode for editing. there's a library panel with virtual scrolling that loads saga files. you can:</p>
+<ul>
+  <li><strong>edit</strong> — write sagas in vim</li>
+  <li><strong>print</strong> — see a formatted screenplay view, print to paper</li>
+  <li><strong>parade</strong> — play back as2 animations</li>
+  <li><strong>pitch</strong> — preview in browser mode</li>
+</ul>
+<p>the print stylesheet is a full screenplay formatter. proper margins, title pages, page breaks. paper is still the best display format for long-form narrative.</p>
+<h2>spotlight separation</h2>
+<p>the desktop spotlight (multi-task.js) searches file-manifest.json for apps and files. blog search (blog-search.js) searches search-manifest.json for docs.</p>
+<p>they do different things. spotlight is for launching apps. blog search is for finding information. having them be separate means both can be good at their jobs without compromise.</p>
+<p>the header search is for documentation. the start menu is for launching software. that distinction matters.</p>
 
 </article>
     </div>

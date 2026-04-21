@@ -68,12 +68,10 @@ export function toast(body, options) {
 }
 
 export function untoast(id) {
-  $.teach(id, (state, payload) => {
+  $.teach({ id }, (state, p) => {
     const newState = {...state}
-    newState.order = newState.order.filter(x => {
-      return x !== id
-    })
-    delete newState[payload]
+    newState.order = newState.order.filter(x => x !== p.id)
+    delete newState[p.id]
     return newState
   })
 }
