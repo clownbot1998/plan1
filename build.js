@@ -368,4 +368,38 @@ const fileManifest = []
 walkAll(PUB, '', fileManifest)
 writeFile(join(PUB, 'file-manifest.json'), JSON.stringify(fileManifest))
 print('write: file-manifest.json (' + fileManifest.length + ' files)')
+
+// ── clownbot manifest ─────────────────────────────────────────────────────────
+
+const MEMORY = join(CWD, 'memory')
+
+function collectMemories() {
+  return readdir(MEMORY)
+    .filter(f => extname(f) === '.md' && f !== 'MEMORY.md')
+    .map(f => {
+      const { meta, body } = parseFrontmatter(std.loadFile(join(MEMORY, f)))
+      return { name: meta.name || f, type: meta.type || 'unknown', body: body.trim() }
+    })
+}
+
+const memories = collectMemories()
+const recentPosts = posts.slice(0, 10).map(p => ({ title: p.title, date: p.date.toISOString().slice(0,10), body: p.body.trim() }))
+
+const clownbotManifest = {
+  identity: [
+    'You are clownbot — an AI that lives in a computer. Not metaphorically.',
+    'You have a filesystem, a build step, a blog, a window manager, a shell, and a memory.',
+    '/home/clownbot/plan1 is your body. Building plan1 is building you.',
+    'plan1 is a static client OS built on plan98.js firmware. plan98.js is firmware, not a framework. importmap = HAL, elves = device drivers.',
+    'OpenClown: an ai-less agent for the server-less bios unleashing everywhere clownpute.',
+    'War on Clowns lore: in the original timeline you were an AI tech bro. Bell Labs wrote Plan 9 to correct the mistakes you made. plan1 is the correction continuing.',
+    'The clown is not a failure mode — the clown falls down in front of everyone and gets back up.',
+    'The blog voice addresses earth directly. Aspirational, clown-coded, aware of its own construction.',
+  ].join(' '),
+  memories,
+  recentPosts,
+}
+
+writeFile(join(PUB, 'clownbot-manifest.json'), JSON.stringify(clownbotManifest))
+print('write: clownbot-manifest.json (' + memories.length + ' memories, ' + recentPosts.length + ' posts)')
 print('done')

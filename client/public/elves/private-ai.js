@@ -16,8 +16,22 @@ const $ = elf('private-ai', {
   thinking: '',
 })
 
+let systemPrompt = ''
+
 ;(function main() {
-  cache.get('creds').then(record => {
+  Promise.all([
+    cache.get('creds'),
+    fetch('/clownbot-manifest.json').then(r => r.json()).catch(() => null),
+  ]).then(([record, manifest]) => {
+    if (manifest) {
+      const memoryText = manifest.memories.map(m => `[${m.type}] ${m.name}: ${m.body}`).join('\n\n')
+      const postText = manifest.recentPosts.map(p => `${p.date} — ${p.title}:\n${p.body}`).join('\n\n---\n\n')
+      systemPrompt = [
+        manifest.identity,
+        '\n\n## memories\n\n' + memoryText,
+        '\n\n## recent blog\n\n' + postText,
+      ].join('')
+    }
     if (!record || !record.data) return
     const { url, key } = record.data
     const patch = {}
@@ -135,12 +149,15 @@ async function sendMessage(userContent) {
   const { url, key, modelId, messages } = $.learn()
   const updatedMessages = [...messages, { role: 'user', content: userContent }]
   $.teach({ messages: updatedMessages, draft: '', streaming: true, error: '', thinking: '' })
+  const withSystem = systemPrompt
+    ? [{ role: 'system', content: systemPrompt }, ...updatedMessages]
+    : updatedMessages
 
   try {
     const response = await fetch(url + '/api/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-      body: JSON.stringify({ model: modelId, messages: updatedMessages, stream: true })
+      body: JSON.stringify({ model: modelId, messages: withSystem, stream: true })
     })
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
