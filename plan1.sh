@@ -133,9 +133,17 @@ case "$CMD" in
     echo "reversing client as $CALLER on port $PORT..."
     sudo -u "$CALLER" -E ssh -N -R "${PORT}:localhost:${PORT}" "local.${CALLER}.me"
     ;;
+  test)
+    shift
+    TEST_FILES=${*:-test/*.test.js}
+    for f in $TEST_FILES; do
+      [ -f "$f" ] && qjs --std "$f"
+    done
+    ;;
   *)
-    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|reverse-client|bootstrap]"
+    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|test|reverse-client|bootstrap]"
     echo "  build  — generates blog pages + vendors deps into dist/"
     echo "  serve  — serves dist/ on port $PORT"
+    echo "  test   — run test suites (default: test/*.test.js)"
     ;;
 esac
