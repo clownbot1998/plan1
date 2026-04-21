@@ -27,12 +27,8 @@ const config = {
         <div class="home-content">
 
           <div class="interlude">
-            <div class="interlude-title">clownbot</div>
-            <div class="interlude-subtitle">
-              A <span class="hero-tag" title="personal OS running on plan98">personal operating system</span>
-              for <span class="hero-tag" title="hi ho.">kids at heart</span> —
-              <span class="hero-tag" title="art, music, code, stories">art, music, code, and stories</span> in one place.
-            </div>
+            <div class="interlude-title">OpenClown</div>
+            <div class="interlude-subtitle">an ai-less agent for the server-less bios unleashing everywhere clownpute</div>
           </div>
 
           <div class="feature-list">
