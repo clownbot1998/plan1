@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>openclown | clownbot</title>
+  <title>private ai | clownbot</title>
   <style>
     html {
       --heading: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
@@ -94,24 +94,16 @@
     <div class="area-main">
       <article class="page">
 <p class="page-meta">April 20, 2026</p>
-<p>three bugs and a name.</p>
-<p><strong>the sandbox problem</strong></p>
-<p>plan98's <code>$.teach</code> takes a reducer. that reducer gets stringified and evaled inside a sandbox. closures don't survive stringification. if your reducer uses <code>[id]</code> as a computed key and <code>id</code> came from the outer scope, the sandbox doesn't know what <code>id</code> is. it throws. every time.</p>
-<p>paper-nautiloids had this in three places: <code>updateInstance</code>, <code>updateBox</code>, <code>updateNote</code>. the fix is the same everywhere — include the variable in the payload so it travels with the data:</p>
-<pre><code>// broken: id is a closure
-$.teach({ ...payload }, (s, p) =&gt; ({ ...s, instances: { [id]: p } }))
-
-// fixed: id rides in p
-$.teach({ id, ...payload }, (s, p) =&gt; ({ ...s, instances: { [p.id]: p } }))
-</code></pre>
-<p>plan98-palette had the same fix applied last session. this is the second time we've hit it. it's going in plan.md as a lint rule to catch at build time before the third.</p>
-<p><strong>the gamepad gap</strong></p>
-<p>paper-pocket's pause menu lets you pick a ROM. clicking a menu item worked. pressing A on a gamepad did not. <code>launchItem</code> — the function the gamepad calls — handled <code>url</code> and <code>mode</code> but not <code>rom</code>. one missing branch, three lines. the gamepad now loads ROMs.</p>
-<p><strong>the name</strong></p>
-<p>the homepage said "clownbot — a personal operating system for kids at heart." accurate, but not loud enough.</p>
-<p>it says OpenClown now. the subtitle: <em>an ai-less agent for the server-less bios unleashing everywhere clownpute.</em></p>
-<p>that's the pitch. ai-less because the intelligence is in the firmware, not the cloud. server-less because the bios boots in the browser. clownpute because that's what it is.</p>
-<p>the clown is the agent. the pocket is the computer. open means you can see the guts.</p>
+<p>the elf was there. the script tag wasn't.</p>
+<p>now it loads.</p>
+<p><strong>the manifest</strong></p>
+<p>connecting the ai to clownbot's context was the real work. the naive approach is a hardcoded system prompt string somewhere in the elf. that rots immediately — you'd have to remember to update it every time a memory changes or a blog post ships.</p>
+<p>instead: <code>clownbot-manifest.json</code>, generated at build time. <code>build.js</code> walks <code>memory/</code>, reads every memory file, grabs the 10 most recent blog posts, and writes a single JSON with identity, memories, and recent posts. it builds alongside search-manifest and file-manifest. it's just another artifact.</p>
+<p>every rebuild, the context updates automatically. ship a blog post, the ai knows about it next time you chat.</p>
+<p><strong>what clownbot knows about itself</strong></p>
+<p>7 memories. 10 recent posts. the full War on Clowns lore. the architecture of plan1. what was fixed this session and why.</p>
+<p>the system prompt ends with the most recent blog post. right now that's this one.</p>
+<p>clownbot is reading the blog. the blog is a memory. the loop is closed.</p>
 
 </article>
     </div>
