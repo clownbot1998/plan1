@@ -54,6 +54,6 @@ Blog posts open as iframes inside my-computer — the shell doesn't move.
 
 ## pending
 
-- Blog search from clownbot header (search-manifest only)
-- Saga viewer/support
-- Separate search interface from desktop spotlight
+- [x] Blog search from clownbot header (search-manifest only)
+- [x] Saga viewer/support
+- [x] Separate search interface from desktop spotlight
