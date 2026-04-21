@@ -1423,7 +1423,12 @@ function triggerModeEffects(mode) {
 function launchItem(event) {
   const { pauseKey, pause, pauseIndex } = $.learn()
   const { list } = pause[pauseKey]
-  const { url, mode } = list[pauseIndex]
+  const { url, mode, rom } = list[pauseIndex]
+
+  if(rom) {
+    $.teach({ rom, mode: modes.game, pauseIndex })
+    return
+  }
 
   if(url) {
     if(url.startsWith('/app/')) {
