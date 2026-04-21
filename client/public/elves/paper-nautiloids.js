@@ -760,13 +760,13 @@ function seed(target) {
 }
 
 function updateInstance({ id }, payload) {
-  $.teach({...payload}, (s, p) => {
+  $.teach({ id, ...payload }, (s, p) => {
     return {
       ...s,
       instances: {
         ...s.instances,
-        [id]: {
-          ...s.instances[id],
+        [p.id]: {
+          ...s.instances[p.id],
           ...p
         }
       }
@@ -775,18 +775,18 @@ function updateInstance({ id }, payload) {
 }
 
 function updateBox({ x, y, id }, payload) {
-  $.teach({...payload}, (s, p) => {
-    const key = `${y}-${x}`
+  $.teach({ id, x, y, ...payload }, (s, p) => {
+    const key = `${p.y}-${p.x}`
     return {
       ...s,
       instances: {
         ...s.instances,
-        [id]: {
-          ...s.instances[id],
+        [p.id]: {
+          ...s.instances[p.id],
           boxes: {
-            ...s.instances[id].boxes,
+            ...s.instances[p.id].boxes,
             [key]: {
-              ...s.instances[id].boxes[key],
+              ...s.instances[p.id].boxes[key],
               ...p
             }
           }
@@ -797,16 +797,16 @@ function updateBox({ x, y, id }, payload) {
 }
 
 function updateNote({ id, note }, payload) {
-  $.teach(payload, (s, p) => {
+  $.teach({ id, note, ...payload }, (s, p) => {
     return {
       ...s,
       instances: {
         ...s.instances,
-        [id]: {
-          ...s.instances[id],
+        [p.id]: {
+          ...s.instances[p.id],
           activeNotes: {
-            ...s.instances[id].activeNotes,
-            [note]: p
+            ...s.instances[p.id].activeNotes,
+            [p.note]: p
           }
         }
       }
