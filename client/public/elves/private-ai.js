@@ -8,8 +8,8 @@ const $ = elf('private-ai', {
   ready: false,
   draft: '',
   error: '',
-  url: '',
-  key: '',
+  url: 'http://localhost:11434/v1',
+  key: 'ollama',
   models: [],
   modelId: '',
   messages: [],
@@ -137,7 +137,7 @@ $.draw(target => {
 
 async function loadModels() {
   const { url, key } = $.learn()
-  const response = await fetch(url + '/api/models', {
+  const response = await fetch(url + '/models', {
     headers: { 'Authorization': `Bearer ${key}`, 'Accept': 'application/json' }
   })
   if (!response.ok) throw new Error(`Model fetch failed: ${response.status}`)
@@ -155,7 +155,7 @@ async function sendMessage(userContent) {
     : updatedMessages
 
   try {
-    const response = await fetch(url + '/api/chat/completions', {
+    const response = await fetch(url + '/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
       body: JSON.stringify({ model: modelId, messages: withSystem, stream: true, tools: toolDefinitions })
@@ -257,7 +257,7 @@ async function continueCompletion(messages) {
     ? [{ role: 'system', content: systemPrompt }, ...messages]
     : messages
   try {
-    const response = await fetch(url + '/api/chat/completions', {
+    const response = await fetch(url + '/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
       body: JSON.stringify({ model: modelId, messages: withSystem, stream: true, tools: toolDefinitions })
@@ -489,7 +489,7 @@ export const openClown = {
       const body = { model, messages: currentMessages, stream, ...rest }
       if (withTools) body.tools = toolDefinitions
 
-      const response = await fetch(url + '/api/chat/completions', {
+      const response = await fetch(url + '/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${effectiveKey}` },
         body: JSON.stringify(body)
