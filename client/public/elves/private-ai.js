@@ -1,5 +1,6 @@
 import elf from '@plan98/elf'
 import Cache from '@silly/cache'
+import { toolDefinitions, callTool } from './elf-tools.js'
 
 const cache = Cache('private-ai')
 
@@ -157,7 +158,7 @@ async function sendMessage(userContent) {
     const response = await fetch(url + '/api/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-      body: JSON.stringify({ model: modelId, messages: withSystem, stream: true })
+      body: JSON.stringify({ model: modelId, messages: withSystem, stream: true, tools: toolDefinitions })
     })
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
@@ -173,6 +174,7 @@ async function streamResponse(response, priorMessages) {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = '', accumulated = '', accumulatedThinking = ''
+  const toolCallAcc = {}
 
   function scrollToBottom() {
     const feed = document.getElementById('messages-feed')
@@ -209,11 +211,36 @@ async function streamResponse(response, priorMessages) {
             if (el) el.textContent = accumulated
             scrollToBottom()
           }
+          if (delta?.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const i = tc.index ?? 0
+              if (!toolCallAcc[i]) toolCallAcc[i] = { id: '', type: 'function', function: { name: '', arguments: '' } }
+              if (tc.id) toolCallAcc[i].id = tc.id
+              if (tc.function?.name) toolCallAcc[i].function.name += tc.function.name
+              if (tc.function?.arguments) toolCallAcc[i].function.arguments += tc.function.arguments
+            }
+          }
         } catch (e) { /* malformed chunk */ }
       }
     }
-    $.teach({ messages: [...priorMessages, { role: 'assistant', content: accumulated }], streaming: false, thinking: '' })
-    scrollToBottom()
+
+    const toolCalls = Object.values(toolCallAcc)
+    if (toolCalls.length > 0) {
+      const assistantMsg = { role: 'assistant', content: accumulated || null, tool_calls: toolCalls }
+      const withAssistant = [...priorMessages, assistantMsg]
+      const toolResults = await Promise.all(toolCalls.map(async tc => {
+        let args = {}
+        try { args = JSON.parse(tc.function.arguments) } catch {}
+        const result = await callTool(tc.function.name, args)
+        return { role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) }
+      }))
+      const withResults = [...withAssistant, ...toolResults]
+      $.teach({ messages: withResults })
+      await continueCompletion(withResults)
+    } else {
+      $.teach({ messages: [...priorMessages, { role: 'assistant', content: accumulated }], streaming: false, thinking: '' })
+      scrollToBottom()
+    }
   } catch (err) {
     $.teach({
       streaming: false, thinking: '', error: err.message,
@@ -221,6 +248,24 @@ async function streamResponse(response, priorMessages) {
     })
   } finally {
     reader.releaseLock()
+  }
+}
+
+async function continueCompletion(messages) {
+  const { url, key, modelId } = $.learn()
+  const withSystem = systemPrompt
+    ? [{ role: 'system', content: systemPrompt }, ...messages]
+    : messages
+  try {
+    const response = await fetch(url + '/api/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({ model: modelId, messages: withSystem, stream: true, tools: toolDefinitions })
+    })
+    if (!response.ok) throw new Error(`API error: ${response.status}`)
+    await streamResponse(response, messages)
+  } catch (err) {
+    $.teach({ streaming: false, thinking: '', error: err.message })
   }
 }
 
@@ -432,30 +477,68 @@ $.style(`
   }
 `)
 
-export const starLordButta = {
-  async chat({ model, messages, stream = true, apiKey, ...rest }) {
+export const openClown = {
+  async *chat({ model, messages, stream = true, apiKey, withTools = true, ...rest }) {
     const { url, key } = $.learn()
     const effectiveKey = apiKey || key
-    if (!url || !effectiveKey) throw new Error('starLordButta: missing url or key — connect via the private-ai UI first')
+    if (!url || !effectiveKey) throw new Error('openClown: missing url or key — connect via the private-ai UI first')
 
-    const response = await fetch(url + '/api/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${effectiveKey}` },
-      body: JSON.stringify({ model, messages, stream, ...rest })
-    })
+    let currentMessages = messages
 
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}))
-      throw new Error(err.error?.message || `starLordButta API error: ${response.status}`)
+    while (true) {
+      const body = { model, messages: currentMessages, stream, ...rest }
+      if (withTools) body.tools = toolDefinitions
+
+      const response = await fetch(url + '/api/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${effectiveKey}` },
+        body: JSON.stringify(body)
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error?.message || `openClown API error: ${response.status}`)
+      }
+
+      if (!stream) {
+        const data = await response.json()
+        yield { message: { role: 'assistant', content: data.choices[0].message.content }, done: true }
+        return
+      }
+
+      let accumulated = ''
+      const toolCallAcc = {}
+
+      for await (const chunk of openClown.readStream(response)) {
+        if (chunk.reasoning) yield { message: { role: 'assistant', content: '', reasoning: chunk.reasoning }, done: false }
+        if (chunk.content) { accumulated += chunk.content; yield { message: { role: 'assistant', content: chunk.content }, done: false } }
+        if (chunk.toolCallDelta) {
+          const tc = chunk.toolCallDelta
+          const i = tc.index ?? 0
+          if (!toolCallAcc[i]) toolCallAcc[i] = { id: '', type: 'function', function: { name: '', arguments: '' } }
+          if (tc.id) toolCallAcc[i].id = tc.id
+          if (tc.function?.name) toolCallAcc[i].function.name += tc.function.name
+          if (tc.function?.arguments) toolCallAcc[i].function.arguments += tc.function.arguments
+        }
+      }
+
+      const toolCalls = Object.values(toolCallAcc)
+      if (!withTools || toolCalls.length === 0) {
+        yield { message: { role: 'assistant', content: accumulated }, done: true }
+        return
+      }
+
+      const assistantMsg = { role: 'assistant', content: accumulated || null, tool_calls: toolCalls }
+      const toolResults = await Promise.all(toolCalls.map(async tc => {
+        let args = {}
+        try { args = JSON.parse(tc.function.arguments) } catch {}
+        const result = await callTool(tc.function.name, args)
+        return { role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) }
+      }))
+      currentMessages = [...currentMessages, assistantMsg, ...toolResults]
     }
-
-    return stream ? starLordButta.handleStream(response) : (async function* () {
-      const data = await response.json()
-      yield { message: { role: 'assistant', content: data.choices[0].message.content }, done: true }
-    })()
   },
 
-  async *handleStream(response) {
+  async *readStream(response) {
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
@@ -466,21 +549,17 @@ export const starLordButta = {
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
-
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
           const data = line.slice(6).trim()
-          if (data === '[DONE]') { yield { message: { role: 'assistant', content: '' }, done: true }; return }
+          if (data === '[DONE]') return
           try {
             const parsed = JSON.parse(data)
             const delta = parsed.choices?.[0]?.delta
-            if (delta?.reasoning_content || delta?.thinking)
-              yield { message: { role: delta?.role || 'assistant', content: '', reasoning: delta.reasoning_content || delta.thinking }, done: false }
-            if (delta?.content)
-              yield { message: { role: delta?.role || 'assistant', content: delta.content }, done: false }
-            if (delta?.tool_calls)
-              yield { message: { role: 'assistant', content: '', tool_calls: delta.tool_calls }, done: false }
-          } catch (e) { /* malformed chunk */ }
+            if (delta?.reasoning_content || delta?.thinking) yield { reasoning: delta.reasoning_content || delta.thinking }
+            if (delta?.content) yield { content: delta.content }
+            if (delta?.tool_calls) for (const tc of delta.tool_calls) yield { toolCallDelta: tc }
+          } catch {}
         }
       }
     } finally {
