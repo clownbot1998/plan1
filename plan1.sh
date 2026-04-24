@@ -15,12 +15,10 @@ case "$CMD" in
       echo "already serving on port $PORT (pid $(cat "$PID_FILE"))"
       exit 0
     fi
-    SERVE_DIR="$DIST_DIR"
-    [ ! -f "$DIST_DIR/index.html" ] && SERVE_DIR="$CLIENT_DIR"
-    cd "$SERVE_DIR"
+    cd "$DIST_DIR"
     python3 -m http.server "$PORT" &
     echo $! > "$PID_FILE"
-    echo "serving $SERVE_DIR on http://localhost:$PORT (pid $!)"
+    echo "serving $DIST_DIR on http://localhost:$PORT (pid $!)"
     echo "open http://localhost:$PORT/index.html"
     ;;
   stop)

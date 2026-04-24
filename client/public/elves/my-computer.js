@@ -16,6 +16,7 @@ const SAGAS  = 'sagas'
 const TUTORIAL = 'tutorial'
 const SHARE  = 'share'
 const THEME  = 'theme'
+const PROJECT_MANAGER = 'project-manager'
 
 const config = {
   [HOME]: {
@@ -25,19 +26,16 @@ const config = {
     body: (target) => `
       <div class="home-layout">
         <div class="home-content">
-
           <div class="interlude">
             <div class="interlude-title">OpenClown</div>
             <div class="interlude-subtitle">an ai-less agent for the server-less bios unleashing everywhere clownpute</div>
           </div>
-
           <div class="feature-list">
             <div class="featured-item"><span>✓</span><span>Draw and animate with flip-book, frame by frame</span></div>
             <div class="featured-item"><span>✓</span><span>Compose music with the paper-pocket sequencer</span></div>
             <div class="featured-item"><span>✓</span><span>Write and run code in a live terminal</span></div>
             <div class="featured-item"><span>✓</span><span>Laughter is the only system capable of reducing universal entropy</span></div>
           </div>
-
           <div class="hero-section -right">
             <div class="hero-content">
               <div class="hero-headline">🎨 Art</div>
@@ -50,179 +48,21 @@ const config = {
               </div>
             </div>
           </div>
-
-          <div class="hero-section -left">
-            <div class="hero-content">
-              <div class="hero-headline">🎵 Music</div>
-              <span class="hero-tag" title="plan98's synthesis engine">paper-pocket</span> is a
-              <span class="hero-tag" title="generative and performative">live sequencer</span> built for
-              <span class="hero-tag" title="weird inputs welcome">weird inputs</span>.
-              Plug in a gamepad.
-              <span class="hero-tag" title="tone.js under the hood">Play anything</span>.
-              <div class="hero-action-container">
-                <button class="hero-cta" data-nav="/music">Play Now →</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="hero-section -right">
-            <div class="hero-content">
-              <div class="hero-headline">🖥 Coding</div>
-              A <span class="hero-tag" title="deno on the server, quickjs in build scripts">live shell</span>
-              for <span class="hero-tag" title="everything is a custom element">clown engineers</span>.
-              <span class="hero-tag" title="plan98 elves are web components">Write an elf</span>.
-              <span class="hero-tag" title="the server is plan1.sh">Deploy a plan</span>.
-              <span class="hero-tag" title="9p for WSL interop">Mount a filesystem</span>.
-              <div class="hero-action-container">
-                <button class="hero-cta" data-nav="/coding">Code Now →</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="interlude">
-            <div class="interlude-title">Sagas</div>
-            <div class="interlude-subtitle">Stories that run. Scripts that breathe. Lore that loads.</div>
-            <div>
-              <button class="hero-cta" style="color:white;" data-nav="/sagas">Read Now →</button>
-            </div>
-          </div>
-
-          <div class="os-table-section">
-            <h2 style="padding: 1rem; margin: 0;">BIOS: What Powers Your World</h2>
-            <p style="padding: 0 1rem 1rem; opacity:.65; max-width: 65ch;">
-              Every screen you've ever stared at booted through firmware. BIOS is the thing that
-              wakes up before the operating system, before the app, before you. plan98.js is BIOS
-              for the elf runtime — the layer that says "we're open, send your elves in."
-              Listed last.
-            </p>
-            <div class="os-table-wrap">
-              <table class="os-table">
-                <thead>
-                  <tr>
-                    <th>BIOS</th>
-                    <th>You've seen it when…</th>
-                    <th>It powers</th>
-                    <th>You write things in</th>
-                    <th>Ships to</th>
-                    <th>Footprint</th>
-                    <th>Open source</th>
-                    <th>Hot reload</th>
-                    <th>Creative tools</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td class="feature-name">IBM BIOS<br><small>1981</small></td>
-                    <td>The blinking cursor before DOS loaded on your dad's beige box</td>
-                    <td>Every IBM PC clone ever made</td>
-                    <td>Assembly</td>
-                    <td>One type of machine</td>
-                    <td>~8 KB ROM</td>
-                    <td class="cell-no">No</td>
-                    <td class="cell-no">No — power cycle required</td>
-                    <td class="cell-no">None</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">Award / AMI BIOS<br><small>1990s</small></td>
-                    <td>The blue or gray setup screen you got into by pressing Delete at boot</td>
-                    <td>Millions of desktop PCs through the 90s and 2000s</td>
-                    <td>C + Assembly</td>
-                    <td>x86 desktops</td>
-                    <td>~128–512 KB flash</td>
-                    <td class="cell-no">No</td>
-                    <td class="cell-no">No</td>
-                    <td class="cell-no">None</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">Open Firmware<br><small>IEEE 1275</small></td>
-                    <td>The "ok" prompt on a Sun workstation or old PowerPC Mac</td>
-                    <td>Sun SPARC workstations, IBM RS/6000, old PowerPC Macs</td>
-                    <td>Forth (a stack language)</td>
-                    <td>SPARC, PowerPC, x86</td>
-                    <td>~512 KB ROM</td>
-                    <td class="cell-yes">Yes — IEEE standard</td>
-                    <td class="cell-partial">Forth REPL — sort of</td>
-                    <td class="cell-no">None</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">coreboot</td>
-                    <td>Your Chromebook turning on unreasonably fast</td>
-                    <td>Chromebooks, select ThinkPads, System76 laptops</td>
-                    <td>C</td>
-                    <td>x86 + ARM laptops</td>
-                    <td>~256 KB</td>
-                    <td class="cell-yes">Yes — GPLv2</td>
-                    <td class="cell-no">No</td>
-                    <td class="cell-no">None</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">libreboot</td>
-                    <td>A ThinkPad X60 booting without any proprietary blobs whatsoever</td>
-                    <td>Privacy-hardened laptops sold by Purism, Novacustom, and friends</td>
-                    <td>C</td>
-                    <td>Select x86 hardware</td>
-                    <td>~256 KB</td>
-                    <td class="cell-yes">Yes — GPLv3+</td>
-                    <td class="cell-no">No</td>
-                    <td class="cell-no">None</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">U-Boot<br><small>embedded</small></td>
-                    <td>Your router doing its thing while you wait for the internet to come back</td>
-                    <td>Raspberry Pi, OpenWRT routers, BeagleBone, Android devices, smart TVs</td>
-                    <td>C</td>
-                    <td>ARM, MIPS, RISC-V — anything without a screen</td>
-                    <td>~200 KB flash</td>
-                    <td class="cell-yes">Yes — GPLv2+</td>
-                    <td class="cell-no">No</td>
-                    <td class="cell-no">None</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">UEFI<br><small>current standard</small></td>
-                    <td>Every modern laptop or desktop you've bought in the last decade</td>
-                    <td>HP, Dell, Lenovo, ASUS, Apple Silicon Macs, every gaming PC</td>
-                    <td>C (EFI applications)</td>
-                    <td>x86, ARM, RISC-V — the whole modern market</td>
-                    <td>~4–16 MB flash</td>
-                    <td class="cell-partial">Spec open; most impls proprietary</td>
-                    <td class="cell-no">No</td>
-                    <td class="cell-no">None</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">SeaBIOS</td>
-                    <td>A QEMU virtual machine booting inside your real machine</td>
-                    <td>KVM/QEMU VMs, ChromeOS legacy boot mode, Proxmox guests</td>
-                    <td>C</td>
-                    <td>x86 virtual machines</td>
-                    <td>~128 KB</td>
-                    <td class="cell-yes">Yes — LGPLv3</td>
-                    <td class="cell-no">No</td>
-                    <td class="cell-no">None</td>
-                  </tr>
-                  <tr class="plan98-row">
-                    <td class="feature-name plan98-col">plan98.js</td>
-                    <td class="plan98-col">This page loading. A game starting on Switch. A script running on a microcontroller.</td>
-                    <td class="plan98-col">clownbot, browser apps, Switch/PS/Steam games via MonoGame, microcontrollers via mquickjs (10 kB RAM)</td>
-                    <td class="plan98-col">JavaScript — same elf runs on Node, Deno, Bun, browser, Jint, mquickjs</td>
-                    <td class="plan98-col">Every screen: browser, desktop, console, embedded</td>
-                    <td class="plan98-col">~30 KB JS — plus whatever runtime you choose</td>
-                    <td class="cell-yes plan98-col">Yes</td>
-                    <td class="cell-yes plan98-col">Yes — edit an elf, see it change</td>
-                    <td class="cell-yes plan98-col">Art, music, stories — built in</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="feature-list">
-            <div class="featured-item"><span>✓</span><span>Consider that your true calling could be clown</span></div>
-            <div class="featured-item"><span>✓</span><span>The War on Clowns is real and we are winning</span></div>
-            <div class="featured-item"><span>✓</span><span>Pick a color below. The whole system listens.</span></div>
-          </div>
-
         </div>
-
+        <div class="home-sidebar">
+          <project-manager></project-manager>
+        </div>
+      </div>
+    `
+  },
+  [PROJECT_MANAGER]: {
+    label: 'Projects',
+    path: '/project-manager',
+    icon: '📋',
+    body: (target) => `
+      <div class="project-manager-view">
+        <h2>Project Management</h2>
+        <project-manager></project-manager>
       </div>
     `
   },

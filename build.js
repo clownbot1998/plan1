@@ -43,6 +43,17 @@ function copyFile(src, dst) {
   writeFile(dst, std.loadFile(src))
 }
 
+function copyDir(src, dst, skip = []) {
+  mkdirp(dst)
+  for (const f of readdir(src)) {
+    if (skip.includes(f)) continue
+    const s = join(src, f)
+    const d = join(dst, f)
+    if (isDir(s)) copyDir(s, d)
+    else copyFile(s, d)
+  }
+}
+
 // ── frontmatter ───────────────────────────────────────────────────────────────
 
 function parseFrontmatter(text) {
@@ -182,6 +193,7 @@ function shell({ title, content, sidebar }) {
   <script type="module" src="/elves/hypertext-quote.js"></script>
   <script type="module" src="/elves/title-page.js"></script>
   <script type="module" src="/elves/blog-search.js"></script>
+<script type="module" src="/elves/project-manager.js"></script>
 </head>
 <body>
 
@@ -221,11 +233,17 @@ function shell({ title, content, sidebar }) {
 
 const [CWD] = os.getcwd()
 const BLOG = join(CWD, 'blog')
-const OUT  = join(CWD, 'client/public/blog')
+const SRC  = join(CWD, 'client/public')
+const DIST = join(CWD, 'dist')
+const OUT  = join(DIST, 'blog')
 
 function collectPosts() {
   return readdir(BLOG)
     .filter(f => extname(f) === '.md')
+    .filter(f => {
+      const dateStr = f.slice(0, 10)
+      return /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+    })
     .map(f => {
       const { meta, body } = parseFrontmatter(std.loadFile(join(BLOG, f)))
       const slug = f.replace(/\.md$/, '').replace(/^\d{4}-\d{2}-\d{2}-/, '')
@@ -240,14 +258,18 @@ function collectPosts() {
 
 // ── build ─────────────────────────────────────────────────────────────────────
 
-// copy bytesize CSS
+// copy bytesize CSS into source
 const CSS_SRC = join(CWD, '../bytesize/css')
-const CSS_DST = join(CWD, 'client/public/css')
+const CSS_DST = join(SRC, 'css')
 for (const f of ['base.css', 'main.css']) {
   const src = join(CSS_SRC, f)
   const [, err] = os.stat(src)
   if (err === 0) { copyFile(src, join(CSS_DST, f)); print('copy: css/' + f) }
 }
+
+// copy source into dist (blog generated separately below)
+copyDir(SRC, DIST, ['blog'])
+print('copy: client/public → dist/')
 
 const posts = collectPosts()
 
@@ -297,7 +319,7 @@ print('write: blog/')
 
 // ── search manifest ───────────────────────────────────────────────────────────
 
-const PUB = join(CWD, 'client/public')
+const PUB = SRC
 const SKIP_DIRS = ['vendor', 'css', 'fonts', 'blog']
 const MEDIA_EXT = ['.mp3', '.mp4', '.m3u8', '.wav', '.ogg', '.webm', '.m4a', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp']
 
@@ -344,7 +366,7 @@ for (const f of readdir(PUB)) {
   }
 }
 
-writeFile(join(PUB, 'search-manifest.json'), JSON.stringify(docs))
+writeFile(join(DIST, 'search-manifest.json'), JSON.stringify(docs))
 print('write: search-manifest.json (' + docs.length + ' docs)')
 
 // ── file manifest (full client walk) ─────────────────────────────────────────
@@ -366,7 +388,7 @@ function walkAll(dir, urlBase, files) {
 
 const fileManifest = []
 walkAll(PUB, '', fileManifest)
-writeFile(join(PUB, 'file-manifest.json'), JSON.stringify(fileManifest))
+writeFile(join(DIST, 'file-manifest.json'), JSON.stringify(fileManifest))
 print('write: file-manifest.json (' + fileManifest.length + ' files)')
 
 // ── clownbot manifest ─────────────────────────────────────────────────────────
@@ -400,8 +422,122 @@ const clownbotManifest = {
   recentPosts,
 }
 
-writeFile(join(PUB, 'clownbot-manifest.json'), JSON.stringify(clownbotManifest))
+writeFile(join(DIST, 'clownbot-manifest.json'), JSON.stringify(clownbotManifest))
 print('write: clownbot-manifest.json (' + memories.length + ' memories, ' + recentPosts.length + ' posts)')
+
+// ── task manifest: collect all plan.md files into nested tree ──────────────────
+
+function parsePlanFile(path, basePath) {
+  const content = std.loadFile(path)
+  const relDir = dirname(path).replace(basePath + '/', '')
+  const dir = relDir || '.'
+  const items = []
+  const lines = content.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const checkboxMatch = line.match(/^(\s*)\[([ x])\]\s*(.+)$/)
+    if (checkboxMatch) {
+      const indent = checkboxMatch[1].length
+      const done = checkboxMatch[2] === 'x'
+      const text = checkboxMatch[3].trim()
+      items.push({ indent, done, text, line: i + 1 })
+    }
+  }
+  return { dir, items, path }
+}
+
+function buildTaskTree(planFiles) {
+  const root = { name: 'root', path: '', children: [], done: 0, total: 0 }
+  const byPath = { '': root }
+  
+  // Sort by path depth
+  planFiles.sort((a, b) => a.dir.split('/').length - b.dir.split('/').length)
+  
+  for (const plan of planFiles) {
+    const parts = plan.dir.split('/').filter(Boolean)
+    let parentPath = ''
+    let parent = root
+    
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      const currentPath = parentPath ? parentPath + '/' + part : part
+      
+      if (!byPath[currentPath]) {
+        const node = { 
+          name: part, 
+          path: currentPath, 
+          children: [], 
+          done: 0, 
+          total: 0,
+          items: plan.dir === currentPath ? plan.items : []
+        }
+        byPath[currentPath] = node
+        parent.children.push(node)
+      }
+      
+      parent = byPath[currentPath]
+      parentPath = currentPath
+    }
+    
+    // Add items to this node
+    if (plan.items.length > 0) {
+      parent.items = plan.items
+    }
+  }
+  
+  // Calculate totals recursively
+  function calc(node) {
+    node.total = node.items ? node.items.length : 0
+    node.done = node.items ? node.items.filter(i => i.done).length : 0
+    for (const child of node.children) {
+      calc(child)
+      node.total += child.total
+      node.done += child.done
+    }
+  }
+  calc(root)
+  
+  return root
+}
+
+// Find all plan.md files recursively
+function findAllPlanFiles(dir) {
+  const files = []
+  const entries = readdir(dir)
+  for (const entry of entries) {
+    const fullPath = join(dir, entry)
+    const [, err] = os.stat(fullPath)
+    if (err === 0) {
+      const st = os.stat(fullPath)[0]
+      if ((st.mode & 0o170000) === 0o040000) { // Directory
+        // Skip certain directories
+        if (!['node_modules', '.git', 'dist', 'vendor', 'blog/done'].includes(entry) && !entry.startsWith('.')) {
+          files.push(...findAllPlanFiles(fullPath))
+        }
+      } else if (entry === 'plan.md') { // File
+        files.push(fullPath)
+      }
+    }
+  }
+  return files
+}
+
+try {
+  const allPlanFiles = findAllPlanFiles(CWD)
+  const planFiles = []
+  for (const p of allPlanFiles) {
+    print('parsing: ' + p)
+    planFiles.push(parsePlanFile(p, CWD))
+  }
+  print('found ' + planFiles.length + ' plan files')
+  
+  const taskTree = buildTaskTree(planFiles)
+  writeFile(join(DIST, 'task-manifest.json'), JSON.stringify(taskTree, null, 2))
+  print('write: task-manifest.json (' + taskTree.total + ' tasks)')
+} catch(e) {
+  print('task manifest error: ' + e.message)
+  print(e.stack)
+}
 
 // ── lint: $.teach closure bug ──────────────────────────────────────────────────
 // Flag $.teach(payload, reducer) where reducer uses closure variables as computed keys
