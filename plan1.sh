@@ -15,11 +15,10 @@ case "$CMD" in
       echo "already serving on port $PORT (pid $(cat "$PID_FILE"))"
       exit 0
     fi
-    cd "$DIST_DIR"
-    python3 -m http.server "$PORT" &
+    deno run --allow-read --allow-net --allow-env "$SCRIPT_DIR/server.js" &
     echo $! > "$PID_FILE"
-    echo "serving $DIST_DIR on http://localhost:$PORT (pid $!)"
-    echo "open http://localhost:$PORT/index.html"
+    echo "serving dist/ on http://localhost:$PORT (pid $!)"
+    echo "open http://localhost:$PORT/app/private-ai"
     ;;
   stop)
     if [ -f "$PID_FILE" ]; then

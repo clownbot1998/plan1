@@ -76,7 +76,9 @@ $.draw(target => {
     </option>
   `).join('')
 
-  const messageHtml = messages.map(msg => `
+  const messageHtml = messages
+    .filter(msg => (msg.role === 'user' || msg.role === 'assistant') && msg.content)
+    .map(msg => `
     <div class="message message--${msg.role}">
       <span class="message__role">${msg.role}</span>
       <div class="message__content">${escapeHyperText(msg.content)}</div>
@@ -170,7 +172,9 @@ async function sendMessage(userContent) {
   }
 }
 
-async function streamResponse(response, priorMessages) {
+const MAX_TOOL_DEPTH = 4
+
+async function streamResponse(response, priorMessages, depth = 0) {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = '', accumulated = '', accumulatedThinking = ''
@@ -226,7 +230,11 @@ async function streamResponse(response, priorMessages) {
 
     const toolCalls = Object.values(toolCallAcc)
     if (toolCalls.length > 0) {
-      const assistantMsg = { role: 'assistant', content: accumulated || null, tool_calls: toolCalls }
+      if (depth >= MAX_TOOL_DEPTH) {
+        $.teach({ messages: [...priorMessages, { role: 'assistant', content: accumulated || '(tool loop limit reached)' }], streaming: false, thinking: '' })
+        return
+      }
+      const assistantMsg = { role: 'assistant', content: accumulated || '', tool_calls: toolCalls }
       const withAssistant = [...priorMessages, assistantMsg]
       const toolResults = await Promise.all(toolCalls.map(async tc => {
         let args = {}
@@ -234,9 +242,14 @@ async function streamResponse(response, priorMessages) {
         const result = await callTool(tc.function.name, args)
         return { role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) }
       }))
+      const unknownTool = toolResults.find(r => { try { return JSON.parse(r.content)?.error?.startsWith('unknown tool') } catch { return false } })
+      if (unknownTool) {
+        $.teach({ messages: [...priorMessages, { role: 'assistant', content: accumulated || '(model called unknown tool — stopped)' }], streaming: false, thinking: '', error: JSON.parse(unknownTool.content).error })
+        return
+      }
       const withResults = [...withAssistant, ...toolResults]
       $.teach({ messages: withResults })
-      await continueCompletion(withResults)
+      await continueCompletion(withResults, depth + 1)
     } else {
       $.teach({ messages: [...priorMessages, { role: 'assistant', content: accumulated }], streaming: false, thinking: '' })
       scrollToBottom()
@@ -251,7 +264,7 @@ async function streamResponse(response, priorMessages) {
   }
 }
 
-async function continueCompletion(messages) {
+async function continueCompletion(messages, depth = 0) {
   const { url, key, modelId } = $.learn()
   const withSystem = systemPrompt
     ? [{ role: 'system', content: systemPrompt }, ...messages]
@@ -263,7 +276,7 @@ async function continueCompletion(messages) {
       body: JSON.stringify({ model: modelId, messages: withSystem, stream: true, tools: toolDefinitions })
     })
     if (!response.ok) throw new Error(`API error: ${response.status}`)
-    await streamResponse(response, messages)
+    await streamResponse(response, messages, depth)
   } catch (err) {
     $.teach({ streaming: false, thinking: '', error: err.message })
   }
