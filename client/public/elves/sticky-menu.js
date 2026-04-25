@@ -153,7 +153,7 @@ $.style(`
   & .menu {
     padding: calc(0.382rem * 4) calc(0.618rem * 4);
     background: lemonchiffon;
-    font-family: 'BerkeleyMono', monospace;
+    font-family: 'Recursive';
   }
 
   & .section {
@@ -163,7 +163,12 @@ $.style(`
   & .section-head {
     display: inline-block;
     font-size: 2rem;
-    font-weight: 700;
+    --v-font-wght: 700;
+    --v-font-casl: 0;
+    --v-font-mono: 0;
+    --v-font-slnt: 0;
+    --v-font-crsv: 0;
+    font-variation-settings: "MONO" var(--v-font-mono), "CASL" var(--v-font-casl), "wght" var(--v-font-wght), "slnt" var(--v-font-slnt), "CRSV" var(--v-font-crsv);
     line-height: 1;
     margin: 2rem 0 0.25rem;
   }

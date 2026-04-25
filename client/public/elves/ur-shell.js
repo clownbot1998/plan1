@@ -31,10 +31,6 @@ marked.setOptions({
   smartypants: false, // Prevent automatic quote conversions
 });
 
-// helper for system settings
-console.log(Object.keys(sideEffects).map((key) => {
-  return [key, sideEffects[key], $paperPocket.learn().settings[key]]
-}))
 
 const defaultPath = {}
 const paperPocketPath = Object.keys(sideEffects)
@@ -724,8 +720,8 @@ $.style(`
   & .ur-title {
     color: var(--root-theme, #E83FB8);
     font-size: 2rem;
-    font-weight: 800;
-    font-family: 'BerkeleyMono', monospace;
+    font-family: 'Recursive';
+    font-variation-settings: "MONO" 0, "CASL" 0, "wght" 800, "slnt" 0, "CRSV" 0;
   }
 
   & .message p {

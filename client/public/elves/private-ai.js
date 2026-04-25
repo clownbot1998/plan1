@@ -341,7 +341,7 @@ $.style(`
     flex-direction: column;
     height: 100%;
     overflow: hidden;
-    font-family: 'BerkeleyMono', monospace;
+    font-family: 'Recursive';
   }
 
   & .error {

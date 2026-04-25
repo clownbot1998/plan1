@@ -205,7 +205,7 @@ function openPrintDialog(ref) {
             border: none;
             cursor: pointer;
             color: dodgerblue;
-            font-family: 'BerkeleyMono', monospace;
+            font-family: 'Recursive';
             font-size: 1rem;
             padding: 0;
             text-decoration: underline;
@@ -317,7 +317,7 @@ $.style(`
     position: relative;
     padding-top: 1rem;
     line-height: 1;
-    font-family: 'BerkeleyMono', monospace;
+    font-family: 'Recursive';
   }
 
   & .bs-bar {
@@ -345,7 +345,7 @@ $.style(`
     outline: none;
     background: transparent;
     font-size: 1.6rem;
-    font-family: 'BerkeleyMono', monospace;
+    font-family: 'Recursive';
     color: dodgerblue;
     width: 100%;
     padding: 0;
@@ -417,7 +417,7 @@ $.style(`
     text-align: left;
     padding: .6rem .5rem;
     cursor: pointer;
-    font-family: 'BerkeleyMono', monospace;
+    font-family: 'Recursive';
   }
 
   & .bs-result:hover,

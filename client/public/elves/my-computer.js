@@ -407,7 +407,8 @@ $.style(`
     font-size: 3rem;
     font-weight: 800;
     color: var(--root-theme, #E83FB8);
-    font-family: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
+    font-family: 'Recursive';
+    font-variation-settings: "MONO" 0, "CASL" 0, "wght" 800, "slnt" 0, "CRSV" 0;
     letter-spacing: -.03em;
   }
 
@@ -568,7 +569,8 @@ $.style(`
     color: var(--root-theme, #E83FB8);
     font-size: 2rem;
     font-weight: 800;
-    font-family: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
+    font-family: 'Recursive';
+    font-variation-settings: "MONO" 0, "CASL" 0, "wght" 800, "slnt" 0, "CRSV" 0;
     letter-spacing: -.03em;
   }
 
@@ -661,7 +663,8 @@ $.style(`
     padding: .4rem .6rem;
     background: rgba(0,0,0,.05);
     border-radius: .25rem;
-    font-family: 'BerkeleyMono', monospace;
+    font-family: 'Recursive';
+    font-variation-settings: "MONO" 1, "CASL" 0, "wght" 400, "slnt" 0, "CRSV" 0;
     font-size: .85rem;
   }
 `)
