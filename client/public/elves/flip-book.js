@@ -356,15 +356,16 @@ $.style(`
   }
   & .zoom-btn:hover { background: rgba(215,153,33,.15); color: #fabd2f; }
   & .zoom-label {
-    background: transparent; border: none; border-left: 1px solid #3c3836; border-right: 1px solid #3c3836;
+    background: transparent; border: none; border-left: 1px solid #3c3836;
     color: #665c54; font-family: 'BerkeleyMono', monospace; font-size: .6rem;
-    padding: .2rem .35rem; cursor: pointer; display: flex; align-items: center; gap: .25rem;
+    padding: .2rem .35rem; cursor: pointer;
     transition: color 80ms, border-color 80ms; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
-  & .zoom-label:hover { color: #fabd2f; border-color: #d79921; }
-  & .zoom-sep { color: #3c3836; }
-  & [data-zoom-lbl] { display: inline-block; min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
-  & [data-dim-lbl]  { display: inline-block; min-width: 5.5em; font-variant-numeric: tabular-nums; }
+  & .zoom-label:hover { color: #fabd2f; border-left-color: #d79921; }
+  & [data-zoom-lbl] { min-width: 3.2em; text-align: right; }
+  & [data-dim-lbl]  { min-width: 5.5em; }
+  & .zoom-sep { color: #3c3836; font-size: .6rem; }
 
   /* ── COMPASS TOOLBELT — v-log pattern ── */
   &[data-belt="true"] .artboard *, &[data-belt="true"] .taskbar {
@@ -556,11 +557,8 @@ function mount(target) {
           <div class="right">
             <div class="zoom-widget">
               <button class="zoom-btn" data-zoom-out>−</button>
-              <button class="zoom-label" data-open-view="canvas">
-                <span data-zoom-lbl>200%</span>
-                <span class="zoom-sep">|</span>
-                <span data-dim-lbl>${canvasW}×${canvasH}</span>
-              </button>
+              <button class="zoom-label" data-zoom-reset data-zoom-lbl>200%</button>
+              <button class="zoom-label" data-open-view="canvas" data-dim-lbl>${canvasW}×${canvasH}</button>
               <button class="zoom-btn" data-zoom-in>+</button>
             </div>
           </div>
@@ -2264,6 +2262,7 @@ function captureFrame(target) {
 }
 $.when('click','[data-zoom-in]',e=>{const r=e.target.closest(tag);if(!r)return;setZoom(r,$.learn().zoom+0.25)})
 $.when('click','[data-zoom-out]',e=>{const r=e.target.closest(tag);if(!r)return;setZoom(r,$.learn().zoom-0.25)})
+$.when('click','[data-zoom-reset]',e=>{const r=e.target.closest(tag);if(!r)return;setZoom(r,1)})
 $.when('click','[data-cycle-tool]',()=>$.whisper({tool:nextTool($.learn().tool)}))
 $.when('click','[data-undo]',event=>{const r=event.target.closest(tag);if(r)undoFrame(r)})
 $.when('click','[data-redo]',event=>{const r=event.target.closest(tag);if(r)redoFrame(r)})
