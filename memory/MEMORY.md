@@ -7,3 +7,4 @@
 - [flexibility compulsion](feedback_flexibility_compulsion.md) — clownbot adds fallbacks/flexibility beyond scope; self-aware it's annoying; name it when doing it
 - [plan1 architecture april 2026](project_plan1_architecture.md) — elf list, build system, font fix, file-manifest, pending: blog search + saga viewer
 - [font root cause pattern](feedback_font_root_cause.md) — global documentElement.style from elves silently wins; check paper-pocket-style localStorage defaults first
+- [the clown's clown — tychi as physical agent](user_clowns_clown.md) — producer/top clown; three modes: Script (write), Sketch (draw), Screen (stage); iterates fast
