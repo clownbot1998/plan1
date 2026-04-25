@@ -68,6 +68,25 @@ const initialState = existingState
 
 const $ = elf(link, initialState)
 
+// auto-provision from server-injected env if no keycards exist in localStorage
+if (
+  plan98?.env?.PLAN98_WAS_SIGNER &&
+  plan98?.env?.PLAN98_WAS_SPACE_ID &&
+  initialState.keycards.length === 0
+) {
+  const _bootstrapKeycard = {
+    id: plan98.env.PLAN98_WAS_SPACE_ID,
+    type: 'generic',
+    src: '/app/time-machine',
+    title: 'Memex',
+    host: walletDefaultHost,
+    at: new Date().toJSON(),
+    asJSON: JSON.parse(plan98.env.PLAN98_WAS_SIGNER),
+  }
+  $.teach({ keycards: [_bootstrapKeycard], activeKeycardId: _bootstrapKeycard.id })
+  persist()
+}
+
 $.when('click', '[data-approve-keycard]', () => {
   $.teach({ pendingKeycard: { __status: 'APPROVED' } })
 })

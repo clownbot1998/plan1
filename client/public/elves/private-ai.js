@@ -4,12 +4,16 @@ import { toolDefinitions, callTool } from './elf-tools.js'
 
 const cache = Cache('private-ai')
 
+const envUrl = (typeof plan98 !== 'undefined' && plan98?.env?.OLLAMA_HOST) || ''
+const envKey = (typeof plan98 !== 'undefined' && plan98?.env?.OLLAMA_KEY) || ''
+const hasEnvCreds = !!(envUrl && envKey)
+
 const $ = elf('private-ai', {
-  ready: false,
+  ready: hasEnvCreds,
   draft: '',
   error: '',
-  url: 'http://localhost:11434/v1',
-  key: 'ollama',
+  url: envUrl || 'http://localhost:11434/v1',
+  key: envKey || 'ollama',
   models: [],
   modelId: '',
   messages: [],
@@ -33,12 +37,10 @@ let systemPrompt = ''
         '\n\n## recent blog\n\n' + postText,
       ].join('')
     }
-    if (!record || !record.data) return
-    const { url, key } = record.data
-    const patch = {}
-    if (url) patch.url = url
-    if (key) patch.key = key
-    $.teach(patch)
+    const { url, key } = record?.data || {}
+    if (url) $.teach({ url })
+    if (key) $.teach({ key })
+    if ($.learn().ready) loadModels().catch(err => $.teach({ error: err.message }))
   })
 })()
 

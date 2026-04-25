@@ -15,7 +15,9 @@ case "$CMD" in
       echo "already serving on port $PORT (pid $(cat "$PID_FILE"))"
       exit 0
     fi
-    deno run --allow-read --allow-net --allow-env "$SCRIPT_DIR/server.js" &
+    ENV_FLAG=""
+    [ -f "$SCRIPT_DIR/.env" ] && ENV_FLAG="--env-file=$SCRIPT_DIR/.env"
+    deno run --allow-read --allow-net --allow-env $ENV_FLAG "$SCRIPT_DIR/server.js" &
     echo $! > "$PID_FILE"
     echo "serving dist/ on http://localhost:$PORT (pid $!)"
     echo "open http://localhost:$PORT/app/private-ai"
