@@ -39,8 +39,21 @@ function writeFile(p, content) {
   f.close()
 }
 
+const BINARY_EXTS = new Set([
+  'woff', 'woff2', 'ttf', 'otf', 'eot',
+  'png', 'jpg', 'jpeg', 'gif', 'ico', 'webp', 'avif',
+  'mp3', 'ogg', 'wav',
+  'mp4', 'webm', 'mov', 'ogv',
+  'wasm', 'pdf',
+])
+
 function copyFile(src, dst) {
-  writeFile(dst, std.loadFile(src))
+  const ext = src.split('.').pop()?.toLowerCase() ?? ''
+  if (BINARY_EXTS.has(ext)) {
+    std.popen(`cp '${src}' '${dst}'`, 'r').close()
+  } else {
+    writeFile(dst, std.loadFile(src))
+  }
 }
 
 function copyDir(src, dst, skip = []) {
@@ -121,8 +134,8 @@ function shell({ title, content, sidebar }) {
   <title>${title} | clownbot</title>
   <style>
     html {
-      --heading: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
-      --monospace: 'BerkeleyMono', 'Monaco', 'Courier New', monospace;
+      --heading: 'Recursive', sans-serif;
+      --monospace: 'Recursive', sans-serif;
       --font-size: 1.6rem;
       --font-size--small: 1.2rem;
       --line-height: 2.4rem;
