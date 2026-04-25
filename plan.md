@@ -47,14 +47,14 @@ elf-tools' read/write/delete actually hit storage.
 - [x] inject both into every page via the env block from step 1
 - [x] plan98-wallet.js auto-provisions from plan98.env on load if no keycards exist
 
-### step 4 — /admin/ route (QR keycard, lower priority)
+### step 4 — /admin/ route (QR keycard)
 
-nice to have for onboarding other users or devices. not needed for solo dev.
-
-- [ ] add `PLAN1_PASSPHRASE` env var
-- [ ] `/admin/` route: encrypt keycard JSON with AES + passphrase, encode as QR
-      pointing to `/app/plan98-wallet?data=<encrypted>`
-- [ ] verify the wallet elf can decrypt and import it
+- [x] `PLAN1_PASSPHRASE` env var (in .env.example)
+- [x] `/admin/` route: AES-encrypt keycard JSON-RPC with passphrase, serve
+      standalone HTML page with inline SVG QR pointing to
+      `/app/plan98-wallet?data=<encrypted>`
+- [x] qr-code.js elf ported to plan1; qr-creator added to importmap
+- [ ] verify wallet decrypts and imports on receiving device
 
 ---
 

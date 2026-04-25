@@ -63,4 +63,4 @@ one open at a time. each expands to the apps within.
 - [ ] port shirt-flicks to plan1
 - [ ] sticky-menu remembers last open section across sessions (cache.get/put)
 - [ ] sticky-menu back gesture (swipe or keyboard shortcut)
-- [ ] /admin/ QR keycard route (step 4 of server upgrade)
+- [x] /admin/ QR keycard route — AES-encrypted, standalone HTML page
