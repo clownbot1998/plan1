@@ -79,32 +79,65 @@
           "@did.coop/did-key-ed25519": "https://esm.sh/@did.coop/did-key-ed25519@0.0.14",
           "@wallet.storage/fetch-client": "https://esm.sh/@wallet.storage/fetch-client@1.1.3",
           "crypto-js": "https://esm.sh/crypto-js@4.2.0?bundle",
-          "eruda": "https://esm.sh/eruda@3.4.0"
+          "eruda": "https://esm.sh/eruda@3.4.0",
+          "qr-creator": "https://esm.sh/qr-creator@1.0.0"
         }
       }
     </script>
     <script type="module" src="/main.js"></script>
-    <script type="module" src="/elves/ur-shell.js"></script>
-    <script type="module" src="/elves/multi-task.js"></script>
-    <script type="module" src="/elves/source-code.js"></script>
-    <script type="module" src="/elves/flip-book.js"></script>
-    <script type="module" src="/elves/lore-baby.js"></script>
-    <script type="module" src="/elves/saga-pitch.js"></script>
-    <script type="module" src="/elves/my-computer.js"></script>
     <script type="module" src="/elves/sticky-menu.js"></script>
-    <script type="module" src="/elves/private-ai.js"></script>
-    <script type="module" src="/elves/title-page.js"></script>
-    <script type="module" src="/elves/hypertext-action.js"></script>
-    <script type="module" src="/elves/hypertext-address.js"></script>
-    <script type="module" src="/elves/hypertext-blankline.js"></script>
-    <script type="module" src="/elves/hypertext-comment.js"></script>
-    <script type="module" src="/elves/hypertext-effect.js"></script>
-    <script type="module" src="/elves/hypertext-highlighter.js"></script>
-    <script type="module" src="/elves/hypertext-parenthetical.js"></script>
-    <script type="module" src="/elves/hypertext-puppet.js"></script>
-    <script type="module" src="/elves/hypertext-quote.js"></script>
-    <script type="module" src="/elves/hypertext-variable.js"></script>
-<script type="module" src="/elves/project-manager.js"></script>
+    <script type="module">
+      const ELVES = {
+        'ur-shell':                '/elves/ur-shell.js',
+        'multi-task':              '/elves/multi-task.js',
+        'source-code':             '/elves/source-code.js',
+        'flip-book':               '/elves/flip-book.js',
+        'lore-baby':               '/elves/lore-baby.js',
+        'saga-pitch':              '/elves/saga-pitch.js',
+        'my-computer':             '/elves/my-computer.js',
+        'qr-code':                 '/elves/qr-code.js',
+        'private-ai':              '/elves/private-ai.js',
+        'title-page':              '/elves/title-page.js',
+        'project-manager':         '/elves/project-manager.js',
+        'blog-search':             '/elves/blog-search.js',
+        'paper-pocket':            '/elves/paper-pocket.js',
+        'plan98-wallet':           '/elves/plan98-wallet.js',
+        'plan98-modal':            '/elves/plan98-modal.js',
+        'plan98-panel':            '/elves/plan98-panel.js',
+        'plan98-toast':            '/elves/plan98-toast.js',
+        'hypertext-action':        '/elves/hypertext-action.js',
+        'hypertext-address':       '/elves/hypertext-address.js',
+        'hypertext-blankline':     '/elves/hypertext-blankline.js',
+        'hypertext-comment':       '/elves/hypertext-comment.js',
+        'hypertext-effect':        '/elves/hypertext-effect.js',
+        'hypertext-highlighter':   '/elves/hypertext-highlighter.js',
+        'hypertext-parenthetical': '/elves/hypertext-parenthetical.js',
+        'hypertext-puppet':        '/elves/hypertext-puppet.js',
+        'hypertext-quote':         '/elves/hypertext-quote.js',
+        'hypertext-variable':      '/elves/hypertext-variable.js',
+      }
+
+      const loading = new Set()
+
+      function maybeLoad(el) {
+        const tag = el.localName
+        if (!tag.includes('-')) return
+        if (customElements.get(tag) || loading.has(tag) || !ELVES[tag]) return
+        loading.add(tag)
+        import(ELVES[tag])
+      }
+
+      new MutationObserver(mutations => {
+        for (const m of mutations)
+          for (const node of m.addedNodes) {
+            if (node.nodeType !== 1) continue
+            maybeLoad(node)
+            node.querySelectorAll('*').forEach(maybeLoad)
+          }
+      }).observe(document, { subtree: true, childList: true })
+
+      document.querySelectorAll('*').forEach(maybeLoad)
+    </script>
   </head>
   <script>document.write(`<body pathname="${window.location.pathname}">`)</script>
     <main id="main">
