@@ -1,4 +1,6 @@
 // plan1 app server — serves dist/, handles /app/<tag> routing
+import { serveDir } from 'jsr:@std/http/file-server';
+
 const DIST = new URL('./dist/', import.meta.url).pathname;
 const PORT = Number(Deno.env.get('PLAN1_PORT') ?? 1998);
 
@@ -82,34 +84,6 @@ try {
   Deno.exit(1);
 }
 
-const TYPES = {
-  html: 'text/html; charset=utf-8',
-  js: 'text/javascript',
-  mjs: 'text/javascript',
-  cjs: 'text/javascript',
-  css: 'text/css',
-  json: 'application/json',
-  svg: 'image/svg+xml',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  ico: 'image/x-icon',
-  woff: 'font/woff',
-  woff2: 'font/woff2',
-  ttf: 'font/ttf',
-  mp3: 'audio/mpeg',
-  mp4: 'video/mp4',
-  webm: 'video/webm',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  saga: 'text/plain',
-};
-
-function mimeType(path) {
-  const ext = path.split('.').pop()?.toLowerCase() ?? '';
-  return TYPES[ext] ?? 'application/octet-stream';
-}
 
 function injectApp(tag, attrs = '') {
   return baseHTML.replace(
@@ -118,11 +92,67 @@ function injectApp(tag, attrs = '') {
   );
 }
 
+async function adminPage(requestUrl) {
+  const passphrase = safeEnv('PLAN1_PASSPHRASE');
+  if (!passphrase) return new Response(
+    'set PLAN1_PASSPHRASE in .env to enable /admin/',
+    { status: 503, headers: { 'content-type': 'text/plain' } }
+  );
+
+  const { default: CryptoJS } = await import('npm:crypto-js');
+  const { default: QRCode }   = await import('npm:qrcode');
+
+  const wasHost = safeEnv('PLAN98_WAS_HOST', 'http://localhost:1088');
+  const payload = {
+    jsonrpc: '2.0',
+    method: 'import-keycard',
+    params: {
+      type: 'keycard',
+      keycard: {
+        id: _spaceId,
+        title: 'Memex',
+        src: '/app/time-machine',
+        asJSON: JSON.parse(_signerJson),
+        host: wasHost,
+      }
+    }
+  };
+
+  const encrypted = CryptoJS.AES.encrypt(btoa(JSON.stringify(payload)), passphrase).toString();
+  const keycardUrl = `${requestUrl.origin}/app/plan98-wallet?data=${encodeURIComponent(encrypted)}`;
+  const svg = await QRCode.toString(keycardUrl, { type: 'svg', margin: 2 });
+
+  return new Response(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>plan1 / admin</title>
+  <style>
+    body { margin: 0; min-height: 100dvh; display: flex; flex-direction: column;
+           align-items: center; justify-content: center; font-family: 'BerkeleyMono', monospace;
+           background: lemonchiffon; gap: 1rem; }
+    h1 { font-size: 1rem; margin: 0; }
+    .qr { width: min(80vmin, 360px); height: min(80vmin, 360px); }
+    .qr svg { width: 100%; height: 100%; }
+    p { font-size: .75rem; opacity: .5; margin: 0; }
+  </style>
+</head>
+<body>
+  <h1>scan to import keycard</h1>
+  <div class="qr">${svg}</div>
+  <p>requires PLAN1_PASSPHRASE on the receiving device</p>
+</body>
+</html>`, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+}
+
 Deno.serve({ port: PORT }, async (request) => {
   const url = new URL(request.url);
   let path = decodeURIComponent(url.pathname);
 
   if (path === '/') path = '/index.html';
+
+  if (path === '/admin' || path === '/admin/') return adminPage(url);
 
   if (path.startsWith('/app/')) {
     const tag = path.split('/app/')[1].split('/')[0];
@@ -135,20 +165,24 @@ Deno.serve({ port: PORT }, async (request) => {
     });
   }
 
-  try {
-    const file = await Deno.open(DIST + path.slice(1), { read: true });
-    const ct = mimeType(path);
-    if (ct === 'text/html; charset=utf-8') {
-      const text = await Deno.readTextFile(DIST + path.slice(1));
-      return new Response(injectEnv(text), { headers: { 'content-type': ct } });
-    }
-    return new Response(file.readable, { headers: { 'content-type': ct } });
-  } catch {
+  const res = await serveDir(request, { fsRoot: DIST, quiet: true });
+
+  if (res.status === 404) {
     return new Response(injectEnv(baseHTML), {
       status: 200,
       headers: { 'content-type': 'text/html; charset=utf-8' },
     });
   }
+
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct.includes('text/html')) {
+    const text = await res.text();
+    const headers = new Headers(res.headers);
+    headers.delete('content-length'); // length changes after env injection
+    return new Response(injectEnv(text), { status: res.status, headers });
+  }
+
+  return res;
 });
 
 console.log(`serving dist/ on http://localhost:${PORT}`);
