@@ -580,7 +580,7 @@ $.style(`
 
   & .darkroom { display: none; position: absolute; inset: 0; background: rgba(29,32,33,.97); z-index: 100; overflow: hidden; align-items: center; justify-content: center; }
   & .darkroom.open { display: flex; }
-  & .dr-canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; image-rendering: pixelated; cursor: zoom-in; }
+  & .dr-canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; cursor: zoom-in; }
   & .dr-canvas.zoomed { cursor: zoom-out; transform: scale(var(--dr-zoom, 1)); }
   & .dr-controls { position: absolute; bottom: 1.5rem; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: .75rem; transition: opacity .4s; white-space: nowrap; }
   & .dr-controls.fade { opacity: 0; pointer-events: none; }
@@ -1519,24 +1519,32 @@ function drawStroke(context, stroke) {
     return
   }
   if (!stroke || stroke.length < 2) return
-  context.beginPath()
-  context.moveTo(stroke[0].x, stroke[0].y)
+
+  // Each segment gets its own path so lineWidth varies per point, not whole-stroke.
+  // Midpoint chaining is preserved so the curve stays smooth at segment joins.
+  let curX = stroke[0].x, curY = stroke[0].y
   for (let i = 1; i < stroke.length; i++) {
     const point = stroke[i]
+    const endX = i < stroke.length - 1 ? (stroke[i].x + stroke[i+1].x) / 2 : stroke[i].x
+    const endY = i < stroke.length - 1 ? (stroke[i].y + stroke[i+1].y) / 2 : stroke[i].y
+
+    context.beginPath()
+    context.moveTo(curX, curY)
     context.globalCompositeOperation = point.erase ? 'destination-out' : 'source-over'
     context.strokeStyle = point.erase ? 'rgba(0,0,0,1)' : (point.color || '#ebdbb2')
     context.lineCap = 'round'; context.lineJoin = 'round'
     context.globalAlpha = point.opacity ?? 1
     context.lineWidth = point.lineWidth || 8
     if (i < stroke.length - 1) {
-      const xc = (stroke[i].x + stroke[i+1].x) / 2
-      const yc = (stroke[i].y + stroke[i+1].y) / 2
-      context.quadraticCurveTo(point.x, point.y, xc, yc)
+      context.quadraticCurveTo(point.x, point.y, endX, endY)
     } else {
-      context.lineTo(point.x, point.y)
+      context.lineTo(endX, endY)
     }
+    context.stroke()
+
+    curX = endX; curY = endY
   }
-  context.stroke()
+
   context.globalAlpha = 1
   context.globalCompositeOperation = 'source-over'
 }
