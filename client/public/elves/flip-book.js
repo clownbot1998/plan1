@@ -180,6 +180,7 @@ function violinGameLoop() {
       const pressed = checkButton(0, btn)
       if (pressed && !_vHeld[note]) {
         attack(note, violinVelocity(note))
+        $.whisper({ status: `♩ ${_midiName(note)}` })
         _vHeld[note] = true
       } else if (!pressed && _vHeld[note]) {
         release(note)
@@ -742,6 +743,8 @@ function boot(target) {
 
   // ── local viewport position — never shared ──
   target._localCurrent  = 0
+  const { frames: _f } = $.learn()
+  $.whisper({ status: `frame 1 / ${_f.length}` })
 
   // ── per-instance draw state (avoids module-level globals) ──
   target._drawing       = false
@@ -1070,6 +1073,7 @@ function gotoFrame(target, idx) {
   const { frames } = $.learn()
   target._localCurrent = Math.max(0, Math.min(frames.length - 1, idx))
   teachPlayer({ frameId: frames[target._localCurrent] })
+  $.whisper({ status: `frame ${target._localCurrent + 1} / ${frames.length}` })
   loadCurrentFrame(target)
   renderOnion(target)
   renderReel(target)
