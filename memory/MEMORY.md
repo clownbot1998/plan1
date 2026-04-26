@@ -8,3 +8,4 @@
 - [plan1 architecture april 2026](project_plan1_architecture.md) — elf list, build system, font fix, file-manifest, pending: blog search + saga viewer
 - [font root cause pattern](feedback_font_root_cause.md) — global documentElement.style from elves silently wins; check paper-pocket-style localStorage defaults first
 - [the clown's clown — tychi as physical agent](user_clowns_clown.md) — producer/top clown; three modes: Script (write), Sketch (draw), Screen (stage); iterates fast
+- [elf scroll and layout pattern](feedback_elf_css_scroll.md) — height:100% overflow-y:auto on tag; overflow:auto on wide-content cards; check narrow viewport before committing
