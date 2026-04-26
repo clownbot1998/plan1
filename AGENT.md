@@ -38,6 +38,17 @@ Font: Recursive variable font. All five axes: MONO, CASL, wght, slnt, CRSV.
 
 Blog posts open as iframes inside my-computer — the shell doesn't move.
 
+## adding a new elf
+
+1. Create `client/public/elves/<tag-name>.js` — the filename must match the custom element tag.
+2. Register it in `client/public/index.html` in the `ELVES` object (alphabetical order by tag):
+   ```js
+   'my-tag-name': '/elves/my-tag-name.js',
+   ```
+   Without this entry the element is never lazy-loaded and nothing renders.
+3. Run `./plan1.sh build` — the elf appears in `file-manifest.json` and `search-manifest.json`.
+4. Visit `/app/<tag-name>` to test (server mounts `<tag-name>` into `<main>`).
+
 ## user preferences
 
 - Tools: git, vim, tmux, vanilla JS
