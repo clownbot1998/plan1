@@ -1,4 +1,5 @@
 import { Self, Saga, Activities } from '@plan98/types'
+import './lrud-elf.js'
 import { innerHTML } from 'diffhtml'
 import lunr from 'lunr'
 import natsort from 'natsort'
@@ -640,7 +641,36 @@ document.addEventListener('wheel', (event) => {
   suggestionsEl.scrollTop += ramped
 }, { passive: false })
 
+window.addEventListener('lrud:press', e => {
+  const { button } = e.detail
+  const { suggestionsLength, suggestIndex, showSuggestions, suggestions } = $.model()
 
+  if (!showSuggestions || !suggestionsLength) return
+
+  if (button === 'down') {
+    const next = suggestIndex === null ? 0 : suggestIndex + 1
+    if (next < suggestionsLength) $.controller({ suggestIndex: next })
+    return
+  }
+
+  if (button === 'up') {
+    const next = suggestIndex === null ? suggestionsLength - 1 : suggestIndex - 1
+    if (next >= 0) $.controller({ suggestIndex: next })
+    return
+  }
+
+  if (button === 'a' && suggestIndex !== null) {
+    const item = documents.find(y => suggestions[suggestIndex]?.ref === y.path)
+    if (!item) return
+    const root = document.querySelector($.link)
+    fetch(item.path).then(async res => {
+      const file = await res.text()
+      $.controller({ src: item.path, [item.path]: { file, src: item.path } })
+      insert(root, file)
+    })
+    $.controller({ src: item.path, data: null, edit: true, showSuggestions: false })
+  }
+})
 
 $.skin(`
   @media print {

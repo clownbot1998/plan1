@@ -175,7 +175,7 @@ Deno.serve({ port: PORT }, async (request) => {
   }
 
   const ct = res.headers.get('content-type') ?? '';
-  if (ct.includes('text/html')) {
+  if (ct.includes('text/html') && res.status !== 304 && res.status !== 204) {
     const text = await res.text();
     const headers = new Headers(res.headers);
     headers.delete('content-length'); // length changes after env injection

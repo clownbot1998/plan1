@@ -254,6 +254,11 @@ Move right or "A"ffirm to continue.
 
 const character = getCharacter()
 
+const inIframe = window.self !== window.top
+const effectiveMenu = inIframe
+  ? { sticky: { label: 'Sticky Menu', list: [{ label: 'Quit', sticky: true }] }, ...systemMenu }
+  : systemMenu
+
 const $ = elf('paper-pocket', {
   fullScreen: getScreenPreference(),
   character,
@@ -268,7 +273,7 @@ const $ = elf('paper-pocket', {
   mode: startMode(),
   backMode: startMode(),
   settingsKey: 'instrument',
-  pauseKey: 'apps',
+  pauseKey: inIframe ? 'sticky' : 'apps',
   pauseIndex: 0,
   tutorialIndex: 0,
   tutorial: Object.keys(tutorialModes),
@@ -328,7 +333,7 @@ const $ = elf('paper-pocket', {
       value: 'inverted',
     },
   },
-  pause: systemMenu
+  pause: effectiveMenu
 })
 
 elfCursor(elves[character])
@@ -785,9 +790,9 @@ export function renderPauseMenu(menu, pauseIndex, pauseKey) {
   const { list, label } = menu[pauseKey]
 
   const items = list.map((item, i) => {
-    const { label, mode, url, rom } = item
+    const { label, mode, url, rom, sticky } = item
     return `
-      <button ${url ? `data-href="${url}"` : ''} ${rom ? `data-rom="${rom}"` : ''} ${mode ? `data-mode="${mode}"`:''} data-index="${i}" class="menu-link ${pauseIndex === i ? 'active':''}">
+      <button ${url ? `data-href="${url}"` : ''} ${rom ? `data-rom="${rom}"` : ''} ${mode ? `data-mode="${mode}"` : ''} ${sticky ? 'data-sticky-done' : ''} data-index="${i}" class="menu-link ${pauseIndex === i ? 'active':''}">
         ${label}
       </button>
     `
@@ -1422,7 +1427,13 @@ function triggerModeEffects(mode) {
 function launchItem(event) {
   const { pauseKey, pause, pauseIndex } = $.learn()
   const { list } = pause[pauseKey]
-  const { url, mode, rom } = list[pauseIndex]
+  const { url, mode, rom, sticky } = list[pauseIndex]
+
+  if(sticky) {
+    window.parent.dispatchEvent(new CustomEvent('sticky-menu:done'))
+    window.parent.postMessage({ type: 'sticky-menu:done' }, '*')
+    return
+  }
 
   if(rom) {
     $.teach({ rom, mode: modes.game, pauseIndex })
@@ -1449,6 +1460,12 @@ function launchItem(event) {
 
 $.when('click', '.menu-link', (event) => {
   const { href, mode, index, rom } = event.target.dataset
+
+  if ('stickyDone' in event.target.dataset) {
+    window.parent.dispatchEvent(new CustomEvent('sticky-menu:done'))
+    window.parent.postMessage({ type: 'sticky-menu:done' }, '*')
+    return
+  }
 
   const pauseIndex = parseInt(index)
 

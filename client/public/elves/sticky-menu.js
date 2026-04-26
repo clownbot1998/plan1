@@ -1,4 +1,5 @@
 import elf from '@plan98/elf'
+import './lrud-elf.js'
 
 const SECTIONS = {
   script: {
@@ -26,32 +27,84 @@ const SECTIONS = {
   },
 }
 
+const AXIS_RANGES = [
+  ['MONO', 0, 1],
+  ['CASL', 0, 1],
+  ['wght', 300, 1000],
+  ['slnt', -15, 0],
+  ['CRSV', 0, 1],
+]
+
+function randomAxes() {
+  const result = {}
+  for (const [name, min, max] of AXIS_RANGES) {
+    result[name] = min + Math.random() * (max - min)
+  }
+  return result
+}
+
+function allAxes() {
+  const result = {}
+  for (const key of Object.keys(SECTIONS)) result[key] = randomAxes()
+  return result
+}
+
+function fvs(ax) {
+  return `'MONO' ${ax.MONO.toFixed(3)}, 'CASL' ${ax.CASL.toFixed(3)}, 'wght' ${ax.wght.toFixed(0)}, 'slnt' ${ax.slnt.toFixed(2)}, 'CRSV' ${ax.CRSV.toFixed(3)}`
+}
+
+// flat list of navigable items for current menu state
+function navList(activeTab) {
+  const items = []
+  for (const [key, s] of Object.entries(SECTIONS)) {
+    items.push({ type: 'tab', key })
+    if (activeTab === key) {
+      s.apps.forEach((app, i) => items.push({ type: 'app', key, appIndex: i, href: app.href }))
+    }
+  }
+  return items
+}
+
 const $ = elf('sticky-menu', {
   activeTab: null,
   route: null,
+  axes: allAxes(),
+  cursor: 0,
 })
 
+setInterval(() => $.teach({ axes: allAxes() }), 5000)
+
 $.draw(target => {
-  const { activeTab } = $.learn()
+  const { activeTab, cursor, axes, route } = $.learn()
+  const list = navList(activeTab)
 
   const sections = Object.entries(SECTIONS).map(([key, s]) => {
-    const isActive = activeTab === key
-    const appLinks = isActive
-      ? s.apps.map(app =>
-          `<div class="app-row"><a class="app-link" href="${app.href}" data-launch="${app.href}">${app.label}</a></div>`
-        ).join('')
+    const tabIdx = list.findIndex(n => n.type === 'tab' && n.key === key)
+    const isOpen = activeTab === key
+    const ax = axes?.[key] ?? { MONO: 0, CASL: 0, wght: 700, slnt: 0, CRSV: 0 }
+
+    const appLinks = isOpen
+      ? s.apps.map((app, i) => {
+          const appIdx = list.findIndex(n => n.type === 'app' && n.key === key && n.appIndex === i)
+          const hot = cursor === appIdx
+          return `<div class="app-row${hot ? ' gp-cursor' : ''}">
+            <a class="app-link" href="${app.href}" data-launch="${app.href}">${app.label}</a>
+          </div>`
+        }).join('')
       : ''
 
     return `
       <div class="section">
-        <a class="section-head" href="#" data-tab="${key}">${s.label}</a>
+        <a class="section-head${cursor === tabIdx ? ' gp-cursor' : ''}"
+           style="font-variation-settings: ${fvs(ax)};"
+           href="#" data-tab="${key}">${s.label}</a>
         ${appLinks}
       </div>
     `
   }).join('')
 
   return `
-    <div class="sticky" data-dom="iframe"></div>
+    <div class="sticky" data-dom="iframe">${route ? `<iframe src="${route}"></iframe>` : ''}</div>
     <div class="menu">
       <div style="max-width: 70ch; margin: 0 auto;">
         ${sections}
@@ -63,16 +116,6 @@ $.draw(target => {
     const { route } = $.learn()
     if (route) target.dataset.route = route
     else delete target.dataset.route
-  },
-  afterUpdate(target) {
-    const { route } = $.learn()
-    const sticky = target.querySelector('[data-dom="iframe"]')
-    if (sticky && target.currentRoute !== route) {
-      target.currentRoute = route
-      sticky.innerHTML = route
-        ? `<iframe src="${route}"></iframe>`
-        : ''
-    }
   }
 })
 
@@ -80,13 +123,20 @@ $.when('click', '[data-tab]', event => {
   event.preventDefault()
   const tab = event.target.closest('[data-tab]').dataset.tab
   const { activeTab } = $.learn()
-  $.teach({ activeTab: activeTab === tab ? null : tab })
+  const newActive = activeTab === tab ? null : tab
+  const newList = navList(newActive)
+  const cursor = newList.findIndex(n => n.type === 'tab' && n.key === tab)
+  $.teach({ activeTab: newActive, cursor })
 })
 
 $.when('click', '[data-launch]', event => {
   event.preventDefault()
-  const route = event.target.closest('[data-launch]').dataset.launch
-  $.teach({ route })
+  const el = event.target.closest('[data-launch]')
+  const route = el.dataset.launch
+  const { activeTab } = $.learn()
+  const list = navList(activeTab)
+  const cursor = list.findIndex(n => n.type === 'app' && n.href === route)
+  $.teach({ route, cursor: cursor >= 0 ? cursor : $.learn().cursor })
   history.pushState({ type: 'sticky-menu-navigation', route }, '', route)
 })
 
@@ -97,8 +147,68 @@ addEventListener('popstate', event => {
   }
 })
 
-// seed history so back from first app returns here
 history.replaceState({ type: 'sticky-menu-navigation', route: null }, '', location.href)
+
+// iframe signals it's done — rotate focus back to sticky-menu
+function onStickyDone() {
+  $.teach({ route: null })
+  history.pushState({ type: 'sticky-menu-navigation', route: null }, '', '/')
+}
+
+window.addEventListener('sticky-menu:done', onStickyDone)
+window.addEventListener('message', e => {
+  if (e.data?.type === 'sticky-menu:done') onStickyDone()
+})
+
+// gamepad / keyboard navigation via lrud-elf
+window.addEventListener('lrud:press', e => {
+  const { route, activeTab, cursor } = $.learn()
+  if (route) return  // iframe is showing, menu is hidden — don't navigate
+
+  const { button } = e.detail
+  const list = navList(activeTab)
+
+  if (button === 'up') {
+    $.teach({ cursor: Math.max(0, cursor - 1) })
+    return
+  }
+
+  if (button === 'down') {
+    $.teach({ cursor: Math.min(list.length - 1, cursor + 1) })
+    return
+  }
+
+  if (button === 'b') {
+    if (!activeTab) return
+    const tabIdx = Object.keys(SECTIONS).indexOf(activeTab)
+    $.teach({ activeTab: null, cursor: tabIdx })
+    return
+  }
+
+  if (button === 'a') {
+    const item = list[cursor]
+    if (!item) return
+
+    if (item.type === 'tab') {
+      const isOpen = activeTab === item.key
+      const newActive = isOpen ? null : item.key
+      const newList = navList(newActive)
+      if (isOpen) {
+        const tabIdx = newList.findIndex(n => n.type === 'tab' && n.key === item.key)
+        $.teach({ activeTab: newActive, cursor: tabIdx })
+      } else {
+        const firstApp = newList.findIndex(n => n.type === 'app' && n.key === item.key)
+        $.teach({ activeTab: newActive, cursor: firstApp >= 0 ? firstApp : cursor })
+      }
+      return
+    }
+
+    if (item.type === 'app') {
+      $.teach({ route: item.href })
+      history.pushState({ type: 'sticky-menu-navigation', route: item.href }, '', item.href)
+    }
+  }
+})
 
 $.style(`
   & {
@@ -163,24 +273,35 @@ $.style(`
   & .section-head {
     display: inline-block;
     font-size: 2rem;
-    --v-font-wght: 700;
-    --v-font-casl: 0;
-    --v-font-mono: 0;
-    --v-font-slnt: 0;
-    --v-font-crsv: 0;
-    font-variation-settings: "MONO" var(--v-font-mono), "CASL" var(--v-font-casl), "wght" var(--v-font-wght), "slnt" var(--v-font-slnt), "CRSV" var(--v-font-crsv);
     line-height: 1;
-    margin: 2rem 0 0.25rem;
+    margin: 0 0 0.25rem;
+    padding: 1rem;
+    border-radius: 4px;
+    transition: font-variation-settings 5000ms linear;
+  }
+
+  & .section-head.gp-cursor {
+    background: dodgerblue;
+    color: lemonchiffon;
   }
 
   & .app-row {
     margin: 0;
+    padding-left: 1rem;
+  }
+
+  & .app-row.gp-cursor .app-link {
+    background: dodgerblue;
+    color: lemonchiffon;
   }
 
   & .app-link {
     font-size: 1rem;
     font-weight: 400;
     line-height: 1.6;
+    padding: 0.5rem;
+    border-radius: 2px;
+    display: inline-block;
   }
 
   &[data-route] .sticky {

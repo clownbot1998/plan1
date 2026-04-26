@@ -32,16 +32,14 @@ marked.setOptions({
 });
 
 
-const defaultPath = {}
-const paperPocketPath = Object.keys(sideEffects)
-  .filter(key => {
-    return $paperPocket.learn().settings[key]
-  }).reduce((path, key) => {
-    path[key] = sideEffects[key]
-    return path
-  }, defaultPath)
-
 const paperPocketHelp = () => {
+  const paperPocketPath = Object.keys(sideEffects)
+    .filter(key => $paperPocket.learn().settings[key])
+    .reduce((path, key) => {
+      path[key] = sideEffects[key]
+      return path
+    }, {})
+
   return Object.keys(paperPocketPath).map(key => {
   const { label, description, options, value: _value } = $paperPocket.learn().settings[key]
   const value = $paperPocket.learn()[key]
