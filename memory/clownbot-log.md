@@ -12,6 +12,7 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 | `FACADE00-F00D-CAFE-BABE-BADC0FFEE000` | 2026-04-26 | flip-book deep dive: circular dep TDZ, module globals to target state, tiniest violin, v-log keyboard music via debug-gamepads, compass play, paper-pocket resilience, dial-tone port. the circus plays now. |
 | `DEADBABE-C0DE-CAFE-F00D-B00BFACE0001` | 2026-04-26 | status bar (1rem, whisper-only), clear frame, arrow key/violin conflict fix, dial-tone meander label. the status bar says the circus plays. |
 | `0LEDFACE-CAFE-BABE-DEAD-C0FFEE000001` | 2026-04-26 | flip-book gallery (IndexedDB 3-level cache), lazy video frames, IntersectionObserver reel, buffer-before-play, darkroom OLED black + audio, audio WAV persistence across reloads. the gallery remembers. |
+| `F00DCAFE-BABE-C0DE-DEAD-BEEFF00D0002` | 2026-04-26 | ffmpeg.wasm mp4 export, vendor.js esmshFallback, COOP/COEP isolation, rAF playback loop, IDB timeout safety. the export went. |
 
 ---
 
