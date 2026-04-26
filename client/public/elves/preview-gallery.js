@@ -34,7 +34,7 @@ $.draw(target => {
 
   const list = items ?? []
 
-  const { darkroom } = $.learn()
+  const { darkroom, refreshing, refreshLog = [], thumbBust = {} } = $.learn()
 
   if (darkroom) return `
     <div class="darkroom">
@@ -50,7 +50,8 @@ $.draw(target => {
         <label class="field"><input class="inp" name="id" placeholder="item-id" value="${$.learn().draftId ?? ''}" /></label>
         <label class="field"><input class="inp" name="url" placeholder="/app/dial-tone" value="${$.learn().draftUrl ?? ''}" /></label>
         ${list.map(item => {
-          const src = screenshotUrl(galleryId, item.id)
+          const bust = thumbBust[item.id] ? `?t=${thumbBust[item.id]}` : ''
+          const src = screenshotUrl(galleryId, item.id) + bust
           return `
           <div class="row-actions">
             <button class="admin-thumb" data-src="${src}" title="${item.id}">
@@ -67,6 +68,10 @@ $.draw(target => {
         `}).join('')}
       </form>
       ${saved ? `<div class="msg ok">saved.</div>` : ''}
+      <button class="refresh-btn" data-gallery="${galleryId}" ${refreshing ? 'disabled' : ''}>
+        ${refreshing ? 'refreshing…' : 'refresh screenshots'}
+      </button>
+      ${refreshLog.length ? `<pre class="refresh-log">${refreshLog.join('\n')}</pre>` : ''}
     </div>
   `
 
@@ -161,6 +166,34 @@ $.when('click', '[data-remove]', async event => {
 $.when('click', '[data-dup-id]', event => {
   const { dupId, dupUrl } = event.target.dataset
   $.teach({ draftId: dupId + '-copy', draftUrl: dupUrl })
+})
+
+$.when('click', '.refresh-btn', async event => {
+  const galleryId = event.target.dataset.gallery
+  if (!galleryId) return
+  $.teach({ refreshing: true, refreshLog: [] })
+  try {
+    const res = await fetch(`/preview-gallery/${galleryId}/refresh`)
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += value
+      const chunks = buf.split('\n\n')
+      buf = chunks.pop() ?? ''
+      for (const chunk of chunks) {
+        const m = chunk.match(/^data: (.+)$/m)
+        if (!m) continue
+        const line = JSON.parse(m[1])
+        if (line === 'done') break
+        const { thumbBust: bust = {}, refreshLog: log = [] } = $.learn()
+        const ok = line.match(/^OK\s+(\S+)/)
+        $.teach({ thumbBust: ok ? { ...bust, [ok[1]]: Date.now() } : bust, refreshLog: [...log, line] })
+      }
+    }
+  } catch { /* silent */ }
+  $.teach({ refreshing: false })
 })
 
 $.when('click', '.thumb, .admin-thumb', event => {
@@ -323,4 +356,29 @@ $.style(`
   & .msg.error { color: #f66; }
   & .msg.ok { color: #6f6; }
   & .field { margin: 0; }
+  & .refresh-btn {
+    background: #1a1a2e;
+    color: #88aaff;
+    border: 1px solid #334;
+    padding: .3rem .7rem;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: .8rem;
+    align-self: flex-start;
+  }
+  & .refresh-btn:hover:not(:disabled) { background: #222244; }
+  & .refresh-btn:disabled { opacity: .5; cursor: default; }
+  & .refresh-log {
+    font-size: .75rem;
+    color: #888;
+    background: #0a0a0a;
+    border: 1px solid #222;
+    padding: .5rem .75rem;
+    margin: 0;
+    max-height: 12rem;
+    overflow-y: auto;
+    font-family: inherit;
+    font-variation-settings: "MONO" 1;
+    white-space: pre-wrap;
+  }
 `)
