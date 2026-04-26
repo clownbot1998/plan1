@@ -159,7 +159,23 @@ async function adminPage(requestUrl) {
 </html>`, { headers: { 'content-type': 'text/html; charset=utf-8' } });
 }
 
+const ISOLATION_HEADERS = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'credentialless',
+};
+
+function addIsolation(res) {
+  const h = new Headers(res.headers);
+  for (const [k, v] of Object.entries(ISOLATION_HEADERS)) h.set(k, v);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
+
 Deno.serve({ port: PORT }, async (request) => {
+  const res = await handleRequest(request);
+  return addIsolation(res);
+});
+
+async function handleRequest(request) {
   const url = new URL(request.url);
   let path = decodeURIComponent(url.pathname);
 
@@ -219,7 +235,7 @@ Deno.serve({ port: PORT }, async (request) => {
   }
 
   return res;
-});
+}
 
 console.log(`serving dist/ on http://localhost:${PORT}`);
 console.log(`open http://localhost:${PORT}/app/private-ai`);
