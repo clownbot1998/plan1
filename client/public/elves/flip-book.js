@@ -34,8 +34,44 @@ import './plan98-palette.js'
 import { attack, release, setInstrument } from './paper-pocket.js'
 import { checkButton } from './debug-gamepads.js'
 import cache from '@silly/cache'
+import { get as wasGet, put as wasPut, del as wasDel } from './plan98-wallet.js'
 
 const fbCache = cache('flip-book')
+
+// WAS canvas path for a given flip-book id — only for path-like ids (start with /)
+function wasCanvasPath(id) {
+  return id?.startsWith('/') ? `${id}.flip-book.json` : null
+}
+
+async function loadFromWas(target) {
+  const p = wasCanvasPath(target.id)
+  if (!p) return
+  try {
+    const blob = await wasGet(p)
+    if (!blob) return
+    const text = await blob.text()
+    const state = JSON.parse(text)
+    if (state?.frames?.length && state?.frameStrokes) {
+      $.teach(state)
+    }
+  } catch { /* WAS miss or offline — start fresh */ }
+}
+
+let _wasSaveTimer = null
+function scheduleWasSave(id) {
+  const p = wasCanvasPath(id)
+  if (!p) return
+  clearTimeout(_wasSaveTimer)
+  _wasSaveTimer = setTimeout(async () => {
+    try {
+      const { frames, frameStrokes, canvasW, canvasH } = $.learn()
+      const json = JSON.stringify({ frames, frameStrokes, canvasW, canvasH })
+      // WAS is immutable — delete existing version before re-writing
+      await wasDel(p).catch(() => null)
+      await wasPut(p, json, { type: 'application/json' })
+    } catch { /* best-effort */ }
+  }, 1500)
+}
 
 const tag = 'flip-book'
 const playerId = self.crypto.randomUUID()
@@ -880,6 +916,9 @@ function boot(target) {
 
   // Watch for remote frame/stroke changes
   watchSharedState(target)
+
+  // load persisted canvas from WAS if id is a path (e.g. /circus/tent)
+  loadFromWas(target)
 
   // restore session audio (fire-and-forget — audio is a nice-to-have, not blocking)
   fbCache.get(SESSION_AUDIO_KEY).then(record => {
@@ -1912,7 +1951,7 @@ function attachDrawEvents(target) {
       db[frameId].drawCanvas.getContext('2d').drawImage(target._drawCanvas,0,0)
       const fs=$.learn().frameStrokes
       $.teach({frameStrokes:{...fs,[frameId]:[...(fs[frameId]||[]),[{x,y,fill:true,color:fillColor,lineWidth:0,opacity:1}]]}})
-      target._drawing=false; renderReel(target); return
+      target._drawing=false; renderReel(target); scheduleWasSave(target.id); return
     }
 
     const{thickness,opacity,color}=$.learn()
@@ -2010,6 +2049,7 @@ function attachDrawEvents(target) {
         }
       })
       renderReel(target)
+      scheduleWasSave(target.id)
     }
     target._points=[]
   })

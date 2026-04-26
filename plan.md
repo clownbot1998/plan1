@@ -58,6 +58,9 @@ elf-tools' read/write/delete actually hit storage.
 - [x] verify wallet decrypts and imports on receiving device
 - [x] WAS fallback in server.js — 404s check space before serving SPA shell
 - [x] bootstrap files seeded to WAS (server-side upload via Deno; browser upload investigated — silent failures, space still seeded)
+- [x] ./plan1.sh sync — uploads bootstrap to WAS after build
+- [x] 404 extensionless paths serve flip-book elf with id=path (canvas per URL)
+- [x] flip-book: load from WAS on boot if id is a path; save to WAS 1.5s after each stroke
 
 ---
 
@@ -66,9 +69,9 @@ elf-tools' read/write/delete actually hit storage.
 goal: skip unchanged files on rebuild using os.stat() mtime — same qjs environment,
 no new deps, just check before copy/write.
 
-- [ ] track mtime of source files via os.stat() before copyFile/writeFile
-- [ ] skip copy if dst exists and dst.mtime >= src.mtime
-- [ ] skip blog post render if src .md mtime hasn't changed since last dist write
+- [x] track mtime of source files via os.stat() before copyFile/writeFile
+- [x] skip copy if dst exists and dst.mtime >= src.mtime
+- [x] skip blog post render if src .md mtime hasn't changed since last dist write
 - [ ] skip manifest writes if no source files changed (compare aggregate mtime)
 - [ ] measure: baseline full rebuild time vs incremental on no-change run
 

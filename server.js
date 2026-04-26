@@ -211,6 +211,15 @@ async function handleRequest(request) {
         console.error('WAS fallback error:', e.message);
       }
     }
+    // extensionless unknown path → 404 canvas (flip-book seeded by URL)
+    const hasExt = path.includes('.', path.lastIndexOf('/') + 1);
+    if (!hasExt && path !== '/') {
+      const html = await getBaseHTML();
+      return new Response(injectEnv(injectApp(html, 'flip-book', ` id="${path}"`)), {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    }
     return new Response(injectEnv(await getBaseHTML()), {
       status: 200,
       headers: { 'content-type': 'text/html; charset=utf-8' },

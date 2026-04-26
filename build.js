@@ -32,6 +32,11 @@ function isDir(p) {
   return err === 0 && (st.mode & 0o170000) === 0o040000
 }
 
+function mtime(p) {
+  const [st, err] = os.stat(p)
+  return err === 0 ? st.mtime : 0
+}
+
 function writeFile(p, content) {
   mkdirp(dirname(p))
   const f = std.open(p, 'w')
@@ -48,6 +53,7 @@ const BINARY_EXTS = new Set([
 ])
 
 function copyFile(src, dst) {
+  if (mtime(dst) >= mtime(src)) return
   const ext = src.split('.').pop()?.toLowerCase() ?? ''
   if (BINARY_EXTS.has(ext)) {
     std.popen(`cp '${src}' '${dst}'`, 'r').close()
@@ -300,8 +306,11 @@ function fmtDate(d) {
 }
 
 // post pages
+let blogChanged = false
 for (const post of posts) {
   const outPath = join(OUT, post.slug, 'index.html')
+  if (mtime(outPath) >= post.mtime) continue
+  blogChanged = true
   writeFile(outPath, shell({
     title: post.title,
     content: `<article class="page">
@@ -313,23 +322,25 @@ ${mdToHtml(post.body)}
   print('write: blog/' + post.slug + '/')
 }
 
-// blog roll
-const roll = posts.map(p => {
-  const preview = p.body.split('\n').find(l => l.trim()) || ''
-  return `<div class="snippet">
+// blog roll — only rewrite if any post changed
+if (blogChanged) {
+  const roll = posts.map(p => {
+    const preview = p.body.split('\n').find(l => l.trim()) || ''
+    return `<div class="snippet">
   <h2><a class="post-link" href="/blog/${p.slug}/">${p.title}</a></h2>
   <p class="page-meta">${fmtDate(p.date)}</p>
   <p>${inline(preview.slice(0, 200))}${preview.length > 200 ? '…' : ''}</p>
   <p><a href="/blog/${p.slug}/">Read more</a></p>
 </div>`
-}).join('\n')
+  }).join('\n')
 
-writeFile(join(OUT, 'index.html'), shell({
-  title: 'Blog',
-  content: `<section class="wrapper"><div class="post-list">${roll}</div></section>`,
-  sidebar: buildSidebar(),
-}))
-print('write: blog/')
+  writeFile(join(OUT, 'index.html'), shell({
+    title: 'Blog',
+    content: `<section class="wrapper"><div class="post-list">${roll}</div></section>`,
+    sidebar: buildSidebar(),
+  }))
+  print('write: blog/')
+}
 
 // ── search manifest ───────────────────────────────────────────────────────────
 
