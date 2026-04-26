@@ -200,7 +200,7 @@ function rewriteHtml(file) {
 
   const updated = {}
   for (const [spec, url] of Object.entries(imports)) {
-    if (url.includes('esm.sh')) {
+    if (url.startsWith('https://')) {
       updated[spec] = vendorUrl(url)
     } else {
       updated[spec] = url

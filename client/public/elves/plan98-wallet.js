@@ -250,7 +250,7 @@ const methodHandlers = {
     })
 
     /*
-    await backupPlan98({ space, signer, cwd: '/public/elves' }).catch((e) => {
+    await backupPlan98({ space, signer, cwd: '/elves' }).catch((e) => {
       error = true
       reject(ERROR_P98_BACKUP_FAILED)
       console.error(e)
@@ -1132,7 +1132,7 @@ $.when('click', '[data-export]', (event) => {
 $.when('click', '[data-remix]', (event) => {
   showModal(`
     <div style="background: white; height: 100%; width: 100%; overflow: hidden;">
-      <was-code src="/public/elves/plan98-wallet.js"></was-code>
+      <was-code src="/elves/plan98-wallet.js"></was-code>
     </div>
   `, {
     blockExit: false
