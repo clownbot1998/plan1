@@ -52,8 +52,7 @@ async function loadFromWas(target) {
     const text = await blob.text()
     const state = JSON.parse(text)
     if (state?.frames?.length && state?.frameStrokes) {
-      $.teach(state)
-      // wire up lazy video loaders for any frames that had video persisted to WAS
+      // wire frames before $.teach so _hasCachedVideo is set before first render
       const wasBase = target.id
       const { canvasW, canvasH } = state
       const fhv = state.frameHasVideo || {}
@@ -62,6 +61,7 @@ async function loadFromWas(target) {
         f._hasCachedVideo = true
         f._wasVideoPath = `${wasBase}/frame-${frameId}.png`
       })
+      $.teach(state)
     }
   } catch { /* WAS miss or offline — start fresh */ }
 }
@@ -2709,6 +2709,7 @@ async function importVideo(target,file,fpsOverride){
   URL.revokeObjectURL(url);progress.classList.remove('active')
   target._localCurrent = replaceAll ? 0 : current + 1
   $.teach({frames:newFrames,frameStrokes:newStrokes,fps})
+  scheduleWasSave(target.id)
   loadCurrentFrame(target);renderOnion(target);renderReel(target)
   // extract audio track from video file
   try{
