@@ -37,6 +37,17 @@ function mtime(p) {
   return err === 0 ? st.mtime : 0
 }
 
+function dirMaxMtime(dir, skip = []) {
+  let max = 0
+  for (const f of readdir(dir)) {
+    if (skip.includes(f)) continue
+    const full = join(dir, f)
+    if (isDir(full)) { const m = dirMaxMtime(full, skip); if (m > max) max = m }
+    else { const m = mtime(full); if (m > max) max = m }
+  }
+  return max
+}
+
 function writeFile(p, content) {
   mkdirp(dirname(p))
   const f = std.open(p, 'w')
@@ -391,8 +402,19 @@ for (const f of readdir(PUB)) {
   }
 }
 
-writeFile(join(DIST, 'search-manifest.json'), JSON.stringify(docs))
-print('write: search-manifest.json (' + docs.length + ' docs)')
+const searchManifestPath = join(DIST, 'search-manifest.json')
+const searchSrcMtime = Math.max(
+  dirMaxMtime(join(PUB, 'elves')),
+  dirMaxMtime(join(PUB, 'cdn')),
+  dirMaxMtime(join(PUB, 'sagas')),
+  ...posts.map(p => p.mtime)
+)
+if (mtime(searchManifestPath) < searchSrcMtime) {
+  writeFile(searchManifestPath, JSON.stringify(docs))
+  print('write: search-manifest.json (' + docs.length + ' docs)')
+} else {
+  print('[cached] search-manifest.json')
+}
 
 // ── file manifest (full client walk) ─────────────────────────────────────────
 
@@ -413,8 +435,14 @@ function walkAll(dir, urlBase, files) {
 
 const fileManifest = []
 walkAll(PUB, '', fileManifest)
-writeFile(join(DIST, 'file-manifest.json'), JSON.stringify(fileManifest))
-print('write: file-manifest.json (' + fileManifest.length + ' files)')
+const fileManifestPath = join(DIST, 'file-manifest.json')
+const fileSrcMtime = dirMaxMtime(PUB, FILE_SKIP)
+if (mtime(fileManifestPath) < fileSrcMtime) {
+  writeFile(fileManifestPath, JSON.stringify(fileManifest))
+  print('write: file-manifest.json (' + fileManifest.length + ' files)')
+} else {
+  print('[cached] file-manifest.json')
+}
 
 // ── clownbot manifest ─────────────────────────────────────────────────────────
 
@@ -447,8 +475,14 @@ const clownbotManifest = {
   recentPosts,
 }
 
-writeFile(join(DIST, 'clownbot-manifest.json'), JSON.stringify(clownbotManifest))
-print('write: clownbot-manifest.json (' + memories.length + ' memories, ' + recentPosts.length + ' posts)')
+const clownbotManifestPath = join(DIST, 'clownbot-manifest.json')
+const clownbotSrcMtime = Math.max(dirMaxMtime(MEMORY), ...posts.slice(0, 10).map(p => p.mtime))
+if (mtime(clownbotManifestPath) < clownbotSrcMtime) {
+  writeFile(clownbotManifestPath, JSON.stringify(clownbotManifest))
+  print('write: clownbot-manifest.json (' + memories.length + ' memories, ' + recentPosts.length + ' posts)')
+} else {
+  print('[cached] clownbot-manifest.json')
+}
 
 // ── task manifest: collect all plan.md files into nested tree ──────────────────
 
@@ -549,16 +583,21 @@ function findAllPlanFiles(dir) {
 
 try {
   const allPlanFiles = findAllPlanFiles(CWD)
-  const planFiles = []
-  for (const p of allPlanFiles) {
-    print('parsing: ' + p)
-    planFiles.push(parsePlanFile(p, CWD))
+  const taskManifestPath = join(DIST, 'task-manifest.json')
+  const taskSrcMtime = allPlanFiles.reduce((max, p) => Math.max(max, mtime(p)), 0)
+  if (mtime(taskManifestPath) >= taskSrcMtime) {
+    print('[cached] task-manifest.json')
+  } else {
+    const planFiles = []
+    for (const p of allPlanFiles) {
+      print('parsing: ' + p)
+      planFiles.push(parsePlanFile(p, CWD))
+    }
+    print('found ' + planFiles.length + ' plan files')
+    const taskTree = buildTaskTree(planFiles)
+    writeFile(taskManifestPath, JSON.stringify(taskTree, null, 2))
+    print('write: task-manifest.json (' + taskTree.total + ' tasks)')
   }
-  print('found ' + planFiles.length + ' plan files')
-  
-  const taskTree = buildTaskTree(planFiles)
-  writeFile(join(DIST, 'task-manifest.json'), JSON.stringify(taskTree, null, 2))
-  print('write: task-manifest.json (' + taskTree.total + ' tasks)')
 } catch(e) {
   print('task manifest error: ' + e.message)
   print(e.stack)

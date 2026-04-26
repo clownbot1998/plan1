@@ -72,8 +72,8 @@ no new deps, just check before copy/write.
 - [x] track mtime of source files via os.stat() before copyFile/writeFile
 - [x] skip copy if dst exists and dst.mtime >= src.mtime
 - [x] skip blog post render if src .md mtime hasn't changed since last dist write
-- [ ] skip manifest writes if no source files changed (compare aggregate mtime)
-- [ ] measure: baseline full rebuild time vs incremental on no-change run
+- [x] skip manifest writes if no source files changed (compare aggregate mtime)
+- [x] measure: baseline full rebuild time vs incremental on no-change run (build.js: ~0.27s either way; vendor.js dominates total at ~4.7s)
 
 ---
 

@@ -34,6 +34,7 @@ function writeFile(p, content) {
 }
 
 function exists(p) { return os.stat(p)[1] === 0 }
+function mtime(p) { const [st, err] = os.stat(p); return err === 0 ? st.mtime : 0 }
 
 function readdir(p) {
   const [entries, err] = os.readdir(p)
@@ -67,7 +68,7 @@ function copyDir(src, dst) {
     const s = join(src, entry)
     const d = join(dst, entry)
     if (isDir(s)) copyDir(s, d)
-    else writeFile(d, readFile(s))
+    else if (mtime(d) < mtime(s)) writeFile(d, readFile(s))
   }
 }
 
