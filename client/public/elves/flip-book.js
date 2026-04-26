@@ -159,13 +159,16 @@ function _vDebounce(code, ms, cb) {
 function _vReleaseAll() {
   for (const n in _vHeld) { release(parseInt(n)); delete _vHeld[n] }
 }
+const _NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+function _midiName(midi) { return _NOTE_NAMES[midi % 12] + (Math.floor(midi / 12) - 1) }
+
 function _vSlide(dx, dy) {
   _vReleaseAll()
   const s = $.learn()
-  $.whisper({
-    violinX: Math.max(0, Math.min(_VCOLS - 1, s.violinX + dx)),
-    violinY: Math.max(-_VSPATIAL, Math.min(_VROWS - 1 - _VSPATIAL, s.violinY + dy)),
-  })
+  const newX = Math.max(0, Math.min(_VCOLS - 1, s.violinX + dx))
+  const newY = Math.max(-_VSPATIAL, Math.min(_VROWS - 1 - _VSPATIAL, s.violinY + dy))
+  const rootNote = violinNoteFromGrid(newX, newY + _VSPATIAL)
+  $.whisper({ violinX: newX, violinY: newY, status: `${_midiName(rootNote)} · violin` })
 }
 
 function violinGameLoop() {
@@ -236,6 +239,7 @@ const $ = elf(tag, {
   octaveInstruments:  { 1: 'tuba', 2: 'contrabass', 3: 'cello', 4: 'violin', 5: 'trumpet', 6: 'flute' },
   violinX:            8,
   violinY:            0,
+  status:             '',
 
   // camera
   videoEnabled:       false,
@@ -304,7 +308,8 @@ $.style(`
     overflow: hidden; position: relative; touch-action: none;
   }
   & * { box-sizing: border-box; }
-  & .app { display: grid; grid-template-rows: 1fr auto; height: 100%; width: 100%; }
+  & .app { display: grid; grid-template-rows: 1fr auto 1rem; height: 100%; width: 100%; }
+  & .status-bar { font-size:.6rem; color:#665c54; text-align:right; padding:0 .5rem; line-height:1rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-family:'Recursive'; }
 
   & .artboard {
     position: relative; overflow: hidden;
@@ -672,6 +677,7 @@ function mount(target) {
       </div>
       <div class="film-reel" data-film-reel>
       </div>
+      <div class="status-bar" data-status-bar></div>
     </div>
     <div class="darkroom" data-darkroom>
       <button class="dr-close" data-darkroom-close>✕</button>
@@ -711,6 +717,9 @@ function update(target) {
   }
   const slot = target.querySelector('[data-capture-slot]')
   if (slot) slot.innerHTML = videoEnabled ? '<button class="corner-btn" data-capture-frame>📷 capture</button>' : ''
+  const { status } = $.learn()
+  const sb = target.querySelector('[data-status-bar]')
+  if (sb) sb.textContent = status
   return null
 }
 
@@ -1093,6 +1102,7 @@ function addFrame(target, copyFromIdx = null) {
     frameStrokes: { ...frameStrokes, [id]: newStrokes }
   })
   teachPlayer({ frameId: id })
+  $.whisper({ status: copyFromIdx !== null ? 'duplicated frame' : 'added frame' })
 
   loadCurrentFrame(target)
   renderOnion(target)
@@ -1110,6 +1120,19 @@ function deleteFrame(target, idx) {
   target._localCurrent = cur
   const newStrokes = { ...frameStrokes }; delete newStrokes[id]
   $.teach({ frames: newFrames, frameStrokes: newStrokes })
+  $.whisper({ status: 'deleted frame' })
+  loadCurrentFrame(target); renderOnion(target); renderReel(target)
+}
+
+function clearFrame(target, idx) {
+  const { frames, frameStrokes } = $.learn()
+  const id = frames[idx]
+  if (!id) return
+  const newStrokes = { ...frameStrokes, [id]: [] }
+  const ctx = db[id]?.drawCanvas?.getContext('2d')
+  if (ctx) ctx.clearRect(0, 0, db[id].drawCanvas.width, db[id].drawCanvas.height)
+  $.teach({ frameStrokes: newStrokes })
+  $.whisper({ status: 'cleared frame' })
   loadCurrentFrame(target); renderOnion(target); renderReel(target)
 }
 
@@ -1312,9 +1335,11 @@ function showReelMenu(target, frameDiv, idx, id) {
 
   const delBtn = mkBtn('✕  delete', true)
   const dupBtn = mkBtn('⊕  duplicate', false)
+  const clrBtn = mkBtn('○  clear', false)
 
   menu.appendChild(delBtn)
   menu.appendChild(dupBtn)
+  menu.appendChild(clrBtn)
   document.body.appendChild(menu)
 
   // position above the frame — measure after append
@@ -1326,6 +1351,7 @@ function showReelMenu(target, frameDiv, idx, id) {
 
   dupBtn.addEventListener('pointerdown', e => { e.stopPropagation(); menu.remove(); addFrame(target, idx) })
   delBtn.addEventListener('pointerdown', e => { e.stopPropagation(); menu.remove(); deleteFrame(target, idx) })
+  clrBtn.addEventListener('pointerdown', e => { e.stopPropagation(); menu.remove(); clearFrame(target, idx) })
 
   const dismiss = e => {
     if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('pointerdown', dismiss) }
@@ -2450,8 +2476,8 @@ document.addEventListener('keydown',e=>{
   if((e.key==='y'||e.key==='Y')&&(e.ctrlKey||e.metaKey)){redoFrame(root);return}
   const{frames,playing,zoom,tool,violinMode}=$.learn()
   const current = root._localCurrent ?? 0
-  if(e.key==='ArrowRight'||e.key==='.')gotoFrame(root,Math.min(frames.length-1,current+1))
-  if(e.key==='ArrowLeft'||e.key===',')gotoFrame(root,Math.max(0,current-1))
+  if(!violinMode&&(e.key==='ArrowRight'||e.key==='.'))gotoFrame(root,Math.min(frames.length-1,current+1))
+  if(!violinMode&&(e.key==='ArrowLeft'||e.key===','))gotoFrame(root,Math.max(0,current-1))
   if(e.key==='p')openDarkroom(root)
   if(e.key==='Escape'){closeDarkroom(root);closeOverlay(root)}
   if(e.key==='+'||e.key==='=')setZoom(root,zoom+1)

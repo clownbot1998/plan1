@@ -81,7 +81,7 @@ $.when('change', '.notes', event => $.teach({ root: parseInt(event.target.value)
 const midiCodes = [...new Array(116)].map((_, i) => i)
 
 $.draw(() => {
-  const { root } = $.learn()
+  const { root, meander } = $.learn()
 
   const list = instruments.map((name, i) => `<option value="${i}">${name}</option>`).join('')
   const notes = midiCodes.map(n => `<option ${root === n ? 'selected' : ''}>${n}</option>`).join('')
@@ -90,7 +90,7 @@ $.draw(() => {
     <div class="controls">
       <select class="samples">${list}</select>
       <select class="notes">${notes}</select>
-      <button data-meander>Unlock</button>
+      <button data-meander>${meander ? 'Lock' : 'Unlock'}</button>
     </div>
     <div class="the-compass">
       <button class="note root"   data-note="${root}">${root}</button>
