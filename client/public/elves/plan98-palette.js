@@ -275,7 +275,7 @@ $.when('pointerup', '[data-midi]', (event) => {
     }
 
     const root = event.target.closest($.link)
-    const data = { color: newColor }
+    const data = { color: newColor, midi: parseInt(midi) }
 
     update(data)
     root.dispatchEvent(new CustomEvent('input', {
