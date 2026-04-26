@@ -816,7 +816,8 @@ function boot(target) {
   target._panStart      = null
   target._panOrigin     = null
   target._drawRafId     = null
-  target._playInterval  = null
+  target._playing       = false
+  target._rafId         = null
   target._playDir       = 1
   target._drPlaying     = false
   target._drInterval    = null
@@ -1598,16 +1599,6 @@ function renderReel(target) {
   if (active) active.scrollIntoView({ inline: 'nearest', block: 'nearest' })
 }
 
-function tickReelActive(target) {
-  const reel = target.querySelector('[data-film-reel]')
-  if (!reel) return
-  const current = target._localCurrent ?? 0
-  reel.querySelectorAll('.reel-frame').forEach((div, i) => {
-    div.classList.toggle('active', i === current)
-  })
-  const active = reel.querySelector('.reel-frame.active')
-  if (active) active.scrollIntoView({ inline: 'nearest', block: 'nearest' })
-}
 
 /*
 
@@ -2182,7 +2173,14 @@ function _doStartPlayback(target) {
   $.teach({ playing: true })
   $.whisper({ status: '' })
   startAudio(target)
-  target._playInterval = setInterval(() => {
+  const mspf = 1000 / $.learn().fps
+  let lastFrameTime = performance.now()
+  let rafId
+  const tick = (now) => {
+    if (!target._playing) return
+    rafId = requestAnimationFrame(tick)
+    if (now - lastFrameTime < mspf) return
+    lastFrameTime = now
     const { frames, loopMode } = $.learn()
     const current = target._localCurrent ?? 0
     let next = current + target._playDir
@@ -2190,14 +2188,17 @@ function _doStartPlayback(target) {
     else if (loopMode === 'pingpong') { if (next >= frames.length) { next = frames.length - 2; target._playDir = -1 } else if (next < 0) { next = 1; target._playDir = 1 } }
     else { if (next >= frames.length) { next = frames.length - 1; stopPlayback(target); return } }
     target._localCurrent = Math.max(0, Math.min(frames.length - 1, next))
-    loadCurrentFrame(target); renderOnion(target); tickReelActive(target)
-  }, 1000 / $.learn().fps)
+    loadCurrentFrame(target); renderOnion(target)
+  }
+  target._playing = true
+  target._rafId = requestAnimationFrame(tick)
 }
 
 function stopPlayback(target) {
   $.teach({ playing: false })
   $.whisper({ status: '' })
-  clearInterval(target._playInterval)
+  target._playing = false
+  cancelAnimationFrame(target._rafId)
   target._bufferCheck = null
   stopAudio(target)
 }
@@ -2268,80 +2269,127 @@ Export.
 
 */
 
-async function exportMp4(target, { save=false, download=true }={}){
-  const{frames,canvasW,canvasH,fps,loopMode}=$.learn()
-  const off=document.createElement('canvas');off.width=canvasW;off.height=canvasH
-  const octx=off.getContext('2d')
-  const hasAudio = !!target._audioBuffer
-  const mime = hasAudio
-    ? (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus' : 'video/webm')
-    : (MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8' : 'video/webm')
-  const mspf=Math.round(1000/fps)
+let _ffmpeg = null
 
-  let seq=[...frames]
-  if(loopMode==='pingpong') seq=[...frames,...[...frames].reverse().slice(1,-1)]
+async function loadFFmpeg(onLog) {
+  if (_ffmpeg) return _ffmpeg
+  const { FFmpeg } = await import('@ffmpeg/ffmpeg')
+  const { toBlobURL } = await import('@ffmpeg/util')
+  const ff = new FFmpeg()
+  if (onLog) ff.on('log', onLog)
+  const coreBase = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm'
+  await ff.load({
+    coreURL: await toBlobURL(`${coreBase}/ffmpeg-core.js`,   'text/javascript'),
+    wasmURL: await toBlobURL(`${coreBase}/ffmpeg-core.wasm`, 'application/wasm'),
+  })
+  _ffmpeg = ff
+  return ff
+}
 
-  // show progress overlay
-  const progress=target.querySelector('[data-import-progress]')
-  const bar=target.querySelector('[data-import-bar]')
-  const lbl=target.querySelector('[data-import-label]')
-  if(progress){ progress.classList.add('active'); bar.style.width='0%'; lbl.textContent='preparing…' }
+async function exportMp4(target, { download=true }={}) {
+  const { frames, canvasW, canvasH, fps, loopMode } = $.learn()
 
-  // kick off all lazy video loads in parallel so they're ready by the time we reach each frame
+  const progress = target.querySelector('[data-import-progress]')
+  const bar      = target.querySelector('[data-import-bar]')
+  const lbl      = target.querySelector('[data-import-label]')
+  const setStatus = (text, pct) => {
+    if (!progress) return
+    lbl.textContent = text
+    if (pct != null) bar.style.width = pct + '%'
+  }
+
+  progress?.classList.add('active')
+  setStatus('loading ffmpeg…', 0)
+
+  let ff
+  try {
+    ff = await loadFFmpeg(({ message }) => console.debug('[ffmpeg]', message))
+  } catch(e) {
+    progress?.classList.remove('active')
+    alert('ffmpeg failed to load: ' + (e?.message ?? String(e)))
+    return
+  }
+
+  let seq = [...frames]
+  if (loopMode === 'pingpong') seq = [...frames, ...[...frames].reverse().slice(1, -1)]
+
+  // kick off lazy video loads in parallel
   frames.forEach(id => ensureFrameVideo(id, target))
 
-  const stream=off.captureStream(fps)
+  const off = document.createElement('canvas')
+  off.width = canvasW; off.height = canvasH
+  const octx = off.getContext('2d')
 
-  // mix in audio track if one was imported
-  let audioCtx,audioSrc,audioDest
-  if(target._audioBuffer){
-    try{
-      audioCtx=new(window.AudioContext||window.webkitAudioContext)()
-      audioDest=audioCtx.createMediaStreamDestination()
-      audioSrc=audioCtx.createBufferSource()
-      audioSrc.buffer=target._audioBuffer
-      audioSrc.connect(audioDest)
-      stream.addTrack(audioDest.stream.getAudioTracks()[0])
-    }catch(e){console.warn('audio mix failed',e)}
-  }
-
-  const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8_000_000})
-  const chunks=[]
-  rec.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data)}
-  rec.onstop=()=>{
-    if(progress) progress.classList.remove('active')
-    const blob=new Blob(chunks,{type:mime})
-    if(audioCtx)audioCtx.close()
-    if(download){
-      const url=URL.createObjectURL(blob)
-      const a=document.createElement('a');a.href=url;a.download='flipbook.webm';a.click()
-      setTimeout(()=>URL.revokeObjectURL(url),5000)
-    }
-  }
-
-  if(audioSrc)audioSrc.start(0)
-  rec.start(mspf)
-  for(let i=0;i<seq.length;i++){
-    const id=seq[i]
-    const f=ensureFrame(id,canvasW,canvasH)
-    // wait for this frame's video to finish loading if it's still in flight
-    if(f._hasCachedVideo && !f.hasVideo){
-      await new Promise(r=>{
-        const poll=()=>{ if(f.hasVideo||!f._videoLoading) r(); else setTimeout(poll,30) }
+  // phase 1: render frames → PNG → ffmpeg virtual FS  (0–70%)
+  for (let i = 0; i < seq.length; i++) {
+    const id = seq[i]
+    const f  = ensureFrame(id, canvasW, canvasH)
+    if (f._hasCachedVideo && !f.hasVideo) {
+      await new Promise(r => {
+        const deadline = Date.now() + 3000
+        const poll = () => {
+          if (f.hasVideo || !f._videoLoading || Date.now() > deadline) { r(); return }
+          setTimeout(poll, 30)
+        }
         poll()
       })
     }
-    octx.clearRect(0,0,canvasW,canvasH)
-    if(f.hasVideo) octx.drawImage(f.videoCanvas,0,0)
-    octx.drawImage(f.drawCanvas,0,0)
-    await new Promise(r=>requestAnimationFrame(r))
-    await new Promise(r=>setTimeout(r,mspf))
-    if(progress){
-      bar.style.width=`${Math.round(((i+1)/seq.length)*100)}%`
-      lbl.textContent=`exporting ${i+1} / ${seq.length}`
-    }
+    octx.clearRect(0, 0, canvasW, canvasH)
+    if (f.hasVideo) octx.drawImage(f.videoCanvas, 0, 0)
+    octx.drawImage(f.drawCanvas, 0, 0)
+    const blob = await new Promise(r => off.toBlob(r, 'image/png'))
+    await ff.writeFile(`f${String(i).padStart(5,'0')}.png`, new Uint8Array(await blob.arrayBuffer()))
+    setStatus(`rendering ${i + 1} / ${seq.length}`, Math.round((i + 1) / seq.length * 70))
   }
-  rec.stop()
+
+  // phase 2: audio WAV → FS
+  const audioArgs = []
+  if (target._audioBuffer) {
+    const wav = audioBufferToWav(target._audioBuffer)
+    await ff.writeFile('audio.wav', new Uint8Array(await wav.arrayBuffer()))
+    audioArgs.push('-i', 'audio.wav', '-c:a', 'aac', '-shortest')
+  }
+
+  // phase 3: encode  (70–100% via ffmpeg progress)
+  setStatus('encoding…', 70)
+  const onProgress = ({ progress: p }) => setStatus(`encoding… ${Math.round(p * 100)}%`, 70 + Math.round(p * 30))
+  ff.on('progress', onProgress)
+
+  try {
+    await ff.exec([
+      '-framerate', String(fps),
+      '-i', 'f%05d.png',
+      ...audioArgs,
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      'out.mp4',
+    ])
+  } catch(e) {
+    ff.off('progress', onProgress)
+    progress?.classList.remove('active')
+    alert('ffmpeg encode failed: ' + e.message)
+    return
+  }
+
+  ff.off('progress', onProgress)
+
+  const data = await ff.readFile('out.mp4')
+
+  // clean up virtual FS
+  for (let i = 0; i < seq.length; i++) ff.deleteFile(`f${String(i).padStart(5,'0')}.png`).catch(()=>{})
+  if (target._audioBuffer) ff.deleteFile('audio.wav').catch(()=>{})
+  ff.deleteFile('out.mp4').catch(()=>{})
+
+  progress?.classList.remove('active')
+
+  if (download) {
+    const blob = new Blob([data.buffer], { type: 'video/mp4' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url; a.download = 'flipbook.mp4'; a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 5000)
+  }
 }
 
 /*
