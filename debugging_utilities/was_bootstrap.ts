@@ -25,13 +25,52 @@ if (!signerJson || !spaceId) {
 }
 
 const bootstrapPaths = [
+  // core firmware
   '/index.html', '/plan98.js', '/plan98-shims.js', '/main.js',
-  '/saga.js', '/cache.js', '/types.js',
-  '/styles/system.css', '/css/base.css', '/css/main.css',
-  '/elves/plan98-modal.js', '/elves/plan98-panel.js', '/elves/plan98-toast.js',
-  '/elves/plan98-wallet.js', '/elves/paper-pocket.js', '/elves/debug-gamepads.js',
-  '/elves/lrud-elf.js', '/elves/multi-task.js', '/elves/my-computer.js',
+  '/saga.js', '/cache.js', '/types.js', '/as2.js',
+  // styles
+  '/styles/system.css',
+  // fonts
+  '/fonts/Recursive_VF_1.085--subset-GF_latin_basic.woff2',
+  // all registered elves (mirrors ELVES map in index.html)
+  '/elves/ur-shell.js',
+  '/elves/multi-task.js',
+  '/elves/source-code.js',
   '/elves/flip-book.js',
+  '/elves/dial-tone.js',
+  '/elves/lore-baby.js',
+  '/elves/saga-pitch.js',
+  '/elves/my-computer.js',
+  '/elves/qr-code.js',
+  '/elves/private-ai.js',
+  '/elves/title-page.js',
+  '/elves/project-manager.js',
+  '/elves/blog-search.js',
+  '/elves/clown-eyes.js',
+  '/elves/preview-gallery.js',
+  '/elves/paper-pocket.js',
+  '/elves/clownbot-brief.js',
+  '/elves/plan98-tree.js',
+  '/elves/plan98-wallet.js',
+  '/elves/plan98-modal.js',
+  '/elves/plan98-panel.js',
+  '/elves/plan98-toast.js',
+  '/elves/plan98-console.js',
+  '/elves/was-code.js',
+  '/elves/hypertext-action.js',
+  '/elves/hypertext-address.js',
+  '/elves/hypertext-blankline.js',
+  '/elves/hypertext-comment.js',
+  '/elves/hypertext-effect.js',
+  '/elves/hypertext-highlighter.js',
+  '/elves/hypertext-parenthetical.js',
+  '/elves/hypertext-puppet.js',
+  '/elves/hypertext-quote.js',
+  '/elves/hypertext-variable.js',
+  // sticky menu (loaded directly in index.html)
+  '/elves/sticky-menu.js',
+  '/elves/lrud-elf.js',
+  '/elves/debug-gamepads.js',
 ];
 
 if (dryRun) {
