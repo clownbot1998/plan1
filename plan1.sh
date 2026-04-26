@@ -116,6 +116,10 @@ case "$CMD" in
     [ -f "$SCRIPT_DIR/.env" ] && ENV_FLAG="--env-file=$SCRIPT_DIR/.env"
     deno run --allow-net --allow-env $ENV_FLAG "$SCRIPT_DIR/debugging_utilities/was_bootstrap.ts"
     ;;
+  deploy)
+    "$0" build
+    "$0" sync
+    ;;
   watch)
     WATCH_PID_FILE="$SCRIPT_DIR/.watch.pid"
     if [ -f "$WATCH_PID_FILE" ] && kill -0 "$(cat "$WATCH_PID_FILE")" 2>/dev/null; then
@@ -180,9 +184,10 @@ case "$CMD" in
     done
     ;;
   *)
-    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|sync|watch|test|reverse-client|bootstrap]"
+    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|sync|deploy|watch|test|reverse-client|bootstrap]"
     echo "  build  — generates blog pages + vendors deps into dist/"
-    echo "  sync   — uploads dist/ bootstrap files to WAS (run after build)"
+    echo "  sync   — uploads dist/ bootstrap files to WAS"
+    echo "  deploy — build + sync"
     echo "  watch  — rebuilds dist/ on any change to client/"
     echo "  serve  — serves dist/ on port $PORT"
     echo "  test   — run test suites (default: test/*.test.js)"
