@@ -180,6 +180,34 @@ async function handleRequest(request) {
     return new Response('ok');
   }
 
+  if (request.method === 'PUT' && path.match(/^\/preview-gallery\/[^/]+\/config$/)) {
+    const galleryId = path.split('/')[2]
+    const body = await request.json().catch(() => null)
+    if (!body) return new Response('invalid json', { status: 400 })
+    const wasPath = `/preview-gallery/${galleryId}/index.json`
+    const blob = new Blob([JSON.stringify(body)], { type: 'application/json' })
+    const storage = new StorageClient(new URL(safeEnv('PLAN98_WAS_HOST', 'http://localhost:1088')))
+    const space   = storage.space({ signer: _signer, id: `urn:uuid:${_spaceId}` })
+    const res = await space.resource(wasPath).put(blob, { signer: _signer }).catch(e => ({ ok: false, status: 500, text: () => e.message }))
+    return new Response(res.ok ? 'ok' : 'write failed', { status: res.ok ? 200 : 500 })
+  }
+
+  if (path === '/eyes') {
+    const target = url.searchParams.get('url')
+    if (!target) return new Response('missing ?url=', { status: 400 })
+    const outFile = `/tmp/clown-eyes-${Date.now()}.png`
+    const script  = new URL('./debugging_utilities/screenshot.ts', import.meta.url).pathname
+    const proc = new Deno.Command('deno', {
+      args: ['run', '--allow-run', '--allow-net', '--allow-write', script, target, outFile],
+      stdout: 'null', stderr: 'null',
+    })
+    const { code } = await proc.output()
+    if (code !== 0) return new Response('screenshot failed', { status: 500 })
+    const bytes = await Deno.readFile(outFile)
+    Deno.remove(outFile).catch(() => {})
+    return new Response(bytes, { headers: { 'content-type': 'image/png' } })
+  }
+
   if (path.startsWith('/app/')) {
     const tag = path.split('/app/')[1].split('/')[0];
     let attrs = '';
