@@ -140,7 +140,6 @@ case "$CMD" in
     ) &
     echo $! > "$WATCH_PID_FILE"
     echo "watching (pid $!)"
-    wait
     ;;
   bootstrap)
     MEMORY_SRC="$SCRIPT_DIR/memory"

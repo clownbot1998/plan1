@@ -78,7 +78,19 @@ const $ = elf('sticky-menu', {
   cursor: 0,
 })
 
-setInterval(() => $.teach({ axes: allAxes() }), 5000)
+let _axesInterval = null
+function startAxes() {
+  if (_axesInterval) return
+  _axesInterval = setInterval(() => $.teach({ axes: allAxes() }), 5000)
+}
+function stopAxes() {
+  clearInterval(_axesInterval)
+  _axesInterval = null
+}
+startAxes()
+document.addEventListener('visibilitychange', () => {
+  document.visibilityState === 'visible' ? startAxes() : stopAxes()
+})
 
 $.draw(target => {
   const { activeTab, cursor, axes, route } = $.learn()
