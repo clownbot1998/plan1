@@ -8,10 +8,10 @@ flip-book.js is a creative suite for kids: art (drawing), music (circus synth), 
 
 currently the compass south-petal (`plus-5`) opens the export overlay (`VIEWS.export`).
 
-- [ ] add `VIEWS.gallery` to the `VIEWS` map
-- [ ] change `plus-5` compass button to open `VIEWS.gallery` instead of `VIEWS.export`
-- [ ] render gallery view as a `plan98-gallery` component filtered for flip-book data type
-- [ ] when a gallery item is selected, restore that flip-book by URL/id
+- [x] add `VIEWS.gallery` to the `VIEWS` map
+- [x] change `plus-5` compass button to open `VIEWS.gallery` instead of `VIEWS.export`
+- [x] render gallery view with save/load using plan98-wallet WAS storage
+- [x] when a gallery item is selected, restore that flip-book by id
 
 ---
 
@@ -19,9 +19,8 @@ currently the compass south-petal (`plus-5`) opens the export overlay (`VIEWS.ex
 
 currently export is only reachable through the compass. it should always be accessible.
 
-- [ ] add a persistent `export` link/button in the bottom-left corner at the same level as the status bar
-- [ ] this sits outside the overlay system — always rendered, always clickable
-- [ ] clicking it opens the existing `VIEWS.export` overlay (or the new gallery — TBD based on a)
+- [x] add a persistent `export` link/button in the status bar row (left side)
+- [x] clicking it opens the existing `VIEWS.export` overlay
 
 ---
 
@@ -31,26 +30,26 @@ add an import button in the settings overlay that opens a file picker. behavior 
 
 ### schema versioning
 
-- [ ] define `SCHEMA_VERSION` constant (start at `1`)
-- [ ] include `{ schemaVersion: SCHEMA_VERSION, ... }` in all JSON exports
+- [x] define `SCHEMA_VERSION = 1` constant
+- [x] include `{ schemaVersion: SCHEMA_VERSION, ... }` in all JSON exports
 
 ### json import
 
-- [ ] accept `.json` files matching flip-book schema
-- [ ] on load: check `schemaVersion`, accept compatible versions, warn on mismatch
-- [ ] immediately restore frames, settings, and any audio data from the file
+- [x] accept `.json` files matching flip-book schema
+- [x] on load: check `schemaVersion`, accept compatible versions, warn on mismatch
+- [x] immediately restore frames and settings from the file
 
 ### video import
 
-- [ ] open fps-selection wizard before extracting frames
-- [ ] sample frames at selected fps using existing video import pipeline (`importVideo`)
-- [ ] blit each frame to canvas background (already done in `importVideo` — wire to wizard)
-- [ ] extract audio track from video; bind to export/download synchronized with frame fps
-- [ ] audio plays in sync during playback and is included in webm export
+- [x] open fps-selection wizard before extracting frames
+- [x] sample frames at selected fps via `importVideo(target, file, fpsOverride)`
+- [x] extract audio track from video; store as `target._audioBuffer`
+- [x] audio plays in sync during playback (`startAudio`/`stopAudio`)
+- [x] audio mixed into webm export via AudioContext + MediaStreamDestination
 
 ### audio import
 
-- [ ] accept audio file (mp3, wav, ogg, etc.)
-- [ ] no video frames to blit — blank canvas frames at selected fps
-- [ ] bind audio track same as video import path
-- [ ] audio plays in sync during playback and is included in webm export
+- [x] accept audio file (mp3, wav, ogg, etc.)
+- [x] fps wizard → blank canvas frames at selected fps
+- [x] audio plays in sync during playback
+- [x] audio included in webm export

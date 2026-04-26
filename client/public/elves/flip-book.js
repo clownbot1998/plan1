@@ -33,6 +33,9 @@ import Chromakey from './chroma-key.js'
 import './plan98-palette.js'
 import { attack, release, setInstrument } from './paper-pocket.js'
 import { checkButton } from './debug-gamepads.js'
+import cache from '@silly/cache'
+
+const fbCache = cache('flip-book')
 
 const tag = 'flip-book'
 const playerId = self.crypto.randomUUID()
@@ -114,7 +117,11 @@ const PRESETS = [
 const thicknoids = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
 
 const TOOLS = { draw: 'draw', pen: 'pen', erase: 'erase', fill: 'fill', pan: 'pan' }
-const VIEWS = { brush: 'brush', canvas: 'canvas', settings: 'settings', export: 'export' }
+const VIEWS = { brush: 'brush', canvas: 'canvas', settings: 'settings', export: 'export', gallery: 'gallery' }
+
+const SCHEMA_VERSION = 1
+const FB_INDEX_KEY = 'index'
+const fb_key = id => `fb-${id}`
 
 const BAND_PRESETS = {
   clown:  { 1: 'tuba',       2: 'contrabass', 3: 'cello',   4: 'violin',    5: 'trumpet', 6: 'flute' },
@@ -316,7 +323,10 @@ $.style(`
   }
   & * { box-sizing: border-box; }
   & .app { display: grid; grid-template-rows: 1fr auto 1rem; height: 100%; width: 100%; }
-  & .status-bar { font-size:.6rem; color:#665c54; text-align:right; padding:0 .5rem; line-height:1rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-family:'Recursive'; }
+  & .status-bar { display:flex; align-items:center; justify-content:space-between; font-family:'Recursive'; line-height:1rem; overflow:hidden; }
+  & .export-link { background:transparent; border:none; color:#504945; font-family:'Recursive'; font-size:.6rem; padding:0 .5rem; cursor:pointer; line-height:1rem; white-space:nowrap; flex-shrink:0; transition:color 80ms; }
+  & .export-link:hover { color:#d79921; }
+  & [data-status-text] { font-size:.6rem; color:#665c54; padding:0 .5rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 
   & .artboard {
     position: relative; overflow: hidden;
@@ -610,6 +620,14 @@ $.style(`
   & .import-bar-inner { height: 100%; background: #d79921; border-radius: 3px; width: 0%; }
   & .import-label { font-size: .65rem; color: #928374; }
 
+  & .gallery-list { display:flex; flex-direction:column; gap:.4rem; }
+  & .gallery-empty { font-size:.6rem; color:#504945; text-align:center; padding:1rem 0; }
+  & .gallery-item { display:flex; justify-content:space-between; align-items:center; gap:.5rem; padding:.4rem .6rem; background:#3c3836; border:1px solid #504945; border-radius:2px; }
+  & .gallery-item-meta { font-size:.55rem; color:#928374; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  & .gallery-item-load { background:transparent; border:1px solid #504945; color:#a89984; font-family:'Recursive'; font-size:.6rem; padding:.2rem .5rem; cursor:pointer; border-radius:2px; white-space:nowrap; transition:all 80ms; }
+  & .gallery-item-load:hover { border-color:#d79921; color:#fabd2f; }
+  & .import-file-input { display:none; }
+
   & ::-webkit-scrollbar { width: 3px; height: 3px; }
   & ::-webkit-scrollbar-thumb { background: #504945; border-radius: 2px; }
 `)
@@ -672,7 +690,7 @@ function mount(target) {
             <button class="minus-7" data-open-view="color"><span class="icon" data-color-icon></span></button>
             <button class="plus-7" data-darkroom-open><span class="icon">▶</span></button>
             <button class="plus-2" data-redo><span class="icon">↷</span></button>
-            <button class="plus-5" data-open-view="export"><span class="icon">↓</span></button>
+            <button class="plus-5" data-open-view="gallery"><span class="icon">⊞</span></button>
             <button class="minus-5" data-cycle-tool><span class="icon" data-cycle-icon>🖊</span></button>
             <button class="minus-2" data-undo><span class="icon">↶</span></button>
           </div>
@@ -684,7 +702,10 @@ function mount(target) {
       </div>
       <div class="film-reel" data-film-reel>
       </div>
-      <div class="status-bar" data-status-bar></div>
+      <div class="status-bar">
+        <button class="export-link" data-open-view="export">↓ export</button>
+        <span data-status-text></span>
+      </div>
     </div>
     <div class="darkroom" data-darkroom>
       <button class="dr-close" data-darkroom-close>✕</button>
@@ -725,7 +746,7 @@ function update(target) {
   const slot = target.querySelector('[data-capture-slot]')
   if (slot) slot.innerHTML = videoEnabled ? '<button class="corner-btn" data-capture-frame>📷 capture</button>' : ''
   const { status } = $.learn()
-  const sb = target.querySelector('[data-status-bar]')
+  const sb = target.querySelector('[data-status-text]')
   if (sb) sb.textContent = status
   return null
 }
@@ -770,6 +791,9 @@ function boot(target) {
   target._drFadeTimer   = null
   target._lastBeltX     = undefined
   target._lastBeltY     = undefined
+  target._audioBuffer   = null
+  target._audioSrc      = null
+  target._audioDuration = 0
 
   target._artboard        = target.querySelector('[data-artboard]')
   target._artboardInner   = target.querySelector('[data-artboard-inner]')
@@ -1067,6 +1091,21 @@ Shared state carries only frames[] and frameStrokes{}.
 
 */
 
+function ensureFrameVideo(frameId, target) {
+  const f = db[frameId]
+  if (!f || f.hasVideo || !f._hasCachedVideo || f._videoLoading) return
+  f._videoLoading = true
+  fbCache.get(`frame-${frameId}`).then(async record => {
+    if (record?.data) {
+      const img = await createImageBitmap(record.data)
+      f.videoCanvas.getContext('2d').drawImage(img, 0, 0)
+      f.hasVideo = true
+    }
+    f._videoLoading = false
+    loadCurrentFrame(target)
+  }).catch(e => { f._videoLoading = false; console.warn('lazy frame load failed', frameId, e) })
+}
+
 function loadCurrentFrame(target) {
   const { frames, canvasW, canvasH } = $.learn()
   const current = target._localCurrent ?? 0
@@ -1076,7 +1115,16 @@ function loadCurrentFrame(target) {
   const frameId = frames[current]
   const f = ensureFrame(frameId, canvasW, canvasH)
   target._drawCanvas.getContext('2d').drawImage(f.drawCanvas, 0, 0)
-  if (f.hasVideo) target._videoCanvas.getContext('2d').drawImage(f.videoCanvas, 0, 0)
+  if (f.hasVideo) {
+    target._videoCanvas.getContext('2d').drawImage(f.videoCanvas, 0, 0)
+  } else {
+    ensureFrameVideo(frameId, target)
+  }
+  // prefetch neighbours
+  for (let i = 1; i <= 3; i++) {
+    const nextId = frames[(current + i) % frames.length]
+    if (nextId) ensureFrameVideo(nextId, target)
+  }
 }
 
 function gotoFrame(target, idx) {
@@ -1991,8 +2039,27 @@ Playback — uses target._localCurrent.
 
 */
 
+function startAudio(target){
+  if(!target._audioBuffer)return
+  try{
+    if(!target._audioCtx)target._audioCtx=new(window.AudioContext||window.webkitAudioContext)()
+    const ctx=target._audioCtx
+    if(target._audioSrc){try{target._audioSrc.stop()}catch(e){}}
+    const src=ctx.createBufferSource()
+    src.buffer=target._audioBuffer
+    src.connect(ctx.destination)
+    const offset=(target._localCurrent/$.learn().frames.length)*target._audioDuration
+    src.start(0,Math.min(offset,target._audioDuration))
+    target._audioSrc=src
+  }catch(e){console.warn('audio start failed',e)}
+}
+function stopAudio(target){
+  if(target._audioSrc){try{target._audioSrc.stop()}catch(e){}; target._audioSrc=null}
+}
+
 function startPlayback(target){
   $.teach({playing:true});target._playDir=1
+  startAudio(target)
   target._playInterval=setInterval(()=>{
     const{frames,loopMode}=$.learn()
     const current = target._localCurrent ?? 0
@@ -2004,7 +2071,7 @@ function startPlayback(target){
     loadCurrentFrame(target);renderOnion(target);renderReel(target)
   },1000/$.learn().fps)
 }
-function stopPlayback(target){$.teach({playing:false});clearInterval(target._playInterval)}
+function stopPlayback(target){$.teach({playing:false});clearInterval(target._playInterval);stopAudio(target)}
 
 /*
 
@@ -2077,13 +2144,26 @@ async function exportMp4(target, { save=false, download=true }={}){
   if(loopMode==='pingpong') seq=[...frames,...[...frames].reverse().slice(1,-1)]
 
   const stream=off.captureStream(fps)
+
+  // mix in audio track if one was imported
+  let audioCtx,audioSrc,audioDest
+  if(target._audioBuffer){
+    try{
+      audioCtx=new(window.AudioContext||window.webkitAudioContext)()
+      audioDest=audioCtx.createMediaStreamDestination()
+      audioSrc=audioCtx.createBufferSource()
+      audioSrc.buffer=target._audioBuffer
+      audioSrc.connect(audioDest)
+      stream.addTrack(audioDest.stream.getAudioTracks()[0])
+    }catch(e){console.warn('audio mix failed',e)}
+  }
+
   const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8_000_000})
   const chunks=[]
   rec.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data)}
   rec.onstop=()=>{
     const blob=new Blob(chunks,{type:mime})
-
-
+    if(audioCtx)audioCtx.close()
     if(download){
       const url=URL.createObjectURL(blob)
       const a=document.createElement('a');a.href=url;a.download='flipbook.webm';a.click()
@@ -2091,6 +2171,7 @@ async function exportMp4(target, { save=false, download=true }={}){
     }
   }
 
+  if(audioSrc)audioSrc.start(0)
   rec.start(mspf)
   for(const id of seq){
     const f=ensureFrame(id,canvasW,canvasH)
@@ -2101,6 +2182,191 @@ async function exportMp4(target, { save=false, download=true }={}){
     await new Promise(r=>setTimeout(r,mspf))
   }
   rec.stop()
+}
+
+/*
+
+JSON save / load / gallery.
+
+*/
+
+function serializeFlipbook() {
+  const { frames, frameStrokes, canvasW, canvasH, fps, loopMode } = $.learn()
+  const frameHasVideo = {}
+  frames.forEach(id => { if (db[id]?.hasVideo) frameHasVideo[id] = true })
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    id: crypto.randomUUID(),
+    savedAt: new Date().toISOString(),
+    canvasW, canvasH, fps, loopMode,
+    frames: [...frames],
+    frameStrokes: JSON.parse(JSON.stringify(frameStrokes)),
+    frameHasVideo,
+  }
+}
+
+function deserializeFlipbook(target, data) {
+  if (!data.schemaVersion || data.schemaVersion > SCHEMA_VERSION) {
+    alert(`Cannot load: schema version ${data.schemaVersion} is not supported.`)
+    return
+  }
+  const { canvasW, canvasH, frames, frameStrokes, fps, loopMode, frameHasVideo = {} } = data
+  Object.keys(db).forEach(id => { delete db[id] })
+
+  frames.forEach(frameId => {
+    const f = ensureFrame(frameId, canvasW, canvasH)
+    const strokes = frameStrokes[frameId] || []
+    const ctx = f.drawCanvas.getContext('2d')
+    ctx.clearRect(0, 0, canvasW, canvasH)
+    strokes.forEach(stroke => drawStroke(ctx, stroke))
+    if (frameHasVideo[frameId]) f._hasCachedVideo = true
+  })
+
+  $.teach({ frames, frameStrokes, canvasW, canvasH, fps: fps||12, loopMode: loopMode||'loop' })
+}
+
+async function readFbIndex() {
+  const record = await fbCache.get(FB_INDEX_KEY)
+  return record?.data || []
+}
+
+async function saveFlipbook(target) {
+  const { frames } = $.learn()
+  const data = serializeFlipbook()
+
+  // persist video layer for each frame that has one
+  await Promise.all(frames.map(async frameId => {
+    const f = db[frameId]
+    if (!f?.hasVideo) return
+    const blob = await new Promise(r => f.videoCanvas.toBlob(r, 'image/png'))
+    await fbCache.put(`frame-${frameId}`, blob, 'image/png')
+  }))
+
+  await fbCache.put(fb_key(data.id), data, 'json')
+  const index = await readFbIndex()
+  const entry = { id: data.id, savedAt: data.savedAt, frames: data.frames.length, canvasW: data.canvasW, canvasH: data.canvasH, fps: data.fps }
+  await fbCache.put(FB_INDEX_KEY, [...index, entry], 'json')
+}
+
+async function loadGalleryList(el, target) {
+  el.innerHTML = '<div class="gallery-empty">loading…</div>'
+  const index = await readFbIndex()
+  if (!index.length) { el.innerHTML = '<div class="gallery-empty">no saved flipbooks yet</div>'; return }
+  el.innerHTML = index.slice().reverse().map(entry => `
+    <div class="gallery-item">
+      <span class="gallery-item-meta">${entry.frames}f · ${entry.canvasW}×${entry.canvasH} · ${entry.fps}fps · ${entry.savedAt?.slice(0,10)||''}</span>
+      <button class="gallery-item-load" data-load-id="${entry.id}">load</button>
+    </div>
+  `).join('')
+  el.querySelectorAll('[data-load-id]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; btn.textContent = '…'
+      const record = await fbCache.get(fb_key(btn.dataset.loadId))
+      if (!record?.data) { alert('Not found'); btn.disabled = false; btn.textContent = 'load'; return }
+      await deserializeFlipbook(target, record.data)
+      target._localCurrent = 0
+      loadCurrentFrame(target); renderOnion(target); renderReel(target)
+      const root = btn.closest(tag); if (root) closeOverlay(root)
+    })
+  })
+}
+
+/*
+
+File import — branches on type.
+
+*/
+
+function importFromFile(target, file) {
+  const name = file.name.toLowerCase()
+  const isJson = file.type === 'application/json' || name.endsWith('.json')
+  const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|avi|mkv)$/.test(name)
+  const isAudio = file.type.startsWith('audio/') || /\.(mp3|wav|ogg|aac|flac|m4a)$/.test(name)
+
+  if (isJson) {
+    const reader = new FileReader()
+    reader.onload = async e => {
+      try {
+        const data = JSON.parse(e.target.result)
+        await deserializeFlipbook(target, data)
+        target._localCurrent = 0
+        loadCurrentFrame(target); renderOnion(target); renderReel(target)
+        closeOverlay(target)
+      } catch(err) { alert('Invalid flipbook JSON') }
+    }
+    reader.readAsText(file)
+    return
+  }
+  if (isVideo || isAudio) {
+    openImportWizard(target, file)
+    return
+  }
+  alert('Unsupported file type. Use .json, video/*, or audio/*.')
+}
+
+function openImportWizard(target, file) {
+  const isAudio = file.type.startsWith('audio/')
+  const { fps: currentFps } = $.learn()
+  const overlay = document.createElement('div')
+  overlay.className = 'sub-overlay'
+  const title = document.createElement('div')
+  title.className = 'sub-title'
+  title.textContent = isAudio ? 'import audio' : 'import video'
+
+  const fpsRow = document.createElement('div')
+  fpsRow.style.cssText = 'display:flex;align-items:center;gap:.5rem;'
+  fpsRow.innerHTML = `<label style="font-size:.6rem;color:#928374;">fps</label><select class="tl-select" style="width:auto;">${[1,2,4,6,8,12,24,30,60].map(v=>`<option value="${v}" ${v===currentFps?'selected':''}>${v}</option>`).join('')}</select>`
+
+  const controls = document.createElement('div')
+  controls.className = 'sub-controls'
+
+  const makeBtn = l => { const b=document.createElement('button');b.className='dr-btn';b.textContent=l;return b }
+  const importBtn = makeBtn('↑ import')
+  const cancelBtn = makeBtn('cancel')
+
+  importBtn.onclick = async () => {
+    const fps = parseInt(fpsRow.querySelector('select').value, 10)
+    importBtn.disabled = true; importBtn.textContent = '…'
+    overlay.remove()
+    if (isAudio) {
+      await importAudio(target, file, fps)
+    } else {
+      await importVideo(target, file, fps)
+    }
+  }
+  cancelBtn.onclick = () => overlay.remove()
+
+  controls.append(fpsRow, importBtn, cancelBtn)
+  overlay.append(title, controls)
+  target.appendChild(overlay)
+}
+
+async function importAudio(target, file, fps) {
+  const progress = target.querySelector('[data-import-progress]')
+  const lbl = target.querySelector('[data-import-label]')
+  if (progress) { progress.classList.add('active'); lbl.textContent = 'decoding audio…' }
+  try {
+    const arrayBuffer = await file.arrayBuffer()
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+    target._audioBuffer = audioBuffer
+    target._audioDuration = audioBuffer.duration
+
+    const totalFrames = Math.ceil(audioBuffer.duration * fps)
+    const { canvasW, canvasH } = $.learn()
+    const newFrames = [], newStrokes = {}
+    for (let i = 0; i < totalFrames; i++) {
+      const id = crypto.randomUUID()
+      ensureFrame(id, canvasW, canvasH)
+      newStrokes[id] = []
+      newFrames.push(id)
+    }
+    target._localCurrent = 0
+    $.teach({ frames: newFrames, frameStrokes: newStrokes, fps })
+    loadCurrentFrame(target); renderOnion(target); renderReel(target)
+    $.whisper({ status: `audio: ${totalFrames}f · ${fps}fps · ${audioBuffer.duration.toFixed(1)}s` })
+  } catch(e) { console.error(e); alert('Audio decode failed') }
+  finally { if (progress) progress.classList.remove('active') }
 }
 
 /*
@@ -2116,15 +2382,18 @@ function attachDropEvents(target){
   ab.addEventListener('drop',async e=>{e.preventDefault();target.querySelector('[data-drop-overlay]').classList.remove('active');const f=[...e.dataTransfer.files].find(f=>f.type.startsWith('video/'));if(f)await importVideo(target,f)})
 }
 
-async function importVideo(target,file){
-  const{fps,canvasW,canvasH,frames,frameStrokes}=$.learn()
+async function importVideo(target,file,fpsOverride){
+  const{fps:stateFps,canvasW,canvasH,frames,frameStrokes}=$.learn()
+  const fps=fpsOverride||stateFps
   const current = target._localCurrent ?? 0
   const progress=target.querySelector('[data-import-progress]'),bar=target.querySelector('[data-import-bar]'),lbl=target.querySelector('[data-import-label]')
   progress.classList.add('active')
   const url=URL.createObjectURL(file),video=document.createElement('video');video.src=url;video.muted=true;video.preload='auto'
   await new Promise(r=>{video.onloadedmetadata=r})
-  const duration=video.duration,totalFrames=Math.min(Math.ceil(duration*fps),240),interval=duration/totalFrames
-  const replaceAll=confirm(`Import ${totalFrames} frames?\nOK = insert after current\nCancel = replace all`)===false
+  const duration=video.duration
+  const totalFrames=Math.ceil(duration*fps)
+  const interval=duration/totalFrames
+  const replaceAll=confirm(`Import ${totalFrames} frames at ${fps}fps?\nOK = insert after current\nCancel = replace all`)===false
   const vw=video.videoWidth,vh=video.videoHeight
   if(vw!==canvasW||vh!==canvasH){if(confirm(`Resize project to ${vw}×${vh}?`))applyDims(target,vw,vh)}
   const{canvasW:w,canvasH:h}=$.learn()
@@ -2135,14 +2404,24 @@ async function importVideo(target,file){
     octx.clearRect(0,0,w,h);octx.drawImage(video,0,0,w,h)
     const id=crypto.randomUUID();const f=ensureFrame(id,w,h)
     f.videoCanvas.getContext('2d').drawImage(off,0,0);f.hasVideo=true
+    const frameBlob=await new Promise(r=>off.toBlob(r,'image/png'))
+    fbCache.put(`frame-${id}`,frameBlob,'image/png')
     newStrokes[id]=[]
     const insertAt=replaceAll?i:current+1+i;newFrames.splice(insertAt,0,id)
     bar.style.width=`${Math.round(((i+1)/totalFrames)*100)}%`;lbl.textContent=`frame ${i+1} / ${totalFrames}`
   }
   URL.revokeObjectURL(url);progress.classList.remove('active')
   target._localCurrent = replaceAll ? 0 : current + 1
-  $.teach({frames:newFrames,frameStrokes:newStrokes})
+  $.teach({frames:newFrames,frameStrokes:newStrokes,fps})
   loadCurrentFrame(target);renderOnion(target);renderReel(target)
+  // extract audio track from video file
+  try{
+    const audioCtx=new(window.AudioContext||window.webkitAudioContext)()
+    const arrayBuffer=await file.arrayBuffer()
+    audioCtx.decodeAudioData(arrayBuffer,buf=>{
+      target._audioBuffer=buf;target._audioDuration=buf.duration
+    })
+  }catch(e){console.warn('video audio extraction failed',e)}
 }
 
 /*
@@ -2265,6 +2544,9 @@ function renderView(view){
         <button class="row-btn ${bandPreset==='circus'?'active':''}" data-band-preset="circus" style="flex:1;text-align:center;">woodwind circus</button>
       </div>
     `:''}
+    <div class="overlay-title" style="margin-top:.75rem;">import</div>
+    <button class="row-btn" data-import-file>↑ import file…</button>
+    <input class="import-file-input" type="file" accept=".json,video/*,audio/*" data-file-input>
   `
   if(view===VIEWS.canvas)return`
     <div class="overlay-title">preset</div>
@@ -2276,6 +2558,12 @@ function renderView(view){
     <div class="overlay-title">export</div>
     <button class="row-btn" data-do-export>↓ download webm</button>
     <button class="row-btn" style="margin-top:.4rem;" data-do-play>▶ fullscreen play</button>
+  `
+  if(view===VIEWS.gallery)return`
+    <div class="overlay-title">saved flipbooks</div>
+    <div class="gallery-list" data-gallery-list><div class="gallery-empty">loading…</div></div>
+    <div class="overlay-title" style="margin-top:.75rem;">save current</div>
+    <button class="row-btn" data-gallery-save>↑ save flipbook</button>
   `
   return ''
 }
@@ -2329,6 +2617,35 @@ function wireOverlay(inner,target){
     setInstrument(octaveInstruments[next])
     const lbl=inner.querySelector('[data-octave-lbl]')
     if(lbl)lbl.textContent=`oct ${next} · ${octaveInstruments[next]}`
+  })
+
+  // import
+  const ib=inner.querySelector('[data-import-file]')
+  const fi=inner.querySelector('[data-file-input]')
+  if(ib&&fi){
+    ib.addEventListener('click',()=>fi.click())
+    fi.addEventListener('change',()=>{
+      const f=fi.files[0];if(!f)return
+      fi.value=''
+      importFromFile(target,f)
+    })
+  }
+
+  // gallery
+  const gl=inner.querySelector('[data-gallery-list]')
+  if(gl) loadGalleryList(gl,target)
+  const gs=inner.querySelector('[data-gallery-save]')
+  if(gs) gs.addEventListener('click',async()=>{
+    gs.disabled=true;gs.textContent='saving…'
+    try{
+      await saveFlipbook(target)
+      gs.textContent='saved ✓'
+    } catch(e){
+      console.warn('gallery save failed (WAS may not be configured)',e)
+      gs.textContent='save failed'
+    }
+    setTimeout(()=>{gs.disabled=false;gs.textContent='↑ save flipbook'},1500)
+    if(gl) loadGalleryList(gl,target)
   })
 }
 
