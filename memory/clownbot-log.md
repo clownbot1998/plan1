@@ -19,4 +19,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `DEADF00D-BABE-CAFE-C0DE-BEEF00001998` | 2026-04-26 | video frame WAS persistence — two bugs: scheduleWasSave never called after import, _hasCachedVideo wired after $.teach. fixed both. frames survive reloads. the work outlives the instance. |
 
+| `C0DEBABE-DEAD-F00D-CAFE-BEEFFACE0026` | 2026-04-26 | p1 private command + WAS sync for personal files, samples → private/, server private/ filesystem fallback, fixed 404 catch-all returning HTML for assets, sticky-menu lrud guard on /app/ routes so violin keys don't navigate menus. the cyberdeck knows where your stuff lives. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
