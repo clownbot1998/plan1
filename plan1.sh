@@ -121,6 +121,12 @@ case "$CMD" in
     [ -f "$SCRIPT_DIR/.env" ] && ENV_FLAG="--env-file=$SCRIPT_DIR/.env"
     deno run --allow-net --allow-env $ENV_FLAG "$SCRIPT_DIR/debugging_utilities/was_bootstrap.ts"
     ;;
+  private)
+    ENV_FLAG=""
+    [ -f "$SCRIPT_DIR/.env" ] && ENV_FLAG="--env-file=$SCRIPT_DIR/.env"
+    mkdir -p "$SCRIPT_DIR/private"
+    deno run --allow-net --allow-env --allow-read --allow-write $ENV_FLAG "$SCRIPT_DIR/debugging_utilities/was_private.ts" "${@:2}"
+    ;;
   deploy)
     "$0" build
     "$0" sync
@@ -192,8 +198,9 @@ case "$CMD" in
     echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|sync|deploy|watch|test|reverse-client|bootstrap]"
     echo "  build  — generates blog pages + vendors deps into dist/"
     echo "  sync   — uploads dist/ bootstrap files to WAS"
-    echo "  deploy — build + sync"
-    echo "  watch  — rebuilds dist/ on any change to client/"
+    echo "  deploy   — build + sync"
+    echo "  private  — sync private/ to WAS (--pull to restore, --dry-run to preview)"
+    echo "  watch    — rebuilds dist/ on any change to client/"
     echo "  serve  — serves dist/ on port $PORT"
     echo "  test   — run test suites (default: test/*.test.js)"
     ;;

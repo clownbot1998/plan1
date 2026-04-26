@@ -1,7 +1,12 @@
 .serve.pid
+.watch.pid
+.env
+.claude/
 dist/
 client/public/blog/
 client/public/search-manifest.json
 client/public/file-manifest.json
 client/public/clownbot-manifest.json
 client/public/task-manifest.json
+client/public/cdn/attentionandlearninglab.com/samples/
+private/
