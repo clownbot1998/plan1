@@ -71,11 +71,13 @@ function navList(activeTab) {
   return items
 }
 
+const initialRoute = location.pathname.startsWith('/app/') ? location.pathname : null
+
 const $ = elf('sticky-menu', {
   activeTab: null,
-  route: null,
+  route: initialRoute,
   axes: allAxes(),
-  cursor: 0,
+  cursor: initialRoute ? navList(null).findIndex(n => n.type === 'app' && n.href === initialRoute) : 0,
 })
 
 let _axesInterval = null
@@ -165,7 +167,7 @@ addEventListener('popstate', event => {
   }
 })
 
-history.replaceState({ type: 'sticky-menu-navigation', route: null }, '', location.href)
+history.replaceState({ type: 'sticky-menu-navigation', route: initialRoute }, '', location.href)
 
 // iframe signals it's done — rotate focus back to sticky-menu
 function onStickyDone() {

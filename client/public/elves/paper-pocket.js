@@ -411,7 +411,7 @@ function loadInstrument(instrument) {
   ready = false
   current = SampleLibrary.load({
     instruments: instrument,
-    baseUrl: (self.plan98?.env?.HEAVY_ASSET_CDN_URL || '') + "/cdn/attentionandlearninglab.com/samples/"
+    baseUrl: (self.plan98?.env?.HEAVY_ASSET_CDN_URL || '/private') + "/cdn/attentionandlearninglab.com/samples/"
   })
 
   Tone.loaded().then(function() {

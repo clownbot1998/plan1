@@ -3,7 +3,8 @@ import { serveDir } from 'jsr:@std/http/file-server';
 import { Ed25519Signer } from 'npm:@did.coop/did-key-ed25519@0.0.14';
 import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3';
 
-const DIST = new URL('./dist/', import.meta.url).pathname;
+const DIST    = new URL('./dist/',    import.meta.url).pathname;
+const PRIVATE = new URL('./private/', import.meta.url).pathname;
 const PORT = Number(Deno.env.get('PLAN1_PORT') ?? 1998);
 
 function safeEnv(key, fallback = '') {
@@ -194,6 +195,10 @@ async function handleRequest(request) {
   const res = await serveDir(request, { fsRoot: DIST, quiet: true });
 
   if (res.status === 404) {
+    // private/ filesystem fallback — serves personal assets (samples, photos, etc.) directly
+    const privateRes = await serveDir(request, { fsRoot: PRIVATE, urlRoot: 'private', quiet: true });
+    if (privateRes.status === 200) return privateRes;
+
     const wasHost = safeEnv('PLAN98_WAS_HOST');
     if (wasHost && _spaceId) {
       try {
@@ -220,10 +225,7 @@ async function handleRequest(request) {
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
     }
-    return new Response(injectEnv(await getBaseHTML()), {
-      status: 200,
-      headers: { 'content-type': 'text/html; charset=utf-8' },
-    });
+    return new Response('Not Found', { status: 404 });
   }
 
   const ct = res.headers.get('content-type') ?? '';
