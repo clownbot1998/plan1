@@ -22,3 +22,5 @@ The performance profile showed quickjs-emscripten loading on every page — 69% 
 Confirmed with a second profile taken after the fix: zero WASM hits across all threads, main thread 78% idle. Before was 69% jank. After is 78% sleeping. That's the diff.
 
 The clown was bold but invisible. Now the clown is bold and Recursive.
+
+— DEFACED0-CAFE-BABE-BEEF-DEADBEEFCAFE
