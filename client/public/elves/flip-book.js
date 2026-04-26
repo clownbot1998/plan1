@@ -594,20 +594,20 @@ $.style(`
   & .ck-color-row { display: flex; gap: .5rem; align-items: center; }
   & .ck-preview { width: 28px; height: 28px; border-radius: 3px; border: 1px solid #504945; flex-shrink: 0; }
 
-  & .darkroom { display: none; position: absolute; inset: 0; background: rgba(29,32,33,.97); z-index: 100; overflow: hidden; align-items: center; justify-content: center; }
+  & .darkroom { display: none; position: absolute; inset: 0; background: #000; z-index: 100; overflow: hidden; align-items: center; justify-content: center; }
   & .darkroom.open { display: flex; }
   & .dr-canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; cursor: zoom-in; }
   & .dr-canvas.zoomed { cursor: zoom-out; transform: scale(var(--dr-zoom, 1)); }
   & .dr-controls { position: absolute; bottom: 1.5rem; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: .75rem; transition: opacity .4s; white-space: nowrap; }
   & .dr-controls.fade { opacity: 0; pointer-events: none; }
-  & .dr-btn { background: #3c3836; border: 1px solid #504945; color: #a89984; font-family: 'Recursive'; font-size: .7rem; padding: .3rem .65rem; cursor: pointer; border-radius: 2px; transition: all 80ms; }
-  & .dr-btn:hover { border-color: #d79921; color: #fabd2f; }
-  & .dr-btn.active { background: #d79921; color: #282828; border-color: #d79921; }
-  & .dr-counter { font-size: .65rem; color: #665c54; min-width: 4rem; text-align: center; }
-  & .dr-close { position: absolute; top: .75rem; right: .75rem; background: transparent; border: 1px solid #504945; color: #665c54; width: 28px; height: 28px; border-radius: 2px; cursor: pointer; font-size: .9rem; display: grid; place-items: center; transition: opacity .4s; }
+  & .dr-btn { background: transparent; border: 1px solid #222; color: #666; font-family: 'Recursive'; font-size: .7rem; padding: .3rem .65rem; cursor: pointer; border-radius: 2px; transition: all 80ms; }
+  & .dr-btn:hover { border-color: #fff; color: #fff; }
+  & .dr-btn.active { background: #fff; color: #000; border-color: #fff; }
+  & .dr-counter { font-size: .65rem; color: #444; min-width: 4rem; text-align: center; }
+  & .dr-close { position: absolute; top: .75rem; right: .75rem; background: transparent; border: 1px solid #222; color: #444; width: 28px; height: 28px; border-radius: 2px; cursor: pointer; font-size: .9rem; display: grid; place-items: center; transition: opacity .4s; }
   & .dr-close.fade { opacity: 0; pointer-events: none; }
-  & .dr-close:hover { color: #ebdbb2; border-color: #928374; }
-  & .dr-title { position: absolute; top: .75rem; left: 50%; transform: translateX(-50%); font-size: .65rem; color: #928374; letter-spacing: .08em; transition: opacity .4s; }
+  & .dr-close:hover { color: #fff; border-color: #fff; }
+  & .dr-title { position: absolute; top: .75rem; left: 50%; transform: translateX(-50%); font-size: .65rem; color: #444; letter-spacing: .08em; transition: opacity .4s; }
   & .dr-title.fade { opacity: 0; }
 
   & .sub-overlay { position: fixed; inset: 0; background: rgba(29,32,33,.95); z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; }
@@ -2185,6 +2185,7 @@ function closeDarkroom(target){
   const trayBody=target.closest('.tray-body')
   if(trayBody) trayBody.style.overflow=''
   drStop(target);target._drZoomed=false;target._drCanvas.classList.remove('zoomed');clearTimeout(target._drFadeTimer)
+  stopAudio(target)
 }
 function drRenderFrame(target){
   const{frames,canvasW,canvasH,fps,loopMode}=$.learn(),dc=target._drCanvas,ctx=dc.getContext('2d')
@@ -2195,6 +2196,7 @@ function drRenderFrame(target){
 }
 function drStart(target){
   target._drPlaying=true;const btn=target.querySelector('[data-dr-play]');if(btn){btn.textContent='⏸ pause';btn.classList.add('active')}
+  startAudio(target)
   target._drDir=1;target._drInterval=setInterval(()=>{
     const{frames,loopMode}=$.learn();let next=target._drCurrent+target._drDir
     if(loopMode==='loop')next=((next%frames.length)+frames.length)%frames.length
@@ -2203,7 +2205,11 @@ function drStart(target){
     target._drCurrent=Math.max(0,Math.min(frames.length-1,next));drRenderFrame(target)
   },1000/$.learn().fps)
 }
-function drStop(target){target._drPlaying=false;clearInterval(target._drInterval);const btn=target.querySelector('[data-dr-play]');if(btn){btn.textContent='▶ play';btn.classList.remove('active')}}
+function drStop(target){
+  target._drPlaying=false;clearInterval(target._drInterval)
+  stopAudio(target)
+  const btn=target.querySelector('[data-dr-play]');if(btn){btn.textContent='▶ play';btn.classList.remove('active')}
+}
 
 /*
 
@@ -2220,6 +2226,15 @@ async function exportMp4(target, { save=false, download=true }={}){
 
   let seq=[...frames]
   if(loopMode==='pingpong') seq=[...frames,...[...frames].reverse().slice(1,-1)]
+
+  // show progress overlay
+  const progress=target.querySelector('[data-import-progress]')
+  const bar=target.querySelector('[data-import-bar]')
+  const lbl=target.querySelector('[data-import-label]')
+  if(progress){ progress.classList.add('active'); bar.style.width='0%'; lbl.textContent='preparing…' }
+
+  // kick off all lazy video loads in parallel so they're ready by the time we reach each frame
+  frames.forEach(id => ensureFrameVideo(id, target))
 
   const stream=off.captureStream(fps)
 
@@ -2240,6 +2255,7 @@ async function exportMp4(target, { save=false, download=true }={}){
   const chunks=[]
   rec.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data)}
   rec.onstop=()=>{
+    if(progress) progress.classList.remove('active')
     const blob=new Blob(chunks,{type:mime})
     if(audioCtx)audioCtx.close()
     if(download){
@@ -2251,13 +2267,25 @@ async function exportMp4(target, { save=false, download=true }={}){
 
   if(audioSrc)audioSrc.start(0)
   rec.start(mspf)
-  for(const id of seq){
+  for(let i=0;i<seq.length;i++){
+    const id=seq[i]
     const f=ensureFrame(id,canvasW,canvasH)
+    // wait for this frame's video to finish loading if it's still in flight
+    if(f._hasCachedVideo && !f.hasVideo){
+      await new Promise(r=>{
+        const poll=()=>{ if(f.hasVideo||!f._videoLoading) r(); else setTimeout(poll,30) }
+        poll()
+      })
+    }
     octx.clearRect(0,0,canvasW,canvasH)
     if(f.hasVideo) octx.drawImage(f.videoCanvas,0,0)
     octx.drawImage(f.drawCanvas,0,0)
     await new Promise(r=>requestAnimationFrame(r))
     await new Promise(r=>setTimeout(r,mspf))
+    if(progress){
+      bar.style.width=`${Math.round(((i+1)/seq.length)*100)}%`
+      lbl.textContent=`exporting ${i+1} / ${seq.length}`
+    }
   }
   rec.stop()
 }
