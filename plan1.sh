@@ -110,6 +110,11 @@ case "$CMD" in
   build)
     qjs --std "$SCRIPT_DIR/build.js"
     qjs --std "$SCRIPT_DIR/vendor.js"
+    # verify no double-nested vendor paths (symptom of incremental+rewrite bug)
+    if grep -rq "vendor/deps/vendor" "$DIST_DIR"/*.html "$DIST_DIR"/blog/ 2>/dev/null; then
+      echo "error: double-nested vendor paths detected in dist HTML — run ./plan1.sh build again to fix"
+      exit 1
+    fi
     ;;
   sync)
     ENV_FLAG=""

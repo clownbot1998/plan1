@@ -68,7 +68,7 @@ function copyDir(src, dst) {
     const s = join(src, entry)
     const d = join(dst, entry)
     if (isDir(s)) copyDir(s, d)
-    else if (mtime(d) < mtime(s)) writeFile(d, readFile(s))
+    else if (entry.endsWith('.html') || mtime(d) < mtime(s)) writeFile(d, readFile(s))
   }
 }
 
