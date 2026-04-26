@@ -1,5 +1,7 @@
 // plan1 app server — serves dist/, handles /app/<tag> routing
 import { serveDir } from 'jsr:@std/http/file-server';
+import { Ed25519Signer } from 'npm:@did.coop/did-key-ed25519@0.0.14';
+import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3';
 
 const DIST = new URL('./dist/', import.meta.url).pathname;
 const PORT = Number(Deno.env.get('PLAN1_PORT') ?? 1998);
@@ -8,51 +10,31 @@ function safeEnv(key, fallback = '') {
   return Deno.env.get(key) ?? fallback;
 }
 
-// --- Ed25519 keycard bootstrap ---
-// multicodec varint prefixes
-const ED25519_PUB_PREFIX  = new Uint8Array([0xed, 0x01]);
-const ED25519_PRIV_PREFIX = new Uint8Array([0x80, 0x26]);
-const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-
-function bytesToBase58(bytes) {
-  let n = 0n;
-  for (const b of bytes) n = n * 256n + BigInt(b);
-  let result = '';
-  while (n > 0n) { result = BASE58_ALPHABET[Number(n % 58n)] + result; n /= 58n; }
-  for (const b of bytes) { if (b !== 0) break; result = '1' + result; }
-  return result;
+function getContentTypeByPath(p) {
+  const ext = p.split('.').pop()?.toLowerCase() ?? '';
+  return ({
+    js: 'text/javascript', mjs: 'text/javascript',
+    css: 'text/css', html: 'text/html; charset=utf-8',
+    json: 'application/json', svg: 'image/svg+xml',
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    gif: 'image/gif', webp: 'image/webp', ico: 'image/x-icon',
+    wasm: 'application/wasm', mp3: 'audio/mpeg', wav: 'audio/wav',
+    mp4: 'video/mp4', webm: 'video/webm',
+  })[ext] ?? 'application/octet-stream';
 }
 
-function toMultibase(prefix, keyBytes) {
-  const buf = new Uint8Array(prefix.length + keyBytes.length);
-  buf.set(prefix); buf.set(keyBytes, prefix.length);
-  return 'z' + bytesToBase58(buf);
-}
+// --- keycard bootstrap (uses @did.coop/did-key-ed25519 so format is wallet-compatible) ---
+const _savedSignerJson = safeEnv('PLAN98_WAS_SIGNER');
+let _spaceId = safeEnv('PLAN98_WAS_SPACE_ID');
 
-function b64urlToBytes(b64url) {
-  return Uint8Array.from(atob(b64url.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
-}
+const _signer = _savedSignerJson
+  ? await Ed25519Signer.fromJSON(_savedSignerJson)
+  : await Ed25519Signer.generate();
 
-async function generateSignerJson() {
-  const { privateKey, publicKey } = await crypto.subtle.generateKey(
-    { name: 'Ed25519' }, true, ['sign', 'verify']
-  );
-  const pubJwk  = await crypto.subtle.exportKey('jwk', publicKey);
-  const privJwk = await crypto.subtle.exportKey('jwk', privateKey);
-  const pubBytes  = b64urlToBytes(pubJwk.x);
-  const privBytes = b64urlToBytes(privJwk.d);
-  const publicKeyMultibase  = toMultibase(ED25519_PUB_PREFIX,  pubBytes);
-  const privateKeyMultibase = toMultibase(ED25519_PRIV_PREFIX, privBytes);
-  const controller = `did:key:${publicKeyMultibase}`;
-  return JSON.stringify({ publicKeyMultibase, privateKeyMultibase, controller });
-}
+const _signerJson = JSON.stringify(_signer.toJSON());
 
-let _signerJson = safeEnv('PLAN98_WAS_SIGNER');
-let _spaceId    = safeEnv('PLAN98_WAS_SPACE_ID');
-
-if (!_signerJson || !_spaceId) {
-  if (!_signerJson) _signerJson = await generateSignerJson();
-  if (!_spaceId)    _spaceId    = crypto.randomUUID();
+if (!_savedSignerJson || !_spaceId) {
+  if (!_spaceId) _spaceId = crypto.randomUUID();
   console.log('\ngenerated ephemeral keycard — persist in .env to survive restart:');
   console.log(`PLAN98_WAS_SPACE_ID=${_spaceId}`);
   console.log(`PLAN98_WAS_SIGNER='${_signerJson}'\n`);
@@ -105,7 +87,11 @@ function injectApp(html, tag, attrs = '') {
   );
 }
 
-async function adminPage(requestUrl) {
+// /admin/ — the ticket booth.
+// Knowing PLAN1_PASSPHRASE lets you scan the QR, decrypt the root keycard,
+// and import it into plan98-wallet. The keycard grants write access to the
+// same WAS space the server reads from. Default (no passphrase) = disk only.
+async function adminPage() {
   const passphrase = safeEnv('PLAN1_PASSPHRASE');
   if (!passphrase) return new Response(
     'set PLAN1_PASSPHRASE in .env to enable /admin/',
@@ -113,7 +99,6 @@ async function adminPage(requestUrl) {
   );
 
   const { default: CryptoJS } = await import('npm:crypto-js');
-  const { default: QRCode }   = await import('npm:qrcode');
 
   const wasHost = safeEnv('PLAN98_WAS_HOST', 'http://localhost:1088');
   const payload = {
@@ -123,7 +108,7 @@ async function adminPage(requestUrl) {
       type: 'keycard',
       keycard: {
         id: _spaceId,
-        title: 'Memex',
+        title: 'plan1',
         src: '/app/time-machine',
         asJSON: JSON.parse(_signerJson),
         host: wasHost,
@@ -132,31 +117,20 @@ async function adminPage(requestUrl) {
   };
 
   const encrypted = CryptoJS.AES.encrypt(btoa(JSON.stringify(payload)), passphrase).toString();
-  const keycardUrl = `${requestUrl.origin}/app/plan98-wallet?data=${encodeURIComponent(encrypted)}`;
-  const svg = await QRCode.toString(keycardUrl, { type: 'svg', margin: 2 });
+  const safeKeycard = encodeURIComponent(encrypted);
 
-  return new Response(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>plan1 / admin</title>
-  <style>
-    body { margin: 0; min-height: 100dvh; display: flex; flex-direction: column;
-           align-items: center; justify-content: center; font-family: 'BerkeleyMono', monospace;
-           background: lemonchiffon; gap: 1rem; }
-    h1 { font-size: 1rem; margin: 0; }
-    .qr { width: min(80vmin, 360px); height: min(80vmin, 360px); }
-    .qr svg { width: 100%; height: 100%; }
-    p { font-size: .75rem; opacity: .5; margin: 0; }
-  </style>
-</head>
-<body>
-  <h1>scan to import keycard</h1>
-  <div class="qr">${svg}</div>
-  <p>requires PLAN1_PASSPHRASE on the receiving device</p>
-</body>
-</html>`, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+  const body = `
+    <div style="background: white; height: 100%; width: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+      <qr-code lazy-prefix="true" src="/app/plan98-wallet?data=${safeKeycard}" style="width: 75vmin; height: 75vmin;" target="_top"></qr-code>
+    </div>
+  `;
+
+  const html = (await getBaseHTML())
+    .replace(/<main[^>]*>[\s\S]*?<\/main>/, `<main id="main">${body}</main>`);
+
+  return new Response(injectEnv(html), {
+    headers: { 'content-type': 'text/html; charset=utf-8' }
+  });
 }
 
 const ISOLATION_HEADERS = {
@@ -181,7 +155,7 @@ async function handleRequest(request) {
 
   if (path === '/') path = '/index.html';
 
-  if (path === '/admin' || path === '/admin/') return adminPage(url);
+  if (path === '/admin' || path === '/admin/') return adminPage();
 
   // live reload — SSE stream
   if (path === '/__reload' && request.method === 'GET') {
@@ -220,6 +194,23 @@ async function handleRequest(request) {
   const res = await serveDir(request, { fsRoot: DIST, quiet: true });
 
   if (res.status === 404) {
+    const wasHost = safeEnv('PLAN98_WAS_HOST');
+    if (wasHost && _spaceId) {
+      try {
+        const storage = new StorageClient(new URL(wasHost));
+        const space = storage.space({ signer: _signer, id: `urn:uuid:${_spaceId}` });
+        const wasRes = await space.resource(path).get({ signer: _signer }).catch(() => null);
+        if (wasRes?.status === 200) {
+          console.log('Serving ' + path + ' from WAS ' + _spaceId);
+          const ct = getContentTypeByPath(path);
+          const headers = new Headers({ 'content-type': ct });
+          for (const [k, v] of Object.entries(ISOLATION_HEADERS)) headers.set(k, v);
+          return new Response(await wasRes.blob(), { status: 200, headers });
+        }
+      } catch (e) {
+        console.error('WAS fallback error:', e.message);
+      }
+    }
     return new Response(injectEnv(await getBaseHTML()), {
       status: 200,
       headers: { 'content-type': 'text/html; charset=utf-8' },

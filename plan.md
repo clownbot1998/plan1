@@ -54,7 +54,23 @@ elf-tools' read/write/delete actually hit storage.
       standalone HTML page with inline SVG QR pointing to
       `/app/plan98-wallet?data=<encrypted>`
 - [x] qr-code.js elf ported to plan1; qr-creator added to importmap
-- [ ] verify wallet decrypts and imports on receiving device
+- [x] /admin/ uses qr-code elf (client-side) instead of npm:qrcode (server-side); ticketing service documented
+- [x] verify wallet decrypts and imports on receiving device
+- [x] WAS fallback in server.js — 404s check space before serving SPA shell
+- [x] bootstrap files seeded to WAS (server-side upload via Deno; browser upload investigated — silent failures, space still seeded)
+
+---
+
+## build: stat-based incremental rebuild (qjs compat)
+
+goal: skip unchanged files on rebuild using os.stat() mtime — same qjs environment,
+no new deps, just check before copy/write.
+
+- [ ] track mtime of source files via os.stat() before copyFile/writeFile
+- [ ] skip copy if dst exists and dst.mtime >= src.mtime
+- [ ] skip blog post render if src .md mtime hasn't changed since last dist write
+- [ ] skip manifest writes if no source files changed (compare aggregate mtime)
+- [ ] measure: baseline full rebuild time vs incremental on no-change run
 
 ---
 

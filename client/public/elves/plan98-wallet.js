@@ -218,37 +218,26 @@ const methodHandlers = {
     $.teach({ uploadQueue: [], uploadCursor: 0 })
 
     const bootstrapDependencies = [
-      '/public/index.html',
-      '/public/styles/system.css',
-      '/public/vendor/es-module-shims.js',
-      '/public/brand.js',
-      '/public/elves/sillonious-brand.js',
-      '/public/elf.js',
-      '/public/module.js',
-      '/public/plan98.js',
-      '/public/saga.js',
-      '/public/elves/data-popover.js',
-      '/public/elves/data-tooltip.js',
-      '/public/elves/plan98-modal.js',
-      '/public/elves/plan98-panel.js',
-      '/public/elves/plan98-toast.js',
-      '/public/_statebus.js',
-      '/public/statebus/statebus.js',
-      '/public/statebus/client-library.js',
-      '/public/statebus/braidify-client.js',
-      '/public/sqlite.js',
-      '/public/main.js',
-      '/public/elves/plan98-console.js',
-      '/public/elves/plan98-synthia.js',
-      '/public/elves/plan98-wallet.js',
-      '/public/elves/debug-gamepads.js',
-      '/public/elves/paper-pocket.js',
-      '/public/elves/tiniest-violin.js',
-      '/public/elves/time-machine.js',
-      '/public/elves/sketch-pad.js',
-      '/public/elves/was-code.js',
-      '/public/elves/code-module.js',
-      '/public/elves/source-code.js',
+      '/index.html',
+      '/plan98.js',
+      '/plan98-shims.js',
+      '/main.js',
+      '/saga.js',
+      '/cache.js',
+      '/types.js',
+      '/styles/system.css',
+      '/css/base.css',
+      '/css/main.css',
+      '/elves/plan98-modal.js',
+      '/elves/plan98-panel.js',
+      '/elves/plan98-toast.js',
+      '/elves/plan98-wallet.js',
+      '/elves/paper-pocket.js',
+      '/elves/debug-gamepads.js',
+      '/elves/lrud-elf.js',
+      '/elves/multi-task.js',
+      '/elves/my-computer.js',
+      '/elves/flip-book.js',
     ]
 
     bootstrapDependencies.map(path => {
@@ -320,9 +309,15 @@ export async function requestKeycardInsertion(keycard) {
 
 function insertKeycard(state, payload) {
   if(state.keycards.find(x => x.id === payload.id)) {
-    return pasteToKeycard(state, payload)
+    return {
+      ...state,
+      keycards: state.keycards.map(x => x.id !== payload.id ? x : { ...x, ...payload })
+    }
   } else {
-    return unshiftKeycard(state, payload)
+    return {
+      ...state,
+      keycards: [payload, ...state.keycards]
+    }
   }
 }
 
@@ -641,11 +636,11 @@ function process(context) {
         return res
       })
       .catch(e => {
-        $.teach({ error: true }, updateQueueAt(uploadCursor))
+        $.teach({ _index: uploadCursor, error: true }, updateQueueAt)
         console.debug(e)
       })
       .finally(() => {
-        $.teach({ done: true }, updateQueueAt(uploadCursor))
+        $.teach({ _index: uploadCursor, done: true }, updateQueueAt)
         $.teach({ uploadCursor: uploadCursor + 1 })
         if(uploadQueue[uploadCursor]) {
           uploading = false
@@ -654,7 +649,7 @@ function process(context) {
       })
   }).catch((error) => {
     console.error(error)
-    $.teach({ error: true, done: true }, updateQueueAt(uploadCursor))
+    $.teach({ _index: uploadCursor, error: true, done: true }, updateQueueAt)
     $.teach({ uploadCursor: uploadCursor + 1 })
     if(uploadQueue[uploadCursor]) {
       uploading = false
@@ -663,21 +658,13 @@ function process(context) {
   })
 }
 
-function updateQueueAt(index) {
-  return (state, payload) => {
-    return {
-      ...state,
-      uploadQueue: state.uploadQueue.map((x, i) => {
-        if(i === index) {
-          return {
-            ...x,
-            ...payload
-          }
-        }
-
-        return x
-      })
-    }
+function updateQueueAt(state, payload) {
+  const { _index, ...update } = payload
+  return {
+    ...state,
+    uploadQueue: state.uploadQueue.map((x, i) =>
+      i === _index ? { ...x, ...update } : x
+    )
   }
 }
 
@@ -1330,16 +1317,17 @@ $.style(`
 
   & .serious-business {
     padding: 1rem;
-    --v-font-mono: 1;
-    --v-font-casl: 0;
-    --v-font-wght: 400;
-    --v-font-slnt: 0;
-    --v-font-crsv: 0;
-    font-variation-settings: "MONO" var(--v-font-mono), "CASL" var(--v-font-casl), "wght" var(--v-font-wght), "slnt" var(--v-font-slnt), "CRSV" var(--v-font-crsv);
+    font-variation-settings: "MONO" 1, "CASL" 0, "wght" 400, "slnt" 0, "CRSV" 0;
     font-family: "Recursive";
     background: white;
     color: rgba(0,0,0,.85);
     overflow: auto;
+  }
+
+  & .serious-business h1,
+  & .serious-business h2,
+  & .serious-business h3 {
+    font-variation-settings: "MONO" 1, "CASL" 0, "wght" 400, "slnt" 0, "CRSV" 0;
   }
 
 
@@ -1421,13 +1409,7 @@ $.style(`
     background: linear-gradient(135deg, rgba(0,0,0,.35), rgba(0,0,0,.75)), var(--root-theme, mediumseagreen);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    font-weight: bold;
-    --v-font-mono: 0;
-    --v-font-casl: 0;
-    --v-font-wght: 1000;
-    --v-font-slnt: -15;
-    --v-font-crsv: 0;
-    font-variation-settings: "MONO" var(--v-font-mono), "CASL" var(--v-font-casl), "wght" var(--v-font-wght), "slnt" var(--v-font-slnt), "CRSV" var(--v-font-crsv);
+    font-variation-settings: "MONO" 0, "CASL" 0, "wght" 1000, "slnt" -15, "CRSV" 0;
     font-family: "Recursive";
   }
 `)
