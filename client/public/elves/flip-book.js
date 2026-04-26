@@ -307,6 +307,12 @@ $.style(`
     font-family: 'Recursive';
     font-variation-settings: "MONO" 1, "CASL" 0, "wght" 400, "slnt" 0, "CRSV" 0;
     overflow: hidden; position: relative; touch-action: none;
+    user-select: none; /* supported by Chrome and Opera */
+    -webkit-user-select: none; /* Safari */
+    -khtml-user-select: none; /* Konqueror HTML */
+    -moz-user-select: none; /* Firefox */
+    -ms-user-select: none; /* Internet Explorer/Edge */
+    -webkit-touch-callout: none;
   }
   & * { box-sizing: border-box; }
   & .app { display: grid; grid-template-rows: 1fr auto 1rem; height: 100%; width: 100%; }
