@@ -1,6 +1,7 @@
-import { $, html } from '@silly/tag'
+import { Self } from '@plan98/types'
 
 const tag = 'clownbot-brief'
+const $ = Self(tag)
 
 function css() {
   return `

@@ -40,7 +40,14 @@ Blog posts open as iframes inside my-computer — the shell doesn't move.
 
 ## adding a new elf
 
-1. Create `client/public/elves/<tag-name>.js` — the filename must match the custom element tag.
+1. Create `client/public/elves/<tag-name>.js` — the filename must match the custom element tag. Boilerplate:
+   ```js
+   import { Self } from '@plan98/types'
+   const tag = 'my-tag-name'
+   const $ = Self(tag)
+   $.draw(target => `...`)
+   $.when('load', tag, (event) => { ... })
+   ```
 2. Register it in `client/public/index.html` in the `ELVES` object (alphabetical order by tag):
    ```js
    'my-tag-name': '/elves/my-tag-name.js',
