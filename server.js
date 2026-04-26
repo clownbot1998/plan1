@@ -192,6 +192,45 @@ async function handleRequest(request) {
     return new Response(res.ok ? 'ok' : 'write failed', { status: res.ok ? 200 : 500 })
   }
 
+  if (request.method === 'GET' && path.match(/^\/preview-gallery\/[^/]+\/refresh$/)) {
+    const galleryId = path.split('/')[2]
+    const waitMs    = url.searchParams.get('wait') ?? '2000'
+    const script    = new URL('./debugging_utilities/was_gallery.ts', import.meta.url).pathname
+    const enc2      = new TextEncoder()
+    const stream    = new ReadableStream({
+      async start(controller) {
+        try {
+          const child = new Deno.Command('deno', {
+            args: ['run','--allow-run','--allow-net','--allow-env','--allow-read','--allow-write',
+                   script, '--id', galleryId, '--wait', waitMs],
+            stdout: 'piped', stderr: 'null',
+            env: Deno.env.toObject(),
+          }).spawn()
+          const reader = child.stdout.pipeThrough(new TextDecoderStream()).getReader()
+          let buf = ''
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buf += value
+            const lines = buf.split('\n')
+            buf = lines.pop() ?? ''
+            for (const line of lines) {
+              if (line.trim()) controller.enqueue(enc2.encode(`data: ${JSON.stringify(line)}\n\n`))
+            }
+          }
+          await child.status
+          controller.enqueue(enc2.encode(`data: "done"\n\n`))
+        } catch(e) {
+          controller.enqueue(enc2.encode(`data: ${JSON.stringify('error: ' + e.message)}\n\n`))
+        }
+        controller.close()
+      }
+    })
+    return new Response(stream, {
+      headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'connection': 'keep-alive' }
+    })
+  }
+
   if (path === '/eyes') {
     const target = url.searchParams.get('url')
     if (!target) return new Response('missing ?url=', { status: 400 })
