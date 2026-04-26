@@ -411,7 +411,7 @@ function loadInstrument(instrument) {
   ready = false
   current = SampleLibrary.load({
     instruments: instrument,
-    baseUrl: (self.plan98?.env?.HEAVY_ASSET_CDN_URL || '') + "/private/tychi.1998.social/SourceCode/tonejs-instruments/samples/"
+    baseUrl: (self.plan98?.env?.HEAVY_ASSET_CDN_URL || '') + "/cdn/attentionandlearninglab.com/samples/"
   })
 
   Tone.loaded().then(function() {
@@ -419,6 +419,10 @@ function loadInstrument(instrument) {
     Tone.Transport.bpm.value = parseInt(getBpm())
     current.release = .5;
     current.toDestination();
+  }).catch(function() {
+    ready = true
+    Tone.Transport.bpm.value = parseInt(getBpm())
+    try { current.release = .5; current.toDestination(); } catch(e) {}
   })
 
 }
@@ -494,16 +498,20 @@ export function getBpm() {
 
 const attacking = {}
 
-export function attack(note) {
+export function attack(note, velocity=1) {
   if(!ready || attacking[note]) return
-  current.triggerAttack(Tone.Frequency(note, "midi").toNote());
-  attacking[note] = true
+  try {
+    current.triggerAttack(Tone.Frequency(note, "midi").toNote(), Tone.now(), velocity);
+    attacking[note] = true
+  } catch(e) {}
 }
 
-export function attackRelease(note, callback=()=>null, time=getNoteDuration()) {
+export function attackRelease(note, callback=()=>null, time=getNoteDuration(), velocity=1) {
   if(ready) {
-    current.triggerAttackRelease(Tone.Frequency(note, "midi").toNote(), time);
-    attacking[note] = true
+    try {
+      current.triggerAttackRelease(Tone.Frequency(note, "midi").toNote(), time, Tone.now(), velocity);
+      attacking[note] = true
+    } catch(e) {}
   }
 
   setTimeout(callback, Tone.Time(time).toMilliseconds())
