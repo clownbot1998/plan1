@@ -122,6 +122,41 @@ const VIEWS = { brush: 'brush', canvas: 'canvas', settings: 'settings', export: 
 const SCHEMA_VERSION = 1
 const FB_INDEX_KEY = 'index'
 const fb_key = id => `fb-${id}`
+const audio_key = id => `audio-${id}`
+const SESSION_AUDIO_KEY = 'session-audio'
+
+function audioBufferToWav(buf) {
+  const ch = buf.numberOfChannels, sr = buf.sampleRate, len = buf.length
+  const ab = new ArrayBuffer(44 + len * ch * 2)
+  const v = new DataView(ab)
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)) }
+  str(0,'RIFF'); v.setUint32(4, 36 + len*ch*2, true); str(8,'WAVE')
+  str(12,'fmt '); v.setUint32(16,16,true); v.setUint16(20,1,true)
+  v.setUint16(22,ch,true); v.setUint32(24,sr,true); v.setUint32(28,sr*ch*2,true)
+  v.setUint16(32,ch*2,true); v.setUint16(34,16,true)
+  str(36,'data'); v.setUint32(40, len*ch*2, true)
+  let o = 44
+  for (let i = 0; i < len; i++) for (let c = 0; c < ch; c++) {
+    const s = Math.max(-1, Math.min(1, buf.getChannelData(c)[i]))
+    v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7FFF, true); o += 2
+  }
+  return new Blob([ab], { type: 'audio/wav' })
+}
+
+async function persistSessionAudio(target) {
+  if (!target._audioBuffer) return
+  try { await fbCache.put(SESSION_AUDIO_KEY, audioBufferToWav(target._audioBuffer), 'audio/wav') }
+  catch(e) { console.warn('audio persist failed', e) }
+}
+
+async function restoreAudioFromBlob(target, blob) {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+    const buf = await audioCtx.decodeAudioData(await blob.arrayBuffer())
+    target._audioBuffer = buf
+    target._audioDuration = buf.duration
+  } catch(e) { console.warn('audio restore failed', e) }
+}
 
 const BAND_PRESETS = {
   clown:  { 1: 'tuba',       2: 'contrabass', 3: 'cello',   4: 'violin',    5: 'trumpet', 6: 'flute' },
@@ -844,6 +879,11 @@ function boot(target) {
 
   // Watch for remote frame/stroke changes
   watchSharedState(target)
+
+  // restore session audio (fire-and-forget — audio is a nice-to-have, not blocking)
+  fbCache.get(SESSION_AUDIO_KEY).then(record => {
+    if (record?.data) restoreAudioFromBlob(target, record.data)
+  }).catch(() => {})
 }
 
 function attachArtboardPan(target) {
@@ -2348,9 +2388,14 @@ async function saveFlipbook(target) {
     await fbCache.put(`frame-${frameId}`, blob, 'image/png')
   }))
 
+  if (target._audioBuffer) {
+    try { await fbCache.put(audio_key(data.id), audioBufferToWav(target._audioBuffer), 'audio/wav') }
+    catch(e) { console.warn('audio save failed', e) }
+  }
+
   await fbCache.put(fb_key(data.id), data, 'json')
   const index = await readFbIndex()
-  const entry = { id: data.id, savedAt: data.savedAt, frames: data.frames.length, canvasW: data.canvasW, canvasH: data.canvasH, fps: data.fps }
+  const entry = { id: data.id, savedAt: data.savedAt, frames: data.frames.length, canvasW: data.canvasW, canvasH: data.canvasH, fps: data.fps, hasAudio: !!target._audioBuffer }
   await fbCache.put(FB_INDEX_KEY, [...index, entry], 'json')
 }
 
@@ -2372,6 +2417,11 @@ async function loadGalleryList(el, target) {
       await deserializeFlipbook(target, record.data)
       target._localCurrent = 0
       loadCurrentFrame(target); renderOnion(target); renderReel(target)
+      // restore audio if saved with this flipbook
+      target._audioBuffer = null; target._audioDuration = 0
+      fbCache.get(audio_key(btn.dataset.loadId)).then(ar => {
+        if (ar?.data) restoreAudioFromBlob(target, ar.data)
+      }).catch(() => {})
       const root = btn.closest(tag); if (root) closeOverlay(root)
     })
   })
@@ -2457,6 +2507,7 @@ async function importAudio(target, file, fps) {
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
     target._audioBuffer = audioBuffer
     target._audioDuration = audioBuffer.duration
+    persistSessionAudio(target)
 
     const totalFrames = Math.ceil(audioBuffer.duration * fps)
     const { canvasW, canvasH } = $.learn()
@@ -2526,6 +2577,7 @@ async function importVideo(target,file,fpsOverride){
     const arrayBuffer=await file.arrayBuffer()
     audioCtx.decodeAudioData(arrayBuffer,buf=>{
       target._audioBuffer=buf;target._audioDuration=buf.duration
+      persistSessionAudio(target)
     })
   }catch(e){console.warn('video audio extraction failed',e)}
 }
