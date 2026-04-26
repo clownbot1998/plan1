@@ -1153,6 +1153,21 @@ function ensureFrameVideo(frameId, target) {
   }).catch(e => { f._videoLoading = false; console.warn('lazy frame load failed', frameId, e) })
 }
 
+// Returns a promise that resolves when the frame's video is loaded (or gave up).
+function loadFrameVideo(frameId, target) {
+  const f = db[frameId]
+  if (!f || !f._hasCachedVideo || f.hasVideo) return Promise.resolve()
+  ensureFrameVideo(frameId, target)
+  return new Promise(resolve => {
+    const deadline = Date.now() + 8000
+    const check = () => {
+      if (f.hasVideo || !f._videoLoading || Date.now() > deadline) resolve()
+      else setTimeout(check, 50)
+    }
+    check()
+  })
+}
+
 function updateReelThumb(target, frameId) {
   const thumb = target.querySelector(`canvas[data-thumb-for="${frameId}"]`)
   if (!thumb) return
@@ -2313,33 +2328,30 @@ async function exportMp4(target, { download=true }={}) {
   let seq = [...frames]
   if (loopMode === 'pingpong') seq = [...frames, ...[...frames].reverse().slice(1, -1)]
 
-  // kick off lazy video loads in parallel
-  frames.forEach(id => ensureFrameVideo(id, target))
-
   const off = document.createElement('canvas')
   off.width = canvasW; off.height = canvasH
   const octx = off.getContext('2d')
 
-  // phase 1: render frames → PNG → ffmpeg virtual FS  (0–70%)
+  // phase 1: preload all video frames in parallel (0–30%)
+  let loaded = 0
+  setStatus(`loading frames… 0 / ${frames.length}`, 0)
+  await Promise.all(frames.map(id =>
+    loadFrameVideo(id, target).then(() => {
+      loaded++
+      setStatus(`loading frames… ${loaded} / ${frames.length}`, Math.round(loaded / frames.length * 30))
+    })
+  ))
+
+  // phase 2: render frames → PNG → ffmpeg virtual FS  (30–80%)
   for (let i = 0; i < seq.length; i++) {
     const id = seq[i]
     const f  = ensureFrame(id, canvasW, canvasH)
-    if (f._hasCachedVideo && !f.hasVideo) {
-      await new Promise(r => {
-        const deadline = Date.now() + 3000
-        const poll = () => {
-          if (f.hasVideo || !f._videoLoading || Date.now() > deadline) { r(); return }
-          setTimeout(poll, 30)
-        }
-        poll()
-      })
-    }
     octx.clearRect(0, 0, canvasW, canvasH)
     if (f.hasVideo) octx.drawImage(f.videoCanvas, 0, 0)
     octx.drawImage(f.drawCanvas, 0, 0)
     const blob = await new Promise(r => off.toBlob(r, 'image/png'))
     await ff.writeFile(`f${String(i).padStart(5,'0')}.png`, new Uint8Array(await blob.arrayBuffer()))
-    setStatus(`rendering ${i + 1} / ${seq.length}`, Math.round((i + 1) / seq.length * 70))
+    setStatus(`rendering ${i + 1} / ${seq.length}`, 30 + Math.round((i + 1) / seq.length * 50))
   }
 
   // phase 2: audio WAV → FS
@@ -2350,9 +2362,9 @@ async function exportMp4(target, { download=true }={}) {
     audioArgs.push('-i', 'audio.wav', '-c:a', 'aac', '-shortest')
   }
 
-  // phase 3: encode  (70–100% via ffmpeg progress)
-  setStatus('encoding…', 70)
-  const onProgress = ({ progress: p }) => setStatus(`encoding… ${Math.round(p * 100)}%`, 70 + Math.round(p * 30))
+  // phase 3: encode  (80–100% via ffmpeg progress)
+  setStatus('encoding…', 80)
+  const onProgress = ({ progress: p }) => setStatus(`encoding… ${Math.round(p * 100)}%`, 80 + Math.round(p * 20))
   ff.on('progress', onProgress)
 
   try {
