@@ -1100,9 +1100,12 @@ function ensureFrameVideo(frameId, target) {
       const img = await createImageBitmap(record.data)
       f.videoCanvas.getContext('2d').drawImage(img, 0, 0)
       f.hasVideo = true
+    } else {
+      console.warn('flip-book: no blob in cache for frame', frameId)
     }
     f._videoLoading = false
     loadCurrentFrame(target)
+    renderReel(target)
   }).catch(e => { f._videoLoading = false; console.warn('lazy frame load failed', frameId, e) })
 }
 

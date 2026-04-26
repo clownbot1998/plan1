@@ -59,7 +59,9 @@ export default function cache(name) {
         request.onsuccess = function(event) {
           const request = objectStore.put(record);
           request.onsuccess = () => resolve({ ok: true });
+          request.onerror = reject;
         }
+        request.onerror = reject;
       } catch (e) {
         const request = objectStore.add(record);
         request.onsuccess = resolve;
