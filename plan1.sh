@@ -36,7 +36,11 @@ case "$CMD" in
     fi
     ;;
   restart)
+    OLD_PID=$(cat "$PID_FILE" 2>/dev/null)
     "$0" stop
+    if [ -n "$OLD_PID" ]; then
+      while kill -0 "$OLD_PID" 2>/dev/null; do sleep 0.1; done
+    fi
     "$0" serve
     ;;
   open)
@@ -127,6 +131,12 @@ case "$CMD" in
     mkdir -p "$SCRIPT_DIR/private"
     deno run --allow-net --allow-env --allow-read --allow-write $ENV_FLAG "$SCRIPT_DIR/debugging_utilities/was_private.ts" "${@:2}"
     ;;
+  gallery)
+    ENV_FLAG=""
+    [ -f "$SCRIPT_DIR/.env" ] && ENV_FLAG="--env-file=$SCRIPT_DIR/.env"
+    deno run --allow-run --allow-net --allow-env --allow-read --allow-write $ENV_FLAG "$SCRIPT_DIR/debugging_utilities/was_gallery.ts" "${@:2}"
+    "$0" build
+    ;;
   deploy)
     "$0" build
     "$0" sync
@@ -201,6 +211,7 @@ case "$CMD" in
     echo "  sync   — uploads dist/ bootstrap files to WAS"
     echo "  deploy   — build + sync"
     echo "  private  — sync private/ to WAS (--pull to restore, --dry-run to preview)"
+    echo "  gallery  — screenshot gallery items → private/screenshots/<id>/ then build"
     echo "  watch    — rebuilds dist/ on any change to client/"
     echo "  serve  — serves dist/ on port $PORT"
     echo "  test   — run test suites (default: test/*.test.js)"
