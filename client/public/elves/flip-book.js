@@ -794,6 +794,8 @@ function boot(target) {
   target._audioBuffer   = null
   target._audioSrc      = null
   target._audioDuration = 0
+  target._reelObserver  = null
+  target._bufferCheck   = null
 
   target._artboard        = target.querySelector('[data-artboard]')
   target._artboardInner   = target.querySelector('[data-artboard-inner]')
@@ -1105,8 +1107,20 @@ function ensureFrameVideo(frameId, target) {
     }
     f._videoLoading = false
     loadCurrentFrame(target)
-    renderReel(target)
+    updateReelThumb(target, frameId)
+    target._bufferCheck?.()
   }).catch(e => { f._videoLoading = false; console.warn('lazy frame load failed', frameId, e) })
+}
+
+function updateReelThumb(target, frameId) {
+  const thumb = target.querySelector(`canvas[data-thumb-for="${frameId}"]`)
+  if (!thumb) return
+  const f = db[frameId]
+  if (!f) return
+  const tctx = thumb.getContext('2d')
+  tctx.clearRect(0, 0, thumb.width, thumb.height)
+  if (f.hasVideo) tctx.drawImage(f.videoCanvas, 0, 0)
+  tctx.drawImage(f.drawCanvas, 0, 0)
 }
 
 function loadCurrentFrame(target) {
@@ -1436,6 +1450,12 @@ function renderReel(target) {
   const current = target._localCurrent ?? 0
   const reel = target.querySelector('[data-film-reel]'); if (!reel) return
   const addBtn = reel.querySelector('[data-new-frame]')
+
+  if (target._reelObserver) target._reelObserver.disconnect()
+  target._reelObserver = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) ensureFrameVideo(e.target.dataset.reelId, target) })
+  }, { root: reel, rootMargin: '0px 200px' })
+
   reel.innerHTML = ''
 
   frames.forEach((id, idx) => {
@@ -1445,6 +1465,7 @@ function renderReel(target) {
 
     const thumb = document.createElement('canvas')
     thumb.width = f.drawCanvas.width; thumb.height = f.drawCanvas.height
+    thumb.dataset.thumbFor = id
     const tctx = thumb.getContext('2d')
     if (f.hasVideo) tctx.drawImage(f.videoCanvas, 0, 0)
     tctx.drawImage(f.drawCanvas, 0, 0)
@@ -1528,6 +1549,7 @@ function renderReel(target) {
     catcher.addEventListener('contextmenu', e => e.preventDefault())
     del.addEventListener('click', e => { e.stopPropagation(); deleteFrame(target, idx) })
 
+    if (f._hasCachedVideo && !f.hasVideo) target._reelObserver.observe(div)
     reel.appendChild(div)
   })
 
@@ -2060,21 +2082,74 @@ function stopAudio(target){
   if(target._audioSrc){try{target._audioSrc.stop()}catch(e){}; target._audioSrc=null}
 }
 
-function startPlayback(target){
-  $.teach({playing:true});target._playDir=1
-  startAudio(target)
-  target._playInterval=setInterval(()=>{
-    const{frames,loopMode}=$.learn()
-    const current = target._localCurrent ?? 0
-    let next=current+target._playDir
-    if(loopMode==='loop')next=((next%frames.length)+frames.length)%frames.length
-    else if(loopMode==='pingpong'){if(next>=frames.length){next=frames.length-2;target._playDir=-1}else if(next<0){next=1;target._playDir=1}}
-    else{if(next>=frames.length){next=frames.length-1;stopPlayback(target);return}}
-    target._localCurrent=Math.max(0,Math.min(frames.length-1,next))
-    loadCurrentFrame(target);renderOnion(target);renderReel(target)
-  },1000/$.learn().fps)
+function frameIsReady(frameId) {
+  const f = db[frameId]
+  return !f || !f._hasCachedVideo || f.hasVideo
 }
-function stopPlayback(target){$.teach({playing:false});clearInterval(target._playInterval);stopAudio(target)}
+
+function countReadyAhead(frames, current, n) {
+  let ready = 0
+  for (let i = 0; i < n; i++) {
+    if (frameIsReady(frames[(current + i) % frames.length])) ready++
+    else break  // first gap stops the run
+  }
+  return ready
+}
+
+function startPlayback(target) {
+  target._playDir = 1
+  const { frames, fps } = $.learn()
+  const current = target._localCurrent ?? 0
+  const needed = Math.min(Math.ceil(fps * 2), frames.length)
+  const ready = countReadyAhead(frames, current, needed)
+
+  // kick off aggressive background loading for all unloaded frames
+  frames.forEach(id => ensureFrameVideo(id, target))
+
+  if (ready >= needed) {
+    _doStartPlayback(target)
+    return
+  }
+
+  // buffer: show status, wait for enough consecutive ready frames
+  $.teach({ playing: true })
+  $.whisper({ status: `buffering… ${ready}/${needed}` })
+  target._bufferCheck = () => {
+    const { frames, fps } = $.learn()
+    const current = target._localCurrent ?? 0
+    const needed = Math.min(Math.ceil(fps * 2), frames.length)
+    const ready = countReadyAhead(frames, current, needed)
+    $.whisper({ status: `buffering… ${ready}/${needed}` })
+    if (ready >= needed) {
+      target._bufferCheck = null
+      _doStartPlayback(target)
+    }
+  }
+}
+
+function _doStartPlayback(target) {
+  $.teach({ playing: true })
+  $.whisper({ status: '' })
+  startAudio(target)
+  target._playInterval = setInterval(() => {
+    const { frames, loopMode } = $.learn()
+    const current = target._localCurrent ?? 0
+    let next = current + target._playDir
+    if (loopMode === 'loop') next = ((next % frames.length) + frames.length) % frames.length
+    else if (loopMode === 'pingpong') { if (next >= frames.length) { next = frames.length - 2; target._playDir = -1 } else if (next < 0) { next = 1; target._playDir = 1 } }
+    else { if (next >= frames.length) { next = frames.length - 1; stopPlayback(target); return } }
+    target._localCurrent = Math.max(0, Math.min(frames.length - 1, next))
+    loadCurrentFrame(target); renderOnion(target); renderReel(target)
+  }, 1000 / $.learn().fps)
+}
+
+function stopPlayback(target) {
+  $.teach({ playing: false })
+  $.whisper({ status: '' })
+  clearInterval(target._playInterval)
+  target._bufferCheck = null
+  stopAudio(target)
+}
 
 /*
 
