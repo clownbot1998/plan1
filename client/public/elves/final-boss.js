@@ -21,8 +21,11 @@ const $ = elf('final-boss', {
   consent: false
 })
 
-const initialColors = recalculate()
-$.teach({ colors: initialColors, colorVariables: print(initialColors) })
+// defer past module evaluation cycle — plan98-palette → paper-pocket → final-boss → plan98-palette
+setTimeout(() => {
+  const initialColors = recalculate()
+  $.teach({ colors: initialColors, colorVariables: print(initialColors) })
+}, 0)
 
 function print(colors) {
   return colors.flatMap(x => x).map(({ value }) => `
