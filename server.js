@@ -140,6 +140,8 @@ const ISOLATION_HEADERS = {
 };
 
 function addIsolation(res) {
+  const ct = res.headers.get('content-type') ?? ''
+  if (!ct.includes('text/html')) return res
   const h = new Headers(res.headers);
   for (const [k, v] of Object.entries(ISOLATION_HEADERS)) h.set(k, v);
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });

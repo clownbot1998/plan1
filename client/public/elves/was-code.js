@@ -224,11 +224,19 @@ $.draw(target => {
       }
     })
 
+    const recursiveTheme = EditorView.theme({
+      '.cm-scroller': {
+        fontFamily: '"Recursive", monospace',
+        fontVariationSettings: '"MONO" 1, "CASL" 1, "wght" 400, "slnt" -15, "CRSV" 1',
+      }
+    })
+
     const config = {
       extensions: [
         basicSetup,
         EditorView.lineWrapping,
         gruvboxDark,
+        recursiveTheme,
         javascript(),
         html(),
         css(),
@@ -399,15 +407,6 @@ $.style(`
     overflow: auto;
   }
 
-  & .cm-scroller {
-    --v-font-wght: 400;
-    --v-font-slnt: -15;
-    --v-font-crsv: 1;
-    --v-font-casl: 1;
-    --v-font-mono: 1;
-    font-variation-settings: "MONO" var(--v-font-mono), "CASL" var(--v-font-casl), "wght" var(--v-font-wght), "slnt" var(--v-font-slnt), "CRSV" var(--v-font-crsv);
-    font-family: "Recursive" !important;
-  }
 
   & .select {
     position: absolute;

@@ -37,6 +37,11 @@ function mtime(p) {
   return err === 0 ? st.mtime : 0
 }
 
+function fileSize(p) {
+  const [st, err] = os.stat(p)
+  return err === 0 ? st.size : -1
+}
+
 function dirMaxMtime(dir, skip = []) {
   let max = 0
   for (const f of readdir(dir)) {
@@ -64,11 +69,13 @@ const BINARY_EXTS = new Set([
 ])
 
 function copyFile(src, dst) {
-  if (mtime(dst) >= mtime(src)) return
   const ext = src.split('.').pop()?.toLowerCase() ?? ''
   if (BINARY_EXTS.has(ext)) {
+    // re-copy if dst is stale OR sizes differ (catches old text-corrupted binaries)
+    if (mtime(dst) >= mtime(src) && fileSize(dst) === fileSize(src)) return
     std.popen(`cp '${src}' '${dst}'`, 'r').close()
   } else {
+    if (mtime(dst) >= mtime(src)) return
     writeFile(dst, std.loadFile(src))
   }
 }
