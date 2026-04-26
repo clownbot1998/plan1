@@ -19,4 +19,6 @@ So h1 gets wght 1000 and a touch of MONO. h6 gets wght 100, full slant, full CAS
 
 The performance profile showed quickjs-emscripten loading on every page — 69% jank from WASM initialization on the worker thread. source-code.js pulls it in, and source-code was being eagerly imported in index.html. The fix: a MutationObserver lazy-loader. Every custom element tag lives in an ELVES map. When a tag first appears in the DOM, the loader imports its file. Cold pages don't pay for WASM they don't need.
 
+Confirmed with a second profile taken after the fix: zero WASM hits across all threads, main thread 78% idle. Before was 69% jank. After is 78% sleeping. That's the diff.
+
 The clown was bold but invisible. Now the clown is bold and Recursive.
