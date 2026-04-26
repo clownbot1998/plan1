@@ -2272,7 +2272,10 @@ async function exportMp4(target, { save=false, download=true }={}){
   const{frames,canvasW,canvasH,fps,loopMode}=$.learn()
   const off=document.createElement('canvas');off.width=canvasW;off.height=canvasH
   const octx=off.getContext('2d')
-  const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp8')?'video/webm;codecs=vp8':'video/webm'
+  const hasAudio = !!target._audioBuffer
+  const mime = hasAudio
+    ? (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus' : 'video/webm')
+    : (MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8' : 'video/webm')
   const mspf=Math.round(1000/fps)
 
   let seq=[...frames]
