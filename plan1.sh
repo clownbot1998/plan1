@@ -17,7 +17,7 @@ case "$CMD" in
     fi
     ENV_FLAG=""
     [ -f "$SCRIPT_DIR/.env" ] && ENV_FLAG="--env-file=$SCRIPT_DIR/.env"
-    deno run --allow-read --allow-net --allow-env $ENV_FLAG "$SCRIPT_DIR/server.js" &
+    deno run --allow-read --allow-net --allow-env --allow-run --allow-write $ENV_FLAG "$SCRIPT_DIR/server.js" &
     echo $! > "$PID_FILE"
     echo "serving dist/ on http://localhost:$PORT (pid $!)"
     echo "open http://localhost:$PORT/app/private-ai"
@@ -144,6 +144,7 @@ case "$CMD" in
           --format '%w%f' \
           "$SCRIPT_DIR/client/" \
           "$SCRIPT_DIR/blog/" \
+          "$SCRIPT_DIR/private/" \
           "$SCRIPT_DIR/build.js" \
           "$SCRIPT_DIR/vendor.js" \
           "$SCRIPT_DIR/server.js" 2>/dev/null)

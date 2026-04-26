@@ -603,6 +603,39 @@ try {
   print(e.stack)
 }
 
+// ── private manifest ─────────────────────────────────────────────────────────
+
+const PRIVATE = join(CWD, 'private')
+const privateManifestPath = join(CWD, 'private-manifest.json')
+
+function walkPrivate(dir, base, files) {
+  const [entries, err] = os.readdir(dir)
+  if (err !== 0) return
+  for (const f of entries) {
+    if (f === '.' || f === '..') continue
+    const full = join(dir, f)
+    const rel  = base + '/' + f
+    if (isDir(full)) { walkPrivate(full, rel, files); continue }
+    const [st] = os.stat(full)
+    if (st) files.push({ path: rel, mtime: st.mtime, size: st.size })
+  }
+}
+
+const privateFiles = []
+const [, privateErr] = os.stat(PRIVATE)
+if (privateErr === 0) {
+  walkPrivate(PRIVATE, '', privateFiles)
+  const privateSrcMtime = privateFiles.reduce((m, f) => Math.max(m, f.mtime), 0)
+  if (mtime(privateManifestPath) < privateSrcMtime) {
+    writeFile(privateManifestPath, JSON.stringify(privateFiles))
+    print('write: private-manifest.json (' + privateFiles.length + ' files)')
+  } else {
+    print('[cached] private-manifest.json')
+  }
+} else {
+  print('[skip] private/ not found')
+}
+
 // ── lint: $.teach closure bug ──────────────────────────────────────────────────
 // Flag $.teach(payload, reducer) where reducer uses closure variables as computed keys
 // The sandbox stringifies+evals the reducer so closures don't survive.

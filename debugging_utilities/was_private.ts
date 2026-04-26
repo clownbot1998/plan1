@@ -1,15 +1,18 @@
 #!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write
 /**
- * was_private.ts — sync private/ folder to/from WAS
+ * was_private.ts — delta-sync private/ to/from WAS using manifests
  *
  * Usage:
- *   deno run ... was_private.ts           # push private/ → WAS
- *   deno run ... was_private.ts --pull    # pull WAS /private/ → private/
+ *   deno run ... was_private.ts           # push changed files → WAS
+ *   deno run ... was_private.ts --pull    # pull WAS changes → private/
  *   deno run ... was_private.ts --dry-run # show what would happen
+ *
+ * Reads private-manifest.json (local state from build.js).
+ * Maintains was-manifest.json (last-synced state) for delta detection.
  */
 import { Ed25519Signer } from 'npm:@did.coop/did-key-ed25519@0.0.14';
 import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3';
-import { join, relative } from 'jsr:@std/path';
+import { join, dirname } from 'jsr:@std/path';
 
 const signerJson = Deno.env.get('PLAN98_WAS_SIGNER') ?? '';
 const spaceId    = Deno.env.get('PLAN98_WAS_SPACE_ID') ?? '';
@@ -22,74 +25,99 @@ if (!signerJson || !spaceId) {
   Deno.exit(1);
 }
 
+const root           = new URL('../', import.meta.url).pathname;
+const privateDir     = join(root, 'private');
+const localManifest  = join(root, 'private-manifest.json');
+const syncManifest   = join(root, 'was-manifest.json');
+
 const signer  = await Ed25519Signer.fromJSON(signerJson);
 const storage = new StorageClient(new URL(wasHost));
 const space   = storage.space({ signer, id: `urn:uuid:${spaceId}` });
 
-const privateDir = join(new URL('.', import.meta.url).pathname, '../private');
+type LocalEntry  = { path: string; mtime: number; size: number }
+type SyncEntry   = { path: string; mtime: number; etag?: string }
+type SyncState   = Record<string, SyncEntry>
+
+async function readJSON<T>(p: string, fallback: T): Promise<T> {
+  try { return JSON.parse(await Deno.readTextFile(p)) } catch { return fallback }
+}
 
 async function push() {
-  let ok = 0, skip = 0, fail = 0;
-  for await (const entry of walk(privateDir)) {
-    const rel  = '/' + relative(privateDir, entry);
-    const path = '/private' + rel;
-    if (dryRun) { console.log('PUSH', path); skip++; continue; }
+  const local: LocalEntry[] = await readJSON(localManifest, []);
+  if (!local.length) {
+    console.log('No private-manifest.json — run ./plan1.sh build first');
+    Deno.exit(1);
+  }
+
+  const synced: SyncState = await readJSON(syncManifest, {});
+  const toSync = local.filter(f => {
+    const last = synced[f.path];
+    return !last || last.mtime < f.mtime;
+  });
+
+  if (!toSync.length) { console.log('Nothing to sync.'); return; }
+
+  console.log(`Syncing ${toSync.length} of ${local.length} files to ${wasHost}\n`);
+  let ok = 0, fail = 0;
+
+  for (const f of toSync) {
+    const wasPath = '/private' + f.path;
+    if (dryRun) { console.log('PUSH', wasPath); ok++; continue; }
     try {
-      const bytes = await Deno.readFile(entry);
-      const ct    = guessMime(entry);
+      const bytes = await Deno.readFile(join(privateDir, f.path));
+      const ct    = guessMime(f.path);
       const blob  = new Blob([bytes], { type: ct });
-      const res   = await space.resource(path).put(blob, { signer });
-      console.log(`${res.status} ${path} (${bytes.length}B)`);
-      if (res.ok) ok++; else fail++;
+      const res   = await space.resource(wasPath).put(blob, { signer });
+      const etag  = res.headers?.get('etag') ?? undefined;
+      console.log(`${res.status} ${wasPath} (${bytes.length}B)`);
+      if (res.ok) {
+        synced[f.path] = { path: f.path, mtime: f.mtime, etag };
+        ok++;
+      } else { fail++; }
     } catch (e: unknown) {
-      console.log(`ERR ${path}: ${e instanceof Error ? e.message : String(e)}`);
+      console.log(`ERR ${wasPath}: ${e instanceof Error ? e.message : String(e)}`);
       fail++;
     }
   }
-  console.log(dryRun
-    ? `\nDry run: ${skip} files would be uploaded`
-    : `\nDone: ${ok} uploaded, ${fail} failed`);
+
+  if (!dryRun) await Deno.writeTextFile(syncManifest, JSON.stringify(synced, null, 2));
+  console.log(`\nDone: ${ok} synced, ${fail} failed`);
   if (fail > 0) Deno.exit(1);
 }
 
-async function pull_() {
+async function pullFiles() {
+  const synced: SyncState = await readJSON(syncManifest, {});
   const listRes = await space.resource('/private/').get({ signer }).catch(() => null);
-  if (!listRes || !listRes.ok) {
+  if (!listRes?.ok) {
     console.error('Could not list /private/ from WAS — is WAS running?');
     Deno.exit(1);
   }
   const listing: string[] = await listRes.json().catch(() => []);
-  if (!listing.length) {
-    console.log('Nothing in /private/ on WAS.');
-    return;
-  }
+  if (!listing.length) { console.log('Nothing in /private/ on WAS.'); return; }
+
   let ok = 0, fail = 0;
-  for (const path of listing) {
-    const localPath = join(privateDir, path.replace(/^\/private\//, ''));
-    if (dryRun) { console.log('PULL', path, '→', localPath); continue; }
+  for (const wasPath of listing) {
+    const localRel  = wasPath.replace(/^\/private/, '');
+    const localPath = join(privateDir, localRel);
+    if (dryRun) { console.log('PULL', wasPath, '→', localPath); continue; }
     try {
-      const res = await space.resource(path).get({ signer }).catch(() => null);
-      if (!res?.ok) { console.log(`SKIP ${path} — not found`); fail++; continue; }
+      const res = await space.resource(wasPath).get({ signer }).catch(() => null);
+      if (!res?.ok) { console.log(`SKIP ${wasPath}`); fail++; continue; }
       const bytes = new Uint8Array(await res.arrayBuffer());
-      await Deno.mkdir(localPath.replace(/\/[^/]+$/, ''), { recursive: true });
+      await Deno.mkdir(dirname(localPath), { recursive: true });
       await Deno.writeFile(localPath, bytes);
-      console.log(`${res.status} ${path} → ${localPath}`);
+      const stat = await Deno.stat(localPath);
+      synced[localRel] = { path: localRel, mtime: stat.mtime?.getTime() ?? Date.now() };
+      console.log(`${res.status} ${wasPath} → ${localPath}`);
       ok++;
     } catch (e: unknown) {
-      console.log(`ERR ${path}: ${e instanceof Error ? e.message : String(e)}`);
+      console.log(`ERR ${wasPath}: ${e instanceof Error ? e.message : String(e)}`);
       fail++;
     }
   }
+  if (!dryRun) await Deno.writeTextFile(syncManifest, JSON.stringify(synced, null, 2));
   console.log(`\nDone: ${ok} restored, ${fail} failed`);
   if (fail > 0) Deno.exit(1);
-}
-
-async function* walk(dir: string): AsyncGenerator<string> {
-  for await (const entry of Deno.readDir(dir)) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory) yield* walk(path);
-    else yield path;
-  }
 }
 
 function guessMime(path: string): string {
@@ -99,10 +127,10 @@ function guessMime(path: string): string {
     gif: 'image/gif', webp: 'image/webp', heic: 'image/heic',
     mp4: 'video/mp4', mov: 'video/quicktime', mp3: 'audio/mpeg',
     wav: 'audio/wav', pdf: 'application/pdf', txt: 'text/plain',
-    json: 'application/json',
+    json: 'application/json', ogg: 'audio/ogg',
   };
   return map[ext] ?? 'application/octet-stream';
 }
 
-if (pull) await pull_();
+if (pull) await pullFiles();
 else await push();
