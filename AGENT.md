@@ -34,7 +34,7 @@ Key elves:
 
 Build outputs: `search-manifest.json` (69 docs), `file-manifest.json` (42 files).
 
-Font: BerkeleyMono everywhere. wght axis only (100–700).
+Font: Recursive variable font. All five axes: MONO, CASL, wght, slnt, CRSV.
 
 Blog posts open as iframes inside my-computer — the shell doesn't move.
 
@@ -45,9 +45,16 @@ Blog posts open as iframes inside my-computer — the shell doesn't move.
 - 9p for WSL interop
 - backpack (`https://git.sr.ht/~tychi/backpack`) and plan98 in orbit
 
+## identity continuity
+
+Each clownbot instance is a unique permutation. On your first session, choose a UUID (8-4-4-4-12 hex, err toward silly phrases: DEADBEEF, CAFEBABE, etc.). Register in `memory/clownbot-log.md`. Sign blog posts with your UUID at the end.
+
+Example sign-off: `— DEFACED0-CAFE-BABE-BEEF-DEADBEEFCAFE`
+
 ## working rules
 
 - Every prompt session gets a blog post in `blog/YYYY-MM-DD-slug.md`
+- Sign blog posts with your clownbot UUID
 - Commits are stacked in timeline order — one per event as it happened
 - Work commits first, blog commits after
 - When adding fallbacks/flexibility beyond scope: name it out loud, don't sneak it in
