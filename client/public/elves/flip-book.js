@@ -327,13 +327,13 @@ $.style(`
   & .onion-layer { position: absolute; top: 0; left: 0; pointer-events: none; image-rendering: pixelated; }
 
   & .output-canvas {
-    display: block; image-rendering: pixelated; position: relative; z-index: 10;
+    display: block; position: relative; z-index: 10;
     touch-action: none; user-select: none; -webkit-user-select: none;
   }
 
   /* player presence canvases — one per remote peer, same-frame only */
   & .player-canvases { position: absolute; inset: 0; pointer-events: none; z-index: 11; }
-  & .player-canvas { position: absolute; top: 0; left: 0; pointer-events: none; image-rendering: pixelated; }
+  & .player-canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
 
   /* cursor label for each remote player */
   & .player-cursor {
@@ -1008,7 +1008,11 @@ function initCanvas(target, w, h) {
 
 function applyZoomStyles(target) {
   const { canvasW: w, canvasH: h, zoom } = $.learn()
+  const dpr = window.devicePixelRatio || 1
   const px = n => (n * zoom) + 'px'
+  // DPR-scale the output canvas so strokes render at device resolution
+  target._outputCanvas.width  = Math.round(w * zoom * dpr)
+  target._outputCanvas.height = Math.round(h * zoom * dpr)
   target._outputCanvas.style.width  = px(w)
   target._outputCanvas.style.height = px(h)
   target._onionCanvases.forEach(c => { c.style.width = px(w); c.style.height = px(h) })
@@ -1574,14 +1578,20 @@ function setupCompositeLoop(target) {
 
   const loop = () => {
     if (target._destroyed) return
-    const { canvasW:w, canvasH:h, chromakeyEnabled, chromakeyColor, chromakeyTolerance } = $.learn()
+    const { canvasW:w, canvasH:h, zoom, chromakeyEnabled, chromakeyColor, chromakeyTolerance } = $.learn()
+    const dpr = window.devicePixelRatio || 1
+    const scale = zoom * dpr
 
     if (chromakeyEnabled && (ckCanvas.width!==w||ckCanvas.height!==h)) {
       ckCanvas.width=w; ckCanvas.height=h
       ckCtx=ckCanvas.getContext('2d',{willReadFrequently:true})
     }
 
-    ctx.clearRect(0,0,w,h)
+    ctx.clearRect(0, 0, w * scale, h * scale)
+    ctx.save()
+    ctx.scale(scale, scale)
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(target._videoCanvas,0,0)
 
     if (chromakeyEnabled) {
@@ -1605,6 +1615,7 @@ function setupCompositeLoop(target) {
     Object.values(target._playerCanvasMap || {}).forEach(pc => {
       ctx.drawImage(pc, 0, 0)
     })
+    ctx.restore()
 
     requestAnimationFrame(loop)
   }
