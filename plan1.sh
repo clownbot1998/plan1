@@ -106,6 +106,15 @@ case "$CMD" in
     qjs --std "$SCRIPT_DIR/build.js"
     qjs --std "$SCRIPT_DIR/vendor.js"
     ;;
+  watch)
+    echo "watching client/ for changes — press Ctrl-C to stop"
+    while true; do
+      inotifywait -r -q -e modify,create,delete,move "$SCRIPT_DIR/client/" 2>/dev/null \
+        && echo "── change detected, rebuilding ──" \
+        && qjs --std "$SCRIPT_DIR/build.js" \
+        && curl -sf -X POST "http://localhost:${PORT}/__reload" > /dev/null 2>&1 || true
+    done
+    ;;
   bootstrap)
     MEMORY_SRC="$SCRIPT_DIR/memory"
     MEMORY_DST="$HOME/.claude/projects/-home-clownbot/memory"
@@ -140,8 +149,9 @@ case "$CMD" in
     done
     ;;
   *)
-    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|test|reverse-client|bootstrap]"
+    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|watch|test|reverse-client|bootstrap]"
     echo "  build  — generates blog pages + vendors deps into dist/"
+    echo "  watch  — rebuilds dist/ on any change to client/"
     echo "  serve  — serves dist/ on port $PORT"
     echo "  test   — run test suites (default: test/*.test.js)"
     ;;

@@ -59,6 +59,19 @@ if (!_signerJson || !_spaceId) {
 }
 // --- end keycard bootstrap ---
 
+// --- live reload SSE ---
+const reloadClients = new Set();
+const enc = new TextEncoder();
+
+function broadcastReload() {
+  for (const ctrl of reloadClients) {
+    try { ctrl.enqueue(enc.encode('data: reload\n\n')); } catch { reloadClients.delete(ctrl); }
+  }
+}
+
+const RELOAD_SCRIPT = `<script>(()=>{const e=new EventSource('/__reload');e.onmessage=()=>location.reload()})()</script>`;
+// --- end live reload ---
+
 function buildEnvScript() {
   const env = {
     OLLAMA_HOST:         safeEnv('OLLAMA_HOST',    'http://localhost:11434/v1'),
@@ -73,20 +86,20 @@ function buildEnvScript() {
 }
 
 function injectEnv(html) {
-  return html.replace('</head>', buildEnvScript() + '</head>');
+  return html.replace('</head>', buildEnvScript() + RELOAD_SCRIPT + '</head>');
 }
 
-let baseHTML;
-try {
-  baseHTML = await Deno.readTextFile(`${DIST}index.html`);
-} catch {
-  console.error(`error: dist/index.html not found — run ./plan1.sh build first`);
-  Deno.exit(1);
+async function getBaseHTML() {
+  try {
+    return await Deno.readTextFile(`${DIST}index.html`);
+  } catch {
+    console.error(`error: dist/index.html not found — run ./plan1.sh build first`);
+    Deno.exit(1);
+  }
 }
 
-
-function injectApp(tag, attrs = '') {
-  return baseHTML.replace(
+function injectApp(html, tag, attrs = '') {
+  return html.replace(
     /<main[^>]*>[\s\S]*?<\/main>/,
     `<main id="main"><${tag}${attrs}></${tag}></main>`
   );
@@ -154,13 +167,36 @@ Deno.serve({ port: PORT }, async (request) => {
 
   if (path === '/admin' || path === '/admin/') return adminPage(url);
 
+  // live reload — SSE stream
+  if (path === '/__reload' && request.method === 'GET') {
+    let ctrl;
+    const stream = new ReadableStream({
+      start(c) { ctrl = c; reloadClients.add(c); },
+      cancel() { reloadClients.delete(ctrl); },
+    });
+    return new Response(stream, {
+      headers: {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        'connection': 'keep-alive',
+      },
+    });
+  }
+
+  // live reload — trigger broadcast
+  if (path === '/__reload' && request.method === 'POST') {
+    broadcastReload();
+    return new Response('ok');
+  }
+
   if (path.startsWith('/app/')) {
     const tag = path.split('/app/')[1].split('/')[0];
     let attrs = '';
     for (const [k, v] of url.searchParams) {
       attrs += ` ${k}="${v}"`;
     }
-    return new Response(injectEnv(injectApp(tag, attrs)), {
+    const html = await getBaseHTML();
+    return new Response(injectEnv(injectApp(html, tag, attrs)), {
       headers: { 'content-type': 'text/html; charset=utf-8' },
     });
   }
@@ -168,7 +204,7 @@ Deno.serve({ port: PORT }, async (request) => {
   const res = await serveDir(request, { fsRoot: DIST, quiet: true });
 
   if (res.status === 404) {
-    return new Response(injectEnv(baseHTML), {
+    return new Response(injectEnv(await getBaseHTML()), {
       status: 200,
       headers: { 'content-type': 'text/html; charset=utf-8' },
     });
