@@ -88,6 +88,14 @@ function safeName(url) {
 
 const fetched = {}
 
+// When esm.sh returns an error for a file it bundles differently (e.g. sub-files
+// of @ffmpeg/ffmpeg that live under /es2022/), fall back to unpkg dist/esm/.
+function esmshFallback(url) {
+  const m = url.match(/^https:\/\/esm\.sh\/((?:@[^/]+\/)?[^/]+)\/es2022\/(.+)$/)
+  if (!m) return null
+  return `https://unpkg.com/${m[1]}/dist/esm/${m[2]}`
+}
+
 function resolveRelative(base, rel) {
   // base: full URL of the file containing the import
   // rel: relative specifier like ./ffi.mjs or ../dist/module.mjs
@@ -114,8 +122,13 @@ function vendorUrl(url) {
   } else {
     print('  [fetch] ', url.replace('https://esm.sh/', ''))
     if (!fetch(url, diskPath)) {
-      print('  [error] ', url)
-      return localUrl
+      const fallback = esmshFallback(url)
+      if (fallback && fetch(fallback, diskPath)) {
+        print('  [fallback]', fallback)
+      } else {
+        print('  [error] ', url)
+        return localUrl
+      }
     }
   }
 
@@ -136,6 +149,13 @@ function vendorUrl(url) {
   for (const m of code.matchAll(relPattern)) {
     const rel = m[1] || m[2]
     const absUrl = resolveRelative(url, rel)
+    if (absUrl.startsWith('https://esm.sh/')) vendorUrl(absUrl)
+  }
+
+  // follow new URL('./...', import.meta.url) — used for workers and other assets
+  const newUrlPattern = /new\s+URL\s*\(\s*["'](\.\.?\/[^"']+)["']\s*,\s*import\.meta\.url\s*\)/g
+  for (const m of code.matchAll(newUrlPattern)) {
+    const absUrl = resolveRelative(url, m[1])
     if (absUrl.startsWith('https://esm.sh/')) vendorUrl(absUrl)
   }
 
