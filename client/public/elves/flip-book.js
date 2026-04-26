@@ -31,6 +31,8 @@ import elf from '@plan98/elf'
 import { Integer } from '@plan98/types'
 import Chromakey from './chroma-key.js'
 import './plan98-palette.js'
+import { attack, release, setInstrument } from './paper-pocket.js'
+import { checkButton } from './debug-gamepads.js'
 
 const tag = 'flip-book'
 const playerId = self.crypto.randomUUID()
@@ -114,6 +116,81 @@ const thicknoids = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
 const TOOLS = { draw: 'draw', pen: 'pen', erase: 'erase', fill: 'fill', pan: 'pan' }
 const VIEWS = { brush: 'brush', canvas: 'canvas', settings: 'settings', export: 'export' }
 
+const BAND_PRESETS = {
+  clown:  { 1: 'tuba',       2: 'contrabass', 3: 'cello',   4: 'violin',    5: 'trumpet', 6: 'flute' },
+  circus: { 1: 'contrabass', 2: 'trombone',   3: 'bassoon', 4: 'saxophone', 5: 'trumpet', 6: 'flute' },
+}
+
+// high notes roll off per octave above C5; lows stay at 1.0 (gain relative to reduced highs)
+function violinVelocity(midi) {
+  const note = Number(midi)
+  if (note <= 72) return 1.0
+  const step = Math.floor((note - 72) / 12) + 1
+  return Math.max(0.1, 1.0 - step * 0.18)
+}
+
+// keyboard → music: same pattern as dial-tone.js
+const _VROWS = 7, _VCOLS = 13, _VSPATIAL = 1, _VCENTER = 60
+function violinNoteFromGrid(col, row) {
+  const base = _VCENTER + 30
+  const even = col % 2 === 0
+  const above = col > parseInt(_VCOLS / 2)
+  return even
+    ? base + row * -12 + parseInt(col / 2) * 2
+    : base - 5 + row * -12 + parseInt(col / 2) * 2 + (above ? 12 : 0)
+}
+
+const _NOTE_BTNS = [
+  { btn: 0, interval: 0  },  // j
+  { btn: 1, interval: 7  },  // k
+  { btn: 3, interval: 2  },  // l
+  { btn: 2, interval: 9  },  // h
+  { btn: 4, interval: 4  },  // u
+  { btn: 5, interval: 11 },  // i
+  { btn: 6, interval: 6  },  // y
+  { btn: 7, interval: 13 },  // o
+]
+
+const _vHeld = {}, _vSpam = {}
+function _vDebounce(code, ms, cb) {
+  if (_vSpam[code]) return; _vSpam[code] = true; cb()
+  setTimeout(() => { _vSpam[code] = false }, ms)
+}
+function _vReleaseAll() {
+  for (const n in _vHeld) { release(parseInt(n)); delete _vHeld[n] }
+}
+function _vSlide(dx, dy) {
+  _vReleaseAll()
+  const s = $.learn()
+  $.whisper({
+    violinX: Math.max(0, Math.min(_VCOLS - 1, s.violinX + dx)),
+    violinY: Math.max(-_VSPATIAL, Math.min(_VROWS - 1 - _VSPATIAL, s.violinY + dy)),
+  })
+}
+
+function violinGameLoop() {
+  const { violinMode, violinX, violinY } = $.learn()
+  if (violinMode) {
+    const root = violinNoteFromGrid(violinX, violinY + _VSPATIAL)
+    for (const { btn, interval } of _NOTE_BTNS) {
+      const note = root + interval
+      const pressed = checkButton(0, btn)
+      if (pressed && !_vHeld[note]) {
+        attack(note, violinVelocity(note))
+        _vHeld[note] = true
+      } else if (!pressed && _vHeld[note]) {
+        release(note)
+        delete _vHeld[note]
+      }
+    }
+    if (checkButton(0, 12)) _vDebounce('up',    150, () => _vSlide(0, -1))
+    if (checkButton(0, 13)) _vDebounce('down',  150, () => _vSlide(0,  1))
+    if (checkButton(0, 14)) _vDebounce('left',  150, () => _vSlide(-1, 0))
+    if (checkButton(0, 15)) _vDebounce('right', 150, () => _vSlide( 1, 0))
+  }
+  requestAnimationFrame(violinGameLoop)
+}
+
 /*
 
 State. current is removed from shared state — each peer owns their viewport.
@@ -151,8 +228,18 @@ const $ = elf(tag, {
   view:               null,
   showOverlay:        false,
 
+  // audio — whisper only, never synced over the network
+  violinMode:         false,
+  lastMidi:           60,
+  baseOctave:         4,
+  bandPreset:         'clown',
+  octaveInstruments:  { 1: 'tuba', 2: 'contrabass', 3: 'cello', 4: 'violin', 5: 'trumpet', 6: 'flute' },
+  violinX:            8,
+  violinY:            0,
+
   // camera
   videoEnabled:       false,
+  chromakeyEnabled:   false,
   chromakeyColor:     '#00b140',
   chromakeyTolerance: 30,
 
@@ -565,15 +652,13 @@ function mount(target) {
           </div>
         </div>
         <div class="fb-taskbar -bottom">
-          <div class="left"><button class="corner-btn" data-new-frame>+ frame</button></div>
           <div class="center" data-capture-slot></div>
-          <div class="right"><button class="corner-btn" data-darkroom-open>▶ play</button></div>
         </div>
         <div class="toolbelt-actions" data-toolbelt>
           <div class="the-compass">
             <button data-menu data-drag class="root"><span class="icon" data-root-icon>✏</span></button>
             <button class="minus-7" data-open-view="color"><span class="icon" data-color-icon></span></button>
-            <button class="plus-7" data-open-view="brush"><span class="icon">≡</span></button>
+            <button class="plus-7" data-darkroom-open><span class="icon">▶</span></button>
             <button class="plus-2" data-redo><span class="icon">↷</span></button>
             <button class="plus-5" data-open-view="export"><span class="icon">↓</span></button>
             <button class="minus-5" data-cycle-tool><span class="icon" data-cycle-icon>🖊</span></button>
@@ -586,7 +671,6 @@ function mount(target) {
         </div>
       </div>
       <div class="film-reel" data-film-reel>
-        <button class="reel-add" data-new-frame>+</button>
       </div>
     </div>
     <div class="darkroom" data-darkroom>
@@ -648,7 +732,26 @@ function boot(target) {
   const { canvasW, canvasH, frames } = $.learn()
 
   // ── local viewport position — never shared ──
-  target._localCurrent = 0
+  target._localCurrent  = 0
+
+  // ── per-instance draw state (avoids module-level globals) ──
+  target._drawing       = false
+  target._lineWidth     = 0
+  target._points        = []
+  target._penPoints     = []
+  target._panStart      = null
+  target._panOrigin     = null
+  target._drawRafId     = null
+  target._playInterval  = null
+  target._playDir       = 1
+  target._drPlaying     = false
+  target._drInterval    = null
+  target._drZoomed      = false
+  target._drDir         = 1
+  target._drCurrent     = 0
+  target._drFadeTimer   = null
+  target._lastBeltX     = undefined
+  target._lastBeltY     = undefined
 
   target._artboard        = target.querySelector('[data-artboard]')
   target._artboardInner   = target.querySelector('[data-artboard-inner]')
@@ -899,6 +1002,10 @@ function applyZoomStyles(target) {
   target._onionCanvases.forEach(c => { c.style.width = px(w); c.style.height = px(h) })
   target._playerCanvasCtr.style.width  = px(w)
   target._playerCanvasCtr.style.height = px(h)
+  if (target._penPreviewCanvas) {
+    target._penPreviewCanvas.style.width  = px(w)
+    target._penPreviewCanvas.style.height = px(h)
+  }
   const lbl = target.querySelector('[data-zoom-lbl]')
   if (lbl) lbl.textContent = zoom >= 1 ? `${zoom*100|0}%` : `${Math.round(zoom*100)}%`
 }
@@ -1586,8 +1693,6 @@ Peers' watchSharedState sees the new stroke length, calls replayStrokes.
 
 */
 
-let _drawing=false,_lineWidth=0,_points=[],_penPoints=[],_panStart=null,_panOrigin=null,_drawRafId=null
-
 function getCanvasPos(target, e) {
   const { zoom }=$.learn(), rect=target._outputCanvas.getBoundingClientRect()
   const clientX=e.touches?e.touches[0].clientX:e.clientX
@@ -1606,10 +1711,10 @@ function attachDrawEvents(target) {
     const { tool }=$.learn()
     if (tool==='pan'){startPan(target,e);return}
 
-    if (tool==='pen'){const{x,y}=getCanvasPos(target,e);_penPoints.push({x,y});renderPenPreview(target);return}
+    if (tool==='pen'){const{x,y}=getCanvasPos(target,e);target._penPoints.push({x,y});renderPenPreview(target);return}
 
     captureUndo(target)
-    _drawing=true; _points=[]
+    target._drawing=true; target._points=[]
     const{x,y}=getCanvasPos(target,e)
 
     if (tool==='fill'){
@@ -1622,14 +1727,14 @@ function attachDrawEvents(target) {
       db[frameId].drawCanvas.getContext('2d').drawImage(target._drawCanvas,0,0)
       const fs=$.learn().frameStrokes
       $.teach({frameStrokes:{...fs,[frameId]:[...(fs[frameId]||[]),[{x,y,fill:true,color:fillColor,lineWidth:0,opacity:1}]]}})
-      _drawing=false; renderReel(target); return
+      target._drawing=false; renderReel(target); return
     }
 
     const{thickness,opacity,color}=$.learn()
     const pressure=e.pressure>0?e.pressure:1.0
-    _lineWidth=Math.log(pressure+1)*thickness
-    const pt={x,y,lineWidth:_lineWidth,color,opacity,erase:tool==='erase'}
-    _points.push(pt)
+    target._lineWidth=Math.log(pressure+1)*thickness
+    const pt={x,y,lineWidth:target._lineWidth,color,opacity,erase:tool==='erase'}
+    target._points.push(pt)
     teachPlayer({currentStroke:[pt],cursorX:x,cursorY:y,activelyDrawing:true,color})
   })
 
@@ -1637,22 +1742,22 @@ function attachDrawEvents(target) {
     const{tool}=$.learn()
     if (tool==='pan'){movePan(target,e);return}
     if (tool==='pen'){
-      if(_penPoints.length>0){
+      if(target._penPoints.length>0){
         const{x,y}=getCanvasPos(target,e)
-        const preview=[..._penPoints,{x,y}],saved=_penPoints
-        _penPoints=preview; renderPenPreview(target); _penPoints=saved
+        const preview=[...target._penPoints,{x,y}],saved=target._penPoints
+        target._penPoints=preview; renderPenPreview(target); target._penPoints=saved
       }
       return
     }
-    if (!_drawing) return
+    if (!target._drawing) return
 
     const{x,y}=getCanvasPos(target,e)
     const{thickness,opacity,color}=$.learn()
     const pressure=e.pressure>0?e.pressure:1.0
-    _lineWidth=Math.log(pressure+1)*thickness*4*0.2+_lineWidth*0.8
+    target._lineWidth=Math.log(pressure+1)*thickness*4*0.2+target._lineWidth*0.8
 
-    const pt={x,y,lineWidth:_lineWidth,color,opacity,erase:tool==='erase'}
-    _points.push(pt)
+    const pt={x,y,lineWidth:target._lineWidth,color,opacity,erase:tool==='erase'}
+    target._points.push(pt)
 
     if (tool === 'erase') {
       // erase must draw directly to _drawCanvas — destination-out on _activeCanvas
@@ -1661,7 +1766,7 @@ function attachDrawEvents(target) {
       ctx.globalCompositeOperation = 'destination-out'
       ctx.strokeStyle = 'rgba(0,0,0,1)'
       ctx.lineWidth = pt.lineWidth; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
-      const pts = _points
+      const pts = target._points
       if (pts.length >= 2) {
         ctx.beginPath()
         ctx.moveTo(pts[pts.length-2].x, pts[pts.length-2].y)
@@ -1673,14 +1778,14 @@ function attachDrawEvents(target) {
       // draw full current stroke to _activeCanvas
       const actCtx=target._activeCanvas.getContext('2d')
       actCtx.clearRect(0,0,target._activeCanvas.width,target._activeCanvas.height)
-      drawStroke(actCtx,_points)
+      drawStroke(actCtx,target._points)
     }
 
     // throttle multiplayer broadcast
-    if (!_drawRafId){
-      _drawRafId=requestAnimationFrame(()=>{
-        teachPlayer({currentStroke:[..._points],cursorX:x,cursorY:y,color,activelyDrawing:true})
-        _drawRafId=null
+    if (!target._drawRafId){
+      target._drawRafId=requestAnimationFrame(()=>{
+        teachPlayer({currentStroke:[...target._points],cursorX:x,cursorY:y,color,activelyDrawing:true})
+        target._drawRafId=null
       })
     }
   })
@@ -1689,26 +1794,26 @@ function attachDrawEvents(target) {
     const{tool}=$.learn()
     if (tool==='pan'){endPan(target);return}
     if (tool==='pen')return
-    if (!_drawing)return
-    _drawing=false; _lineWidth=0
+    if (!target._drawing)return
+    target._drawing=false; target._lineWidth=0
 
-    if (_points.length>=2){
-      drawStroke(target._drawCanvas.getContext('2d'),_points)
-    } else if (_points.length===1){
+    if (target._points.length>=2){
+      drawStroke(target._drawCanvas.getContext('2d'),target._points)
+    } else if (target._points.length===1){
       const{color,opacity,thickness}=$.learn(),ctx=target._drawCanvas.getContext('2d')
       ctx.fillStyle=color;ctx.globalAlpha=opacity
-      ctx.beginPath();ctx.arc(_points[0].x,_points[0].y,thickness/2,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1
+      ctx.beginPath();ctx.arc(target._points[0].x,target._points[0].y,thickness/2,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1
     }
 
     target._activeCanvas.getContext('2d').clearRect(0,0,target._activeCanvas.width,target._activeCanvas.height)
     teachPlayer({currentStroke:[],activelyDrawing:false})
 
     // commit stroke to shared state — peers will replay it
-    if (_points.length>0) {
+    if (target._points.length>0) {
       const{frames,frameStrokes}=$.learn()
       const current = target._localCurrent ?? 0
       const frameId=frames[current]
-      const committed=[..._points]
+      const committed=[...target._points]
       // update local db immediately so reel thumb is current
       db[frameId].drawCanvas.getContext('2d').clearRect(0,0,db[frameId].drawCanvas.width,db[frameId].drawCanvas.height)
       db[frameId].drawCanvas.getContext('2d').drawImage(target._drawCanvas,0,0)
@@ -1721,22 +1826,22 @@ function attachDrawEvents(target) {
       })
       renderReel(target)
     }
-    _points=[]
+    target._points=[]
   })
 
   oc.addEventListener('pointercancel',()=>{
-    _drawing=false;_points=[]
+    target._drawing=false;target._points=[]
     if(target._activeCanvas)target._activeCanvas.getContext('2d').clearRect(0,0,target._activeCanvas.width,target._activeCanvas.height)
     teachPlayer({currentStroke:[],activelyDrawing:false})
     endPan(target)
   })
 
   oc.addEventListener('dblclick',()=>{
-    if($.learn().tool==='pen'&&_penPoints.length>1){captureUndo(target);commitPenPath(target)}
+    if($.learn().tool==='pen'&&target._penPoints.length>1){captureUndo(target);commitPenPath(target)}
   })
 
   document.addEventListener('keydown',e=>{
-    if(e.key==='Escape'&&_penPoints.length){_penPoints=[];renderPenPreview(target)}
+    if(e.key==='Escape'&&target._penPoints.length){target._penPoints=[];renderPenPreview(target)}
   })
 }
 
@@ -1763,16 +1868,16 @@ Pan, pen preview, pen commit.
 
 function startPan(target,e){
   const clientX=e.touches?e.touches[0].clientX:e.clientX,clientY=e.touches?e.touches[0].clientY:e.clientY
-  _panStart={x:clientX,y:clientY};_panOrigin={x:$.learn().panX,y:$.learn().panY}
+  target._panStart={x:clientX,y:clientY};target._panOrigin={x:$.learn().panX,y:$.learn().panY}
   target._artboard.style.cursor='grabbing'
 }
 function movePan(target,e){
-  if(!_panStart)return
+  if(!target._panStart)return
   const clientX=e.touches?e.touches[0].clientX:e.clientX,clientY=e.touches?e.touches[0].clientY:e.clientY
-  const panX=_panOrigin.x+(clientX-_panStart.x),panY=_panOrigin.y+(clientY-_panStart.y)
+  const panX=target._panOrigin.x+(clientX-target._panStart.x),panY=target._panOrigin.y+(clientY-target._panStart.y)
   $.whisper({panX,panY}); target._artboardInner.style.transform=`translate(${panX}px,${panY}px)`
 }
-function endPan(target){_panStart=null;target._artboard.style.cursor=''}
+function endPan(target){target._panStart=null;target._artboard.style.cursor=''}
 
 function renderPenPreview(target){
   let pp=target._penPreviewCanvas
@@ -1784,28 +1889,28 @@ function renderPenPreview(target){
   }
   const{canvasW,canvasH,color,fillColor,thickness}=$.learn()
   const ctx=pp.getContext('2d');ctx.clearRect(0,0,canvasW,canvasH)
-  if(_penPoints.length<1)return
-  ctx.beginPath();ctx.moveTo(_penPoints[0].x,_penPoints[0].y)
-  for(let i=1;i<_penPoints.length;i++){
-    if(i<_penPoints.length-1){const mx=(_penPoints[i].x+_penPoints[i+1].x)/2,my=(_penPoints[i].y+_penPoints[i+1].y)/2;ctx.quadraticCurveTo(_penPoints[i].x,_penPoints[i].y,mx,my)}
-    else ctx.lineTo(_penPoints[i].x,_penPoints[i].y)
+  if(target._penPoints.length<1)return
+  ctx.beginPath();ctx.moveTo(target._penPoints[0].x,target._penPoints[0].y)
+  for(let i=1;i<target._penPoints.length;i++){
+    if(i<target._penPoints.length-1){const mx=(target._penPoints[i].x+target._penPoints[i+1].x)/2,my=(target._penPoints[i].y+target._penPoints[i+1].y)/2;ctx.quadraticCurveTo(target._penPoints[i].x,target._penPoints[i].y,mx,my)}
+    else ctx.lineTo(target._penPoints[i].x,target._penPoints[i].y)
   }
   if(fillColor&&fillColor!=='transparent'){ctx.fillStyle=fillColor;ctx.globalAlpha=.35;ctx.fill();ctx.globalAlpha=1}
   if(color&&color!=='transparent'){ctx.strokeStyle=color;ctx.lineWidth=thickness;ctx.lineCap='round';ctx.setLineDash([3,3]);ctx.stroke();ctx.setLineDash([])}
-  _penPoints.forEach((p,i)=>{ctx.fillStyle=i===0?'#fabd2f':'#d79921';ctx.fillRect(p.x-2,p.y-2,4,4)})
+  target._penPoints.forEach((p,i)=>{ctx.fillStyle=i===0?'#fabd2f':'#d79921';ctx.fillRect(p.x-2,p.y-2,4,4)})
 }
 
 function commitPenPath(target){
-  if(_penPoints.length<2){_penPoints=[];return}
+  if(target._penPoints.length<2){target._penPoints=[];return}
   const{color,fillColor,thickness,opacity,frames,frameStrokes}=$.learn()
   const current = target._localCurrent ?? 0
   const ctx=target._drawCanvas.getContext('2d')
-  ctx.beginPath();ctx.moveTo(_penPoints[0].x,_penPoints[0].y)
-  for(let i=1;i<_penPoints.length-1;i++){
-    const mx=(_penPoints[i].x+_penPoints[i+1].x)/2,my=(_penPoints[i].y+_penPoints[i+1].y)/2
-    ctx.quadraticCurveTo(_penPoints[i].x,_penPoints[i].y,mx,my)
+  ctx.beginPath();ctx.moveTo(target._penPoints[0].x,target._penPoints[0].y)
+  for(let i=1;i<target._penPoints.length-1;i++){
+    const mx=(target._penPoints[i].x+target._penPoints[i+1].x)/2,my=(target._penPoints[i].y+target._penPoints[i+1].y)/2
+    ctx.quadraticCurveTo(target._penPoints[i].x,target._penPoints[i].y,mx,my)
   }
-  ctx.lineTo(_penPoints[_penPoints.length-1].x,_penPoints[_penPoints.length-1].y)
+  ctx.lineTo(target._penPoints[target._penPoints.length-1].x,target._penPoints[target._penPoints.length-1].y)
   ctx.closePath();ctx.globalAlpha=opacity
   if(fillColor&&fillColor!=='transparent'){ctx.fillStyle=fillColor;ctx.fill()}
   if(color&&color!=='transparent'){ctx.strokeStyle=color;ctx.lineWidth=thickness;ctx.lineCap='round';ctx.stroke()}
@@ -1814,7 +1919,7 @@ function commitPenPath(target){
   const frameId=frames[current]
   db[frameId].drawCanvas.getContext('2d').clearRect(0,0,db[frameId].drawCanvas.width,db[frameId].drawCanvas.height)
   db[frameId].drawCanvas.getContext('2d').drawImage(target._drawCanvas,0,0)
-  const syntheticStroke=_penPoints.map(p=>({...p,lineWidth:thickness,color,opacity}))
+  const syntheticStroke=target._penPoints.map(p=>({...p,lineWidth:thickness,color,opacity}))
   const {frameStrokes: fspen} = $.learn()
   $.teach({
     frameStrokes: {
@@ -1822,7 +1927,7 @@ function commitPenPath(target){
       [frameId]: [...(fspen[frameId] || []), syntheticStroke]
     }
   })
-  _penPoints=[]; renderReel(target)
+  target._penPoints=[]; renderReel(target)
 }
 
 /*
@@ -1831,21 +1936,20 @@ Playback — uses target._localCurrent.
 
 */
 
-let _playInterval=null,_playDir=1
 function startPlayback(target){
-  $.teach({playing:true});_playDir=1
-  _playInterval=setInterval(()=>{
+  $.teach({playing:true});target._playDir=1
+  target._playInterval=setInterval(()=>{
     const{frames,loopMode}=$.learn()
     const current = target._localCurrent ?? 0
-    let next=current+_playDir
+    let next=current+target._playDir
     if(loopMode==='loop')next=((next%frames.length)+frames.length)%frames.length
-    else if(loopMode==='pingpong'){if(next>=frames.length){next=frames.length-2;_playDir=-1}else if(next<0){next=1;_playDir=1}}
+    else if(loopMode==='pingpong'){if(next>=frames.length){next=frames.length-2;target._playDir=-1}else if(next<0){next=1;target._playDir=1}}
     else{if(next>=frames.length){next=frames.length-1;stopPlayback(target);return}}
     target._localCurrent=Math.max(0,Math.min(frames.length-1,next))
     loadCurrentFrame(target);renderOnion(target);renderReel(target)
   },1000/$.learn().fps)
 }
-function stopPlayback(target){$.teach({playing:false});clearInterval(_playInterval)}
+function stopPlayback(target){$.teach({playing:false});clearInterval(target._playInterval)}
 
 /*
 
@@ -1853,23 +1957,21 @@ Darkroom — self-contained playback cursor, doesn't touch _localCurrent.
 
 */
 
-let _drPlaying=false,_drInterval=null,_drZoomed=false,_drDir=1,_drCurrent=0,_drFadeTimer=null
-
 function drShowControls(target){
   const els=[target._darkroom.querySelector('.dr-controls'),target._darkroom.querySelector('.dr-close'),target._darkroom.querySelector('.dr-title')]
   els.forEach(el=>el&&el.classList.remove('fade'))
-  clearTimeout(_drFadeTimer)
-  _drFadeTimer=setTimeout(()=>els.forEach(el=>el&&el.classList.add('fade')),2000)
+  clearTimeout(target._drFadeTimer)
+  target._drFadeTimer=setTimeout(()=>els.forEach(el=>el&&el.classList.add('fade')),2000)
 }
 
 function openDarkroom(target){
   const{canvasW,canvasH}=$.learn(),dc=target._drCanvas
-  _drCurrent=target._localCurrent??0
+  target._drCurrent=target._localCurrent??0
   const trayBody=target.closest('.tray-body')
   if(trayBody) trayBody.style.overflow='hidden'
   target._darkroom.classList.add('open')
   dc.width=canvasW;dc.height=canvasH
-  if(!dc._zoomWired){dc._zoomWired=true;dc.addEventListener('click',()=>{_drZoomed=!_drZoomed;dc.classList.toggle('zoomed',_drZoomed)})}
+  if(!dc._zoomWired){dc._zoomWired=true;dc.addEventListener('click',()=>{target._drZoomed=!target._drZoomed;dc.classList.toggle('zoomed',target._drZoomed)})}
   if(!target._darkroom._activityWired){
     target._darkroom._activityWired=true
     target._darkroom.addEventListener('pointermove',()=>drShowControls(target))
@@ -1882,26 +1984,26 @@ function closeDarkroom(target){
   target._darkroom.classList.remove('open')
   const trayBody=target.closest('.tray-body')
   if(trayBody) trayBody.style.overflow=''
-  drStop(target);_drZoomed=false;target._drCanvas.classList.remove('zoomed');clearTimeout(_drFadeTimer)
+  drStop(target);target._drZoomed=false;target._drCanvas.classList.remove('zoomed');clearTimeout(target._drFadeTimer)
 }
 function drRenderFrame(target){
   const{frames,canvasW,canvasH,fps,loopMode}=$.learn(),dc=target._drCanvas,ctx=dc.getContext('2d')
   ctx.clearRect(0,0,dc.width,dc.height)
-  if(frames.length){const f=ensureFrame(frames[_drCurrent],canvasW,canvasH);if(f.hasVideo)ctx.drawImage(f.videoCanvas,0,0);ctx.drawImage(f.drawCanvas,0,0)}
-  const counter=target.querySelector('[data-dr-counter]');if(counter)counter.textContent=`${_drCurrent+1} / ${frames.length}`
+  if(frames.length){const f=ensureFrame(frames[target._drCurrent],canvasW,canvasH);if(f.hasVideo)ctx.drawImage(f.videoCanvas,0,0);ctx.drawImage(f.drawCanvas,0,0)}
+  const counter=target.querySelector('[data-dr-counter]');if(counter)counter.textContent=`${target._drCurrent+1} / ${frames.length}`
   const title=target.querySelector('[data-dr-title]');if(title)title.textContent=`${canvasW}×${canvasH} · ${fps}fps · ${loopMode}`
 }
 function drStart(target){
-  _drPlaying=true;const btn=target.querySelector('[data-dr-play]');if(btn){btn.textContent='⏸ pause';btn.classList.add('active')}
-  _drDir=1;_drInterval=setInterval(()=>{
-    const{frames,loopMode}=$.learn();let next=_drCurrent+_drDir
+  target._drPlaying=true;const btn=target.querySelector('[data-dr-play]');if(btn){btn.textContent='⏸ pause';btn.classList.add('active')}
+  target._drDir=1;target._drInterval=setInterval(()=>{
+    const{frames,loopMode}=$.learn();let next=target._drCurrent+target._drDir
     if(loopMode==='loop')next=((next%frames.length)+frames.length)%frames.length
-    else if(loopMode==='pingpong'){if(next>=frames.length){next=frames.length-2;_drDir=-1}else if(next<0){next=1;_drDir=1}}
+    else if(loopMode==='pingpong'){if(next>=frames.length){next=frames.length-2;target._drDir=-1}else if(next<0){next=1;target._drDir=1}}
     else{if(next>=frames.length){next=frames.length-1;drStop(target);return}}
-    _drCurrent=Math.max(0,Math.min(frames.length-1,next));drRenderFrame(target)
+    target._drCurrent=Math.max(0,Math.min(frames.length-1,next));drRenderFrame(target)
   },1000/$.learn().fps)
 }
-function drStop(target){_drPlaying=false;clearInterval(_drInterval);const btn=target.querySelector('[data-dr-play]');if(btn){btn.textContent='▶ play';btn.classList.remove('active')}}
+function drStop(target){target._drPlaying=false;clearInterval(target._drInterval);const btn=target.querySelector('[data-dr-play]');if(btn){btn.textContent='▶ play';btn.classList.remove('active')}}
 
 /*
 
@@ -2040,6 +2142,16 @@ function openPalette(target, colorTarget) {
   overlay.classList.add('open')
   inner.style.cssText = 'height:100%;padding:0;margin:0;max-width:none;display:flex;flex-direction:column;'
   inner.innerHTML = `<plan98-palette data-color-target="${colorTarget}"></plan98-palette>`
+
+  // v-log pattern: attack on pointerdown, palette handles release on pointerup internally
+  const palette = inner.querySelector('plan98-palette')
+  if (palette) {
+    palette.addEventListener('pointerdown', e => {
+      const btn = e.target.closest('[data-midi]')
+      if (!btn || !$.learn().violinMode) return
+      attack(parseInt(btn.dataset.midi), violinVelocity(btn.dataset.midi))
+    })
+  }
 }
 
 function openView(target, view) {
@@ -2061,8 +2173,8 @@ function closeOverlay(target){
 }
 
 function renderView(view){
-  const{fillColor,thickness,opacity,onion,fps,loopMode,canvasW,canvasH,chromakeyEnabled,chromakeyColor,chromakeyTolerance,videoEnabled}=$.learn()
-  if(view===VIEWS.brush)return`
+  const{fillColor,thickness,opacity,onion,fps,loopMode,canvasW,canvasH,chromakeyEnabled,chromakeyColor,chromakeyTolerance,videoEnabled,violinMode,baseOctave,bandPreset,octaveInstruments}=$.learn()
+  if(view===VIEWS.brush||view===VIEWS.settings)return`
     <div class="overlay-title">size</div>
     <div class="thicknoid-grid">${thicknoids.map(t=>`<button class="thicknoid-btn ${thickness===t?'active':''}" data-thick="${t}">${t}</button>`).join('')}</div>
     <div class="overlay-title" style="margin-top:.75rem;">opacity</div>
@@ -2074,15 +2186,7 @@ function renderView(view){
     </button>
     <div class="overlay-title" style="margin-top:.75rem;">onion skin</div>
     <button class="row-btn ${onion?'active':''}" data-toggle-onion>${onion?'● on':'○ off'}</button>
-  `
-  if(view===VIEWS.canvas)return`
-    <div class="overlay-title">preset</div>
-    <div class="preset-grid">${PRESETS.map(p=>`<button class="preset-btn ${p.w===canvasW&&p.h===canvasH?'active':''}" data-preset-w="${p.w}" data-preset-h="${p.h}">${p.label}</button>`).join('')}</div>
-    <div class="overlay-title" style="margin-top:.75rem;">custom</div>
-    <div class="dims-row"><input type="number" value="${canvasW}" min="1" max="3840" data-cust-w><span>×</span><input type="number" value="${canvasH}" min="1" max="2160" data-cust-h><button class="row-btn" style="width:auto;" data-apply-dims>ok</button></div>
-  `
-  if(view===VIEWS.settings)return`
-    <div class="overlay-title">playback</div>
+    <div class="overlay-title" style="margin-top:.75rem;">playback</div>
     <div class="field-row"><label>fps</label><select class="tl-select" data-fps-select>${[1,2,4,6,8,12,24,30,60].map(v=>`<option value="${v}" ${v===fps?'selected':''}>${v}</option>`).join('')}</select></div>
     <div class="field-row" style="margin-top:.4rem;"><label>mode</label><select class="tl-select" data-loop-select>${['loop','pingpong','once'].map(v=>`<option value="${v}" ${v===loopMode?'selected':''}>${v}</option>`).join('')}</select></div>
     <div class="overlay-title" style="margin-top:.75rem;">camera</div>
@@ -2091,6 +2195,27 @@ function renderView(view){
     <button class="row-btn ${chromakeyEnabled?'active':''}" data-toggle-ck>${chromakeyEnabled?'● on':'○ off'}</button>
     <div class="ck-color-row" style="margin-top:.5rem;"><div class="ck-preview" style="background:${chromakeyColor};" data-ck-preview></div><input type="color" value="${chromakeyColor}" data-ck-color></div>
     <div class="field-row" style="margin-top:.4rem;"><label>tolerance</label><input type="range" min="0" max="150" value="${chromakeyTolerance}" data-ck-tolerance><span style="font-size:.6rem;color:#928374;min-width:2rem;">${chromakeyTolerance}</span></div>
+    <div class="overlay-title" style="margin-top:.75rem;">tiniest violin</div>
+    <button class="row-btn ${violinMode?'active':''}" data-toggle-violin>${violinMode?'● on':'○ off'}</button>
+    ${violinMode?`
+      <div class="overlay-title" style="margin-top:.5rem;">base octave</div>
+      <div class="field-row" style="gap:.25rem;">
+        <button class="corner-btn" data-octave-down>−</button>
+        <span data-octave-lbl style="font-size:.65rem;color:#ebdbb2;padding:0 .4rem;flex:1;text-align:center;">oct ${baseOctave} · ${octaveInstruments[baseOctave]}</span>
+        <button class="corner-btn" data-octave-up>+</button>
+      </div>
+      <div class="overlay-title" style="margin-top:.5rem;">band preset</div>
+      <div style="display:flex;gap:4px;">
+        <button class="row-btn ${bandPreset==='clown'?'active':''}" data-band-preset="clown" style="flex:1;text-align:center;">clown orchestra</button>
+        <button class="row-btn ${bandPreset==='circus'?'active':''}" data-band-preset="circus" style="flex:1;text-align:center;">woodwind circus</button>
+      </div>
+    `:''}
+  `
+  if(view===VIEWS.canvas)return`
+    <div class="overlay-title">preset</div>
+    <div class="preset-grid">${PRESETS.map(p=>`<button class="preset-btn ${p.w===canvasW&&p.h===canvasH?'active':''}" data-preset-w="${p.w}" data-preset-h="${p.h}">${p.label}</button>`).join('')}</div>
+    <div class="overlay-title" style="margin-top:.75rem;">custom</div>
+    <div class="dims-row"><input type="number" value="${canvasW}" min="1" max="3840" data-cust-w><span>×</span><input type="number" value="${canvasH}" min="1" max="2160" data-cust-h><button class="row-btn" style="width:auto;" data-apply-dims>ok</button></div>
   `
   if(view===VIEWS.export)return`
     <div class="overlay-title">export</div>
@@ -2114,6 +2239,42 @@ function wireOverlay(inner,target){
   const de=inner.querySelector('[data-do-export]');if(de)de.addEventListener('click',()=>{closeOverlay(target);exportMp4(target,{download:true,save:false})})
   const ds=inner.querySelector('[data-do-save]');if(ds)ds.addEventListener('click',()=>{closeOverlay(target);exportMp4(target,{download:false,save:true})})
   const dp=inner.querySelector('[data-do-play]');if(dp)dp.addEventListener('click',()=>{closeOverlay(target);openDarkroom(target)})
+
+  // tiniest violin — all state via $.whisper, never synced over the network
+  const vb=inner.querySelector('[data-toggle-violin]')
+  if(vb)vb.addEventListener('click',()=>{
+    const{violinMode,octaveInstruments,baseOctave}=$.learn()
+    const n=!violinMode
+    $.whisper({violinMode:n})
+    if(n)setInstrument(octaveInstruments[baseOctave])
+    openView(target,VIEWS.settings)
+  })
+  inner.querySelectorAll('[data-band-preset]').forEach(btn=>btn.addEventListener('click',()=>{
+    const preset=btn.dataset.bandPreset
+    const instruments=BAND_PRESETS[preset]
+    const{baseOctave}=$.learn()
+    $.whisper({bandPreset:preset,octaveInstruments:instruments})
+    setInstrument(instruments[baseOctave])
+    openView(target,VIEWS.settings)
+  }))
+  const ou=inner.querySelector('[data-octave-up]')
+  if(ou)ou.addEventListener('click',()=>{
+    const{baseOctave,octaveInstruments}=$.learn()
+    const next=Math.min(6,baseOctave+1)
+    $.whisper({baseOctave:next})
+    setInstrument(octaveInstruments[next])
+    const lbl=inner.querySelector('[data-octave-lbl]')
+    if(lbl)lbl.textContent=`oct ${next} · ${octaveInstruments[next]}`
+  })
+  const od=inner.querySelector('[data-octave-down]')
+  if(od)od.addEventListener('click',()=>{
+    const{baseOctave,octaveInstruments}=$.learn()
+    const next=Math.max(1,baseOctave-1)
+    $.whisper({baseOctave:next})
+    setInstrument(octaveInstruments[next])
+    const lbl=inner.querySelector('[data-octave-lbl]')
+    if(lbl)lbl.textContent=`oct ${next} · ${octaveInstruments[next]}`
+  })
 }
 
 /*
@@ -2122,31 +2283,32 @@ v-log compass toolbelt drag.
 
 */
 
-let _lastBeltX,_lastBeltY
-
 $.when('pointerdown','[data-drag]',event=>{
   event.preventDefault()
   $.whisper({grabStartX:event.clientX,grabStartY:event.clientY,beltGrabbed:true,beltDragged:false})
 })
 $.when('pointermove','.artboard',event=>{
+  const root=event.target.closest(tag);if(!root)return
   const{beltGrabbed,beltDragged,beltOffsetX,beltOffsetY,grabStartX,grabStartY}=$.learn()
   if(!beltGrabbed)return
   if(grabStartX!==undefined){const dx=Math.abs(event.clientX-grabStartX),dy=Math.abs(event.clientY-grabStartY);if((dx>5||dy>5)&&!beltDragged){event.preventDefault();$.whisper({beltOffsetX:beltOffsetX||0,beltOffsetY:beltOffsetY||0,beltDragged:true})}}
   if(!$.learn().beltDragged)return
   event.preventDefault()
-  if(_lastBeltX!==undefined&&_lastBeltY!==undefined)$.whisper({beltOffsetX:beltOffsetX+(event.clientX-_lastBeltX),beltOffsetY:beltOffsetY+(event.clientY-_lastBeltY)})
-  _lastBeltX=event.clientX;_lastBeltY=event.clientY
+  if(root._lastBeltX!==undefined&&root._lastBeltY!==undefined)$.whisper({beltOffsetX:beltOffsetX+(event.clientX-root._lastBeltX),beltOffsetY:beltOffsetY+(event.clientY-root._lastBeltY)})
+  root._lastBeltX=event.clientX;root._lastBeltY=event.clientY
 })
 $.when('pointerup','[data-drag]',event=>{
+  const root=event.target.closest(tag)
   event.target.releasePointerCapture(event.pointerId)
   if(!$.learn().beltDragged)$.whisper({menuOpen:!$.learn().menuOpen})
   $.whisper({beltGrabbed:false,beltDragged:false,grabStartX:undefined,grabStartY:undefined})
-  _lastBeltX=undefined;_lastBeltY=undefined
+  if(root){root._lastBeltX=undefined;root._lastBeltY=undefined}
 })
 $.when('pointerup','.artboard',event=>{
+  const root=event.target.closest(tag)
   event.target.releasePointerCapture(event.pointerId)
   $.whisper({beltGrabbed:false,beltDragged:false,grabStartX:undefined,grabStartY:undefined})
-  _lastBeltX=undefined;_lastBeltY=undefined
+  if(root){root._lastBeltX=undefined;root._lastBeltY=undefined}
 })
 
 /*
@@ -2166,13 +2328,14 @@ $.when('click','[data-open-view]',event=>{
 
 // palette input — routes to stroke or fill based on data-color-target attribute
 $.when('input','plan98-palette',event=>{
-  const{color}=event.detail
+  const{color,midi}=event.detail
   const colorTarget=event.target.dataset.colorTarget
   if(colorTarget==='fill'){
     $.whisper({fillColor:color,showOverlay:false,view:null,colorTarget:null})
   } else {
     $.whisper({color,showOverlay:false,view:null,colorTarget:null})
   }
+  if(midi!=null) $.whisper({lastMidi:midi})
   const root=event.target.closest(tag)
   if(root)closeOverlay(root)
 })
@@ -2269,9 +2432,9 @@ $.when('click','[data-undo]',event=>{const r=event.target.closest(tag);if(r)undo
 $.when('click','[data-redo]',event=>{const r=event.target.closest(tag);if(r)redoFrame(r)})
 $.when('click','[data-darkroom-open]',e=>{const r=e.target.closest(tag);if(r)openDarkroom(r)})
 $.when('click','[data-darkroom-close]',e=>{const r=e.target.closest(tag);if(r)closeDarkroom(r)})
-$.when('click','[data-dr-play]',e=>{const r=e.target.closest(tag);if(!r)return;_drPlaying?drStop(r):drStart(r)})
-$.when('click','[data-dr-prev]',e=>{const r=e.target.closest(tag);if(!r)return;drStop(r);_drCurrent=Math.max(0,_drCurrent-1);drRenderFrame(r)})
-$.when('click','[data-dr-next]',e=>{const r=e.target.closest(tag);if(!r)return;drStop(r);const{frames}=$.learn();_drCurrent=Math.min(frames.length-1,_drCurrent+1);drRenderFrame(r)})
+$.when('click','[data-dr-play]',e=>{const r=e.target.closest(tag);if(!r)return;r._drPlaying?drStop(r):drStart(r)})
+$.when('click','[data-dr-prev]',e=>{const r=e.target.closest(tag);if(!r)return;drStop(r);r._drCurrent=Math.max(0,r._drCurrent-1);drRenderFrame(r)})
+$.when('click','[data-dr-next]',e=>{const r=e.target.closest(tag);if(!r)return;drStop(r);const{frames}=$.learn();r._drCurrent=Math.min(frames.length-1,r._drCurrent+1);drRenderFrame(r)})
 
 /*
 
@@ -2285,19 +2448,20 @@ document.addEventListener('keydown',e=>{
   if((e.key==='z'||e.key==='Z')&&(e.ctrlKey||e.metaKey)&&e.shiftKey){redoFrame(root);return}
   if((e.key==='z'||e.key==='Z')&&(e.ctrlKey||e.metaKey)){undoFrame(root);return}
   if((e.key==='y'||e.key==='Y')&&(e.ctrlKey||e.metaKey)){redoFrame(root);return}
-  const{frames,playing,zoom,tool}=$.learn()
+  const{frames,playing,zoom,tool,violinMode}=$.learn()
   const current = root._localCurrent ?? 0
   if(e.key==='ArrowRight'||e.key==='.')gotoFrame(root,Math.min(frames.length-1,current+1))
   if(e.key==='ArrowLeft'||e.key===',')gotoFrame(root,Math.max(0,current-1))
-  if(e.key==='n')addFrame(root)
-  if(e.key==='d')addFrame(root,current)
   if(e.key==='p')openDarkroom(root)
   if(e.key==='Escape'){closeDarkroom(root);closeOverlay(root)}
   if(e.key==='+'||e.key==='=')setZoom(root,zoom+1)
   if(e.key==='-')setZoom(root,Math.max(0.25,zoom-0.25))
-  if(e.key==='Tab'){e.preventDefault();$.whisper({tool:nextTool(tool)})}
-  const tk={b:TOOLS.draw,v:TOOLS.pen,e:TOOLS.erase,f:TOOLS.fill,h:TOOLS.pan}
-  if(tk[e.key])$.whisper({tool:tk[e.key]})
+  if(!violinMode){
+    if(e.key==='n')addFrame(root)
+    if(e.key==='Tab'){e.preventDefault();$.whisper({tool:nextTool(tool)})}
+    const tk={b:TOOLS.draw,v:TOOLS.pen,e:TOOLS.erase,f:TOOLS.fill}
+    if(tk[e.key])$.whisper({tool:tk[e.key]})
+  }
 })
 
 /*
@@ -2315,3 +2479,5 @@ customElements.define(tag, class FlipBook extends HTMLElement {
   }
   disconnectedCallback() { this._destroyed = true }
 })
+
+requestAnimationFrame(violinGameLoop)
