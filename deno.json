@@ -1,0 +1,5 @@
+{
+  "tasks": {
+    "test": "deno test --no-check --allow-net --allow-env --env-file=.env debugging_utilities/test_was_e2e.ts"
+  }
+}
