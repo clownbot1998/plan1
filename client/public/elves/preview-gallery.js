@@ -1,4 +1,5 @@
 import { Self } from '@plan98/types'
+import { toast } from '/elves/plan98-toast.js'
 
 const tag = 'preview-gallery'
 const $ = Self(tag)
@@ -9,11 +10,9 @@ function screenshotUrl(galleryId, itemId) {
   return `/private/screenshots/${galleryId}/${itemId}.png`
 }
 
-function CopyButton(id, text) {
-  return `
-    <span id="copy-${id}" style="position:absolute;opacity:0;pointer-events:none">${text}</span>
-    <button class="copy-btn" data-copy="copy-${id}">copy</button>
-  `
+function CopyButton(path) {
+  const full = location.origin + path
+  return `<button class="copy-btn" data-copy-text="${full}">copy</button>`
 }
 
 // ── draw ──────────────────────────────────────────────────────────────────────
@@ -57,7 +56,7 @@ $.draw(target => {
             <button class="admin-thumb" data-src="${src}" title="${item.id}">
               <img src="${src}" alt="${item.id}" />
             </button>
-            ${CopyButton(`${galleryId}-${item.id}`, src)}
+            ${CopyButton(src)}
             <button class="dup-btn" data-dup-id="${item.id}" data-dup-url="${item.url}" title="duplicate">⧉</button>
           </div>
           <div class="mono">${item.id}</div>
@@ -207,18 +206,24 @@ $.when('keydown', tag, event => {
   if (event.key === 'Escape') $.teach({ darkroom: null })
 })
 
-$.when('click', '[data-copy]', async event => {
-  const el = event.target.closest(tag)?.querySelector(`#${event.target.dataset.copy}`)
-  if (!el) return
+$.when('click', '.copy-btn', async event => {
+  const text = event.target.dataset.copyText
+  if (!text) return
   try {
-    await navigator.clipboard.writeText(el.textContent)
+    await navigator.clipboard.writeText(text)
+    toast('copied', { type: 'success' })
   } catch {
-    const ta = document.createElement('textarea')
-    ta.value = el.textContent
-    ta.style.cssText = 'position:fixed;left:-9999px'
-    document.body.appendChild(ta); ta.select()
-    document.execCommand('copy')
-    document.body.removeChild(ta)
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.cssText = 'position:fixed;left:-9999px'
+      document.body.appendChild(ta); ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      toast('copied', { type: 'success' })
+    } catch {
+      toast('copy failed', { type: 'error' })
+    }
   }
 })
 
