@@ -53,6 +53,15 @@ async function loadFromWas(target) {
     const state = JSON.parse(text)
     if (state?.frames?.length && state?.frameStrokes) {
       $.teach(state)
+      // wire up lazy video loaders for any frames that had video persisted to WAS
+      const wasBase = target.id
+      const { canvasW, canvasH } = state
+      const fhv = state.frameHasVideo || {}
+      Object.keys(fhv).forEach(frameId => {
+        const f = ensureFrame(frameId, canvasW, canvasH)
+        f._hasCachedVideo = true
+        f._wasVideoPath = `${wasBase}/frame-${frameId}.png`
+      })
     }
   } catch { /* WAS miss or offline — start fresh */ }
 }
@@ -65,7 +74,9 @@ function scheduleWasSave(id) {
   _wasSaveTimer = setTimeout(async () => {
     try {
       const { frames, frameStrokes, canvasW, canvasH } = $.learn()
-      const json = JSON.stringify({ frames, frameStrokes, canvasW, canvasH })
+      const frameHasVideo = {}
+      frames.forEach(id => { if (db[id]?.hasVideo) frameHasVideo[id] = true })
+      const json = JSON.stringify({ frames, frameStrokes, canvasW, canvasH, frameHasVideo })
       // WAS is immutable — delete existing version before re-writing
       await wasDel(p).catch(() => null)
       await wasPut(p, json, { type: 'application/json' })
@@ -1182,13 +1193,25 @@ function ensureFrameVideo(frameId, target) {
       const img = await createImageBitmap(record.data)
       f.videoCanvas.getContext('2d').drawImage(img, 0, 0)
       f.hasVideo = true
+      f._videoLoading = false
+      loadCurrentFrame(target); updateReelThumb(target, frameId); target._bufferCheck?.()
+    } else if (f._wasVideoPath) {
+      // fbCache missed — try WAS
+      wasGet(f._wasVideoPath).then(async blob => {
+        if (blob) {
+          // also repopulate fbCache so next load is local
+          fbCache.put(`frame-${frameId}`, blob, 'image/png').catch(() => null)
+          const img = await createImageBitmap(blob)
+          f.videoCanvas.getContext('2d').drawImage(img, 0, 0)
+          f.hasVideo = true
+        }
+        f._videoLoading = false
+        loadCurrentFrame(target); updateReelThumb(target, frameId); target._bufferCheck?.()
+      }).catch(() => { f._videoLoading = false })
     } else {
-      console.warn('flip-book: no blob in cache for frame', frameId)
+      f._videoLoading = false
+      console.warn('flip-book: no blob in cache or WAS for frame', frameId)
     }
-    f._videoLoading = false
-    loadCurrentFrame(target)
-    updateReelThumb(target, frameId)
-    target._bufferCheck?.()
   }).catch(e => { f._videoLoading = false; console.warn('lazy frame load failed', frameId, e) })
 }
 
@@ -2677,6 +2700,8 @@ async function importVideo(target,file,fpsOverride){
     f.videoCanvas.getContext('2d').drawImage(off,0,0);f.hasVideo=true
     const frameBlob=await new Promise(r=>off.toBlob(r,'image/png'))
     fbCache.put(`frame-${id}`,frameBlob,'image/png')
+    const _wasBase=wasCanvasPath(target.id)?.replace(/\.flip-book\.json$/,'')
+    if(_wasBase){wasDel(`${_wasBase}/frame-${id}.png`).catch(()=>null);wasPut(`${_wasBase}/frame-${id}.png`,frameBlob,{type:'image/png'}).catch(()=>null)}
     newStrokes[id]=[]
     const insertAt=replaceAll?i:current+1+i;newFrames.splice(insertAt,0,id)
     bar.style.width=`${Math.round(((i+1)/totalFrames)*100)}%`;lbl.textContent=`frame ${i+1} / ${totalFrames}`
