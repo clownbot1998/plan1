@@ -1598,6 +1598,17 @@ function renderReel(target) {
   if (active) active.scrollIntoView({ inline: 'nearest', block: 'nearest' })
 }
 
+function tickReelActive(target) {
+  const reel = target.querySelector('[data-film-reel]')
+  if (!reel) return
+  const current = target._localCurrent ?? 0
+  reel.querySelectorAll('.reel-frame').forEach((div, i) => {
+    div.classList.toggle('active', i === current)
+  })
+  const active = reel.querySelector('.reel-frame.active')
+  if (active) active.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+}
+
 /*
 
 renderPlayerCursors — uses target._localCurrent for same-frame check.
@@ -2179,7 +2190,7 @@ function _doStartPlayback(target) {
     else if (loopMode === 'pingpong') { if (next >= frames.length) { next = frames.length - 2; target._playDir = -1 } else if (next < 0) { next = 1; target._playDir = 1 } }
     else { if (next >= frames.length) { next = frames.length - 1; stopPlayback(target); return } }
     target._localCurrent = Math.max(0, Math.min(frames.length - 1, next))
-    loadCurrentFrame(target); renderOnion(target); renderReel(target)
+    loadCurrentFrame(target); renderOnion(target); tickReelActive(target)
   }, 1000 / $.learn().fps)
 }
 
