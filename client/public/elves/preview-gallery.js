@@ -61,15 +61,19 @@ $.draw(target => {
           </div>
           <div class="mono">${item.id}</div>
           <div class="url-cell">
-            <span>${item.url}</span>
+            <input class="url-inp" data-item-id="${item.id}" value="${item.url}" />
             <button class="rm-btn" data-remove="${item.id}">×</button>
           </div>
         `}).join('')}
       </form>
       ${saved ? `<div class="msg ok">saved.</div>` : ''}
-      <button class="refresh-btn" data-gallery="${galleryId}" ${refreshing ? 'disabled' : ''}>
-        ${refreshing ? 'refreshing…' : 'refresh screenshots'}
-      </button>
+      <div class="refresh-row">
+        <button class="refresh-btn" data-gallery="${galleryId}" ${refreshing ? 'disabled' : ''}>
+          ${refreshing ? 'refreshing…' : 'refresh screenshots'}
+        </button>
+        <input class="wait-inp" type="number" value="${$.learn().waitMs ?? 2000}" min="500" max="15000" step="500" />
+        <span class="wait-label">ms settle</span>
+      </div>
       ${refreshLog.length ? `<pre class="refresh-log">${refreshLog.join('\n')}</pre>` : ''}
     </div>
   `
@@ -167,12 +171,35 @@ $.when('click', '[data-dup-id]', event => {
   $.teach({ draftId: dupId + '-copy', draftUrl: dupUrl })
 })
 
+$.when('change', '.url-inp', async event => {
+  const itemId = event.target.dataset.itemId
+  const newUrl = event.target.value.trim()
+  if (!newUrl || !itemId) return
+  const galleryId = event.target.closest('form.table')?.dataset.gallery
+  if (!galleryId) return
+  const { items = [] } = $.learn()
+  const next = items.map(x => x.id === itemId ? { ...x, url: newUrl } : x)
+  try {
+    await saveConfig(galleryId, next)
+    $.teach({ items: next, saved: true })
+    setTimeout(() => $.teach({ saved: false }), 2000)
+  } catch(e) {
+    $.teach({ error: e.message })
+  }
+})
+
+$.when('input', '.wait-inp', event => {
+  const v = parseInt(event.target.value)
+  if (!isNaN(v)) $.teach({ waitMs: v })
+})
+
 $.when('click', '.refresh-btn', async event => {
   const galleryId = event.target.dataset.gallery
   if (!galleryId) return
+  const { waitMs = 2000 } = $.learn()
   $.teach({ refreshing: true, refreshLog: [] })
   try {
-    const res = await fetch(`/preview-gallery/${galleryId}/refresh`)
+    const res = await fetch(`/preview-gallery/${galleryId}/refresh?wait=${waitMs}`)
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
     let buf = ''
     while (true) {
@@ -356,7 +383,29 @@ $.style(`
   & .rm-btn:hover { color: #f66; }
   & .mono { font-variation-settings: "MONO" 1; font-size: .85rem; padding: .1rem .3rem; }
   & .url-cell { display: flex; align-items: center; gap: .25rem; font-size: .85rem; overflow: hidden; }
-  & .url-cell span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .url-inp {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    color: #aaa;
+    border: none;
+    border-bottom: 1px solid transparent;
+    padding: .1rem .2rem;
+    font-family: inherit;
+    font-size: .85rem;
+  }
+  & .url-inp:focus { outline: none; border-bottom-color: #555; color: #eee; }
+  & .refresh-row { display: flex; align-items: center; gap: .5rem; }
+  & .wait-inp {
+    width: 5rem;
+    background: #222;
+    color: #aaa;
+    border: 1px solid #333;
+    padding: .25rem .4rem;
+    font-family: inherit;
+    font-size: .8rem;
+  }
+  & .wait-label { font-size: .75rem; color: #555; }
   & .msg { padding: 1rem; color: #888; font-size: .9rem; }
   & .msg.error { color: #f66; }
   & .msg.ok { color: #6f6; }
