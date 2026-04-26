@@ -25,6 +25,12 @@ const SECTIONS = {
       { label: 'Multi Task',   href: '/app/multi-task' },
     ]
   },
+  blog: {
+    label: 'Clog',
+    apps: [
+      { label: 'All Posts', href: '/blog/' },
+    ]
+  },
 }
 
 const AXIS_RANGES = [

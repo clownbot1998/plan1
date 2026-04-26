@@ -207,6 +207,7 @@ function shell({ title, content, sidebar }) {
   <script type="module" src="/elves/title-page.js"></script>
   <script type="module" src="/elves/blog-search.js"></script>
 <script type="module" src="/elves/project-manager.js"></script>
+  <script>(()=>{const e=new EventSource('/__reload');e.onmessage=()=>location.reload()})()</script>
 </head>
 <body>
 
@@ -214,7 +215,7 @@ function shell({ title, content, sidebar }) {
   <blog-search></blog-search>
   <nav class="site-nav">
     <div class="nav-item-wrapper"><a class="nav-item" href="/">Home</a></div>
-    <div class="nav-item-wrapper"><a class="nav-item" href="/blog/">Blog</a></div>
+    <div class="nav-item-wrapper"><a class="nav-item" href="/blog/">Clog</a></div>
   </nav>
 </header>
 

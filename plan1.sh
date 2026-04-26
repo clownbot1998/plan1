@@ -23,6 +23,11 @@ case "$CMD" in
     echo "open http://localhost:$PORT/app/private-ai"
     ;;
   stop)
+    WATCH_PID_FILE="$SCRIPT_DIR/.watch.pid"
+    if [ -f "$WATCH_PID_FILE" ]; then
+      kill "$(cat "$WATCH_PID_FILE")" 2>/dev/null || true
+      rm "$WATCH_PID_FILE" 2>/dev/null || true
+    fi
     if [ -f "$PID_FILE" ]; then
       kill "$(cat "$PID_FILE")" 2>/dev/null && echo "stopped" || true
       rm "$PID_FILE" 2>/dev/null || sudo rm "$PID_FILE"
@@ -107,13 +112,35 @@ case "$CMD" in
     qjs --std "$SCRIPT_DIR/vendor.js"
     ;;
   watch)
-    echo "watching client/ for changes — press Ctrl-C to stop"
-    while true; do
-      inotifywait -r -q -e modify,create,delete,move "$SCRIPT_DIR/client/" 2>/dev/null \
-        && echo "── change detected, rebuilding ──" \
-        && qjs --std "$SCRIPT_DIR/build.js" \
-        && curl -sf -X POST "http://localhost:${PORT}/__reload" > /dev/null 2>&1 || true
-    done
+    WATCH_PID_FILE="$SCRIPT_DIR/.watch.pid"
+    if [ -f "$WATCH_PID_FILE" ] && kill -0 "$(cat "$WATCH_PID_FILE")" 2>/dev/null; then
+      echo "already watching (pid $(cat "$WATCH_PID_FILE"))"
+      exit 0
+    fi
+    echo "watching everything — press Ctrl-C to stop"
+    (
+      while true; do
+        CHANGED=$(inotifywait -r -q -e modify,create,delete,move \
+          --format '%w%f' \
+          "$SCRIPT_DIR/client/" \
+          "$SCRIPT_DIR/blog/" \
+          "$SCRIPT_DIR/build.js" \
+          "$SCRIPT_DIR/vendor.js" \
+          "$SCRIPT_DIR/server.js" 2>/dev/null)
+        echo "── $CHANGED"
+        if echo "$CHANGED" | grep -q "server\.js$"; then
+          echo "── server changed, restarting ──"
+          "$SCRIPT_DIR/plan1.sh" restart
+          sleep 1
+        else
+          qjs --std "$SCRIPT_DIR/build.js" 2>/dev/null
+        fi
+        curl -sf -X POST "http://localhost:${PORT}/__reload" > /dev/null 2>&1 || true
+      done
+    ) &
+    echo $! > "$WATCH_PID_FILE"
+    echo "watching (pid $!)"
+    wait
     ;;
   bootstrap)
     MEMORY_SRC="$SCRIPT_DIR/memory"
