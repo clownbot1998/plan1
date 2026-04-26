@@ -62,9 +62,12 @@ function fetch(url, outPath) {
 
 // ── copy src → dist ───────────────────────────────────────────────────────────
 
+const COPY_SKIP = ['blog']
+
 function copyDir(src, dst) {
   mkdirp(dst)
   for (const entry of readdir(src)) {
+    if (COPY_SKIP.includes(entry)) continue
     const s = join(src, entry)
     const d = join(dst, entry)
     if (isDir(s)) copyDir(s, d)

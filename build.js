@@ -333,8 +333,8 @@ ${mdToHtml(post.body)}
   print('write: blog/' + post.slug + '/')
 }
 
-// blog roll — only rewrite if any post changed
-if (blogChanged) {
+// blog roll — rewrite if any post changed or index is missing
+if (blogChanged || !mtime(join(OUT, 'index.html'))) {
   const roll = posts.map(p => {
     const preview = p.body.split('\n').find(l => l.trim()) || ''
     return `<div class="snippet">
