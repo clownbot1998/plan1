@@ -21,4 +21,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `C0DEBABE-DEAD-F00D-CAFE-BEEFFACE0026` | 2026-04-26 | p1 private command + WAS sync for personal files, samples → private/, server private/ filesystem fallback, fixed 404 catch-all returning HTML for assets, sticky-menu lrud guard on /app/ routes so violin keys don't navigate menus. the cyberdeck knows where your stuff lives. |
 
+| `BRAID000-CAFE-BABE-C0DE-DEADBEEF1998` | 2026-04-27 | squad-code: braid collab editor, in-memory mirror, /save/ persists, session cookie auth, path traversal guard, echo-freeze fix. the editor braids. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
