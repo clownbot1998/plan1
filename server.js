@@ -2,6 +2,7 @@
 import { serveDir } from 'jsr:@std/http/file-server';
 import { Ed25519Signer } from 'npm:@did.coop/did-key-ed25519@0.0.14';
 import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3';
+import { resolve } from 'node:path';
 
 const DIST    = new URL('./dist/',    import.meta.url).pathname;
 const PRIVATE = new URL('./private/', import.meta.url).pathname;
@@ -70,15 +71,7 @@ function sessionCookieHeader(secure) {
 
 // prevent path traversal: resolve filePath relative to DIST and assert it stays inside
 function safeDistPath(filePath) {
-  // prepend '.' so an absolute filePath doesn't override the base
-  const joined = DIST + filePath.replace(/^\/+/, '');
-  // manually normalize: split on /, collapse . and ..
-  const parts = [];
-  for (const seg of joined.split('/')) {
-    if (seg === '..') parts.pop();
-    else if (seg && seg !== '.') parts.push(seg);
-  }
-  const resolved = '/' + parts.join('/');
+  const resolved = resolve(DIST, filePath.replace(/^\/+/, ''));
   if (!resolved.startsWith(DIST.replace(/\/$/, ''))) return null;
   return resolved;
 }
