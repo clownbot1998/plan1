@@ -71,11 +71,11 @@ const BINARY_EXTS = new Set([
 function copyFile(src, dst) {
   const ext = src.split('.').pop()?.toLowerCase() ?? ''
   if (BINARY_EXTS.has(ext)) {
-    // re-copy if dst is stale OR sizes differ (catches old text-corrupted binaries)
-    if (mtime(dst) >= mtime(src) && fileSize(dst) === fileSize(src)) return
+    // skip only if dst exists and sizes match (size catches old text-corrupted binaries)
+    if (mtime(dst) > 0 && fileSize(dst) === fileSize(src)) return
     std.popen(`cp '${src}' '${dst}'`, 'r').close()
   } else {
-    if (mtime(dst) >= mtime(src)) return
+    // always copy text files — dist/ is derived, source is truth
     writeFile(dst, std.loadFile(src))
   }
 }

@@ -3,8 +3,8 @@
  * was_bootstrap.ts — upload all bootstrap dependencies to WAS from local server
  *
  * Usage:
- *   deno run --allow-net --allow-env --env-file .env was_bootstrap.ts
- *   deno run --allow-net --allow-env --env-file .env was_bootstrap.ts --dry-run
+ *   set -a && . .env && set +a && deno run --allow-net --allow-env debugging_utilities/was_bootstrap.ts
+ *   set -a && . .env && set +a && deno run --allow-net --allow-env debugging_utilities/was_bootstrap.ts --dry-run
  *
  * Fetches each bootstrap file from PLAN1_HOST (default localhost:1998) and
  * PUTs it into WAS. Idempotent — re-running overwrites with latest dist content.
@@ -56,6 +56,7 @@ const bootstrapPaths = [
   '/elves/plan98-panel.js',
   '/elves/plan98-toast.js',
   '/elves/plan98-console.js',
+  '/elves/squad-code.js',
   '/elves/was-code.js',
   '/elves/hypertext-action.js',
   '/elves/hypertext-address.js',
@@ -98,7 +99,7 @@ for (const path of bootstrapPaths) {
     const blob = await res.blob();
     const ct = res.headers.get('content-type') ?? 'application/octet-stream';
     const typedBlob = new Blob([blob], { type: ct });
-    const putRes = await space.resource(path).put(typedBlob, { signer });
+    const putRes = await space.resource(path.replace(/^\//, '')).put(typedBlob, { signer });
     console.log(`${putRes.status} ${path} (${blob.size}B)`);
     if (putRes.ok) ok++; else fail++;
   } catch(e: unknown) {
