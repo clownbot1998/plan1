@@ -465,7 +465,7 @@ export async function get(src) {
       id: `urn:uuid:${keycard.id}`
     })
 
-    const resource = space.resource(src)
+    const resource = space.resource(src.startsWith('/') ? src : '/' + src)
 
     return await resource.get({ signer })
       .then(async res => {
@@ -488,7 +488,7 @@ export async function touch(src, config={ type: 'application/json' }) {
       id: `urn:uuid:${keycard.id}`
     })
 
-    const resource = space.resource(src)
+    const resource = space.resource(src.startsWith('/') ? src : '/' + src)
 
     const typedBlob = new Blob([JSON.stringify({})], config)
     return await resource.put(typedBlob, { signer })
@@ -512,7 +512,7 @@ export async function put(src, file, config={ type: 'text/plain' }) {
       id: `urn:uuid:${keycard.id}`
     })
 
-    const resource = space.resource(src)
+    const resource = space.resource(src.startsWith('/') ? src : '/' + src)
 
     const typedBlob = new Blob([file], config)
     return await resource.put(typedBlob, { signer })
