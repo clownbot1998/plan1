@@ -43,9 +43,76 @@ if (!_savedSignerJson || !_spaceId) {
 // --- end keycard bootstrap ---
 
 
+// --- session cookie auth ---
+async function sha256hex(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+const _passphrase = safeEnv('PLAN1_PASSPHRASE');
+// stable session token = sha256(passphrase + server secret); survives restarts with same env
+const _serverSecret = safeEnv('PLAN1_SESSION_SECRET') || crypto.randomUUID();
+const _sessionToken = _passphrase ? await sha256hex(_passphrase + _serverSecret) : '';
+
+const SESSION_COOKIE = 'plan1_session';
+
+function checkAuth(request) {
+  if (!_sessionToken) return true; // no passphrase set = open (localhost dev)
+  const cookie = request.headers.get('cookie') ?? '';
+  const match = cookie.match(/(?:^|;\s*)plan1_session=([^;]+)/);
+  return match?.[1] === _sessionToken;
+}
+
+function sessionCookieHeader(secure) {
+  const flags = `HttpOnly; SameSite=Strict; Path=/${secure ? '; Secure' : ''}`;
+  return `${SESSION_COOKIE}=${_sessionToken}; ${flags}`;
+}
+
+// prevent path traversal: resolve filePath relative to DIST and assert it stays inside
+function safeDistPath(filePath) {
+  // prepend '.' so an absolute filePath doesn't override the base
+  const joined = DIST + filePath.replace(/^\/+/, '');
+  // manually normalize: split on /, collapse . and ..
+  const parts = [];
+  for (const seg of joined.split('/')) {
+    if (seg === '..') parts.pop();
+    else if (seg && seg !== '.') parts.push(seg);
+  }
+  const resolved = '/' + parts.join('/');
+  if (!resolved.startsWith(DIST.replace(/\/$/, ''))) return null;
+  return resolved;
+}
+
 // --- live reload SSE ---
 const reloadClients = new Set();
 const enc = new TextEncoder();
+
+// --- braid collaboration state ---
+const braidState = new Map(); // filePath -> { text, version, subs: Set }
+
+async function getBraidResource(filePath) {
+  if (braidState.has(filePath)) return braidState.get(filePath);
+  let text = '';
+  try { text = await Deno.readTextFile(DIST + filePath); } catch { /* new file */ }
+  const state = { text, version: '"v0"', subs: new Set() };
+  braidState.set(filePath, state);
+  return state;
+}
+
+function makeBraidBytes(versionHdr, parentHdr, contentRange, body) {
+  let hdr = `HTTP 200 OK\r\nVersion: ${versionHdr}\r\n`;
+  // always include Parents (empty string = [] = initial state); undefined.sort() throws in simpleton
+  if (parentHdr != null) hdr += `Parents: ${parentHdr}\r\n`;
+  const bodyBytes = enc.encode(body);
+  if (contentRange) hdr += `Content-Length: ${bodyBytes.length}\r\nContent-Range: ${contentRange}\r\n\r\n`;
+  else              hdr += `Content-Length: ${bodyBytes.length}\r\n\r\n`;
+  const hdrBytes = enc.encode(hdr);
+  const tail = enc.encode('\r\n\r\n');
+  const out = new Uint8Array(hdrBytes.length + bodyBytes.length + tail.length);
+  out.set(hdrBytes); out.set(bodyBytes, hdrBytes.length); out.set(tail, hdrBytes.length + bodyBytes.length);
+  return out;
+}
+// --- end braid ---
 
 function broadcastReload() {
   for (const ctrl of reloadClients) {
@@ -93,12 +160,38 @@ function injectApp(html, tag, attrs = '') {
 // Knowing PLAN1_PASSPHRASE lets you scan the QR, decrypt the root keycard,
 // and import it into plan98-wallet. The keycard grants write access to the
 // same WAS space the server reads from. Default (no passphrase) = disk only.
-async function adminPage() {
+async function adminPage(request) {
   const passphrase = safeEnv('PLAN1_PASSPHRASE');
   if (!passphrase) return new Response(
     'set PLAN1_PASSPHRASE in .env to enable /admin/',
     { status: 503, headers: { 'content-type': 'text/plain' } }
   );
+
+  if (!checkAuth(request)) {
+    const loginHtml = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>*{box-sizing:border-box}body{margin:0;background:#1d2021;height:100vh;display:flex;align-items:center;justify-content:center;font-family:monospace}form{display:flex;flex-direction:column;gap:1rem;padding:2rem;background:#282828;border-radius:4px}label{color:#ebdbb2}input{padding:.5rem;background:#3c3836;color:#ebdbb2;border:1px solid #504945;border-radius:2px;font-family:monospace;font-size:1rem}button{padding:.5rem 1rem;background:#458588;color:#ebdbb2;border:none;border-radius:2px;font-family:monospace;font-size:1rem;cursor:pointer}#err{color:#cc241d;display:none}</style>
+</head><body>
+<form id="lf">
+  <label>passphrase</label>
+  <input id="pp" type="password" autocomplete="current-password" autofocus />
+  <button type="submit">unlock</button>
+  <div id="err">wrong passphrase</div>
+</form>
+<script>
+document.getElementById('lf').addEventListener('submit', async e => {
+  e.preventDefault();
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: {'content-type':'application/json'},
+    body: JSON.stringify({ passphrase: document.getElementById('pp').value }),
+  });
+  if (res.ok) location.href = '/admin';
+  else document.getElementById('err').style.display = '';
+});
+</script>
+</body></html>`;
+    return new Response(loginHtml, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+  }
 
   const { default: CryptoJS } = await import('npm:crypto-js');
 
@@ -159,7 +252,109 @@ async function handleRequest(request) {
 
   if (path === '/') path = '/index.html';
 
-  if (path === '/admin' || path === '/admin/') return adminPage();
+  if (path === '/admin' || path === '/admin/') return adminPage(request);
+
+  // login — POST /api/login { passphrase } → sets session cookie
+  if (path === '/api/login' && request.method === 'POST') {
+    if (!_passphrase) return new Response('no passphrase configured', { status: 503 });
+    let body;
+    try { body = await request.json(); } catch { return new Response('bad request', { status: 400 }); }
+    if (body?.passphrase !== _passphrase) {
+      return new Response('unauthorized', { status: 401 });
+    }
+    // detect if request arrived over HTTPS (Caddy sets X-Forwarded-Proto)
+    const secure = request.headers.get('x-forwarded-proto') === 'https';
+    return new Response('ok', {
+      headers: {
+        'content-type': 'text/plain',
+        'set-cookie': sessionCookieHeader(secure),
+      },
+    });
+  }
+
+  // braid collaboration — /braid/<filePath> (in-memory only; no disk writes)
+  if (path.startsWith('/braid/') && (request.method === 'GET' || request.method === 'PUT')) {
+    const filePath = path.slice(6); // '/braid/plan98.js' → '/plan98.js'
+    if (!safeDistPath(filePath)) return new Response('forbidden', { status: 403 });
+    const state = await getBraidResource(filePath);
+
+    if (request.method === 'GET') {
+      let ctrl;
+      const stream = new ReadableStream({
+        start(c) {
+          ctrl = c;
+          state.subs.add(c);
+          c.enqueue(makeBraidBytes(state.version, '', null, state.text));
+        },
+        cancel() { state.subs.delete(ctrl); },
+      });
+      return new Response(stream, {
+        status: 209,
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          'subscribe': 'true',
+          'cache-control': 'no-cache, no-transform',
+          'x-accel-buffering': 'no',
+          'access-control-allow-origin': '*',
+        },
+      });
+    }
+
+    if (request.method === 'PUT') {
+      if (!checkAuth(request)) return new Response('unauthorized', { status: 401 });
+      const versionHdr  = request.headers.get('Version')  ?? `"upd-${Date.now()}"`;
+      const parentHdr   = request.headers.get('Parents');
+      const contentRange = request.headers.get('Content-Range');
+      const patchText   = await request.text();
+      const prevVersion = state.version;
+
+      if (contentRange) {
+        const digits = contentRange.match(/\d+/g);
+        if (digits?.length >= 2) {
+          const s = parseInt(digits[0]), e = parseInt(digits[1]);
+          state.text = state.text.slice(0, s) + patchText + state.text.slice(e);
+        }
+      }
+      state.version = versionHdr;
+
+      // broadcast to all subscribers (parents = previous server version)
+      const update = makeBraidBytes(versionHdr, prevVersion, contentRange, patchText);
+      for (const sub of state.subs) {
+        try { sub.enqueue(update); } catch { state.subs.delete(sub); }
+      }
+
+      return new Response('ok', { headers: { 'access-control-allow-origin': '*' } });
+    }
+  }
+
+  // explicit save — /save/<filePath> — writes to dist/ and WAS
+  if (path.startsWith('/save/') && request.method === 'PUT') {
+    if (!checkAuth(request)) return new Response('unauthorized', { status: 401 });
+    const filePath = path.slice(5); // '/save/plan98.js' → '/plan98.js'
+    const distPath = safeDistPath(filePath);
+    if (!distPath) return new Response('forbidden', { status: 403 });
+
+    const text = await request.text();
+
+    // update in-memory braid state so subscribers stay consistent
+    const state = await getBraidResource(filePath);
+    state.text = text;
+    state.version = `"save-${Date.now()}"`;
+
+    Deno.writeTextFile(distPath, text).then(() => {
+      console.log(`save: wrote ${text.length}B → ${distPath}`);
+    }).catch(console.error);
+
+    const wasHostStr = safeEnv('PLAN98_WAS_HOST');
+    if (wasHostStr && _spaceId) {
+      const wasStorage = new StorageClient(new URL(wasHostStr));
+      const wasSpace   = wasStorage.space({ signer: _signer, id: `urn:uuid:${_spaceId}` });
+      const ct = getContentTypeByPath(filePath);
+      wasSpace.resource(filePath.replace(/^\//, '')).put(new Blob([text], { type: ct }), { signer: _signer }).catch(console.error);
+    }
+
+    return new Response('saved', { headers: { 'access-control-allow-origin': '*' } });
+  }
 
   // live reload — SSE stream
   if (path === '/__reload' && request.method === 'GET') {
@@ -274,7 +469,8 @@ async function handleRequest(request) {
       try {
         const storage = new StorageClient(new URL(wasHost));
         const space = storage.space({ signer: _signer, id: `urn:uuid:${_spaceId}` });
-        const wasRes = await space.resource(path).get({ signer: _signer }).catch(() => null);
+        const wasKey = path.replace(/^\//, '');
+        const wasRes = await space.resource(wasKey).get({ signer: _signer }).catch(() => null);
         if (wasRes?.status === 200) {
           console.log('Serving ' + path + ' from WAS ' + _spaceId);
           const ct = getContentTypeByPath(path);
