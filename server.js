@@ -42,6 +42,7 @@ if (!_savedSignerJson || !_spaceId) {
 }
 // --- end keycard bootstrap ---
 
+
 // --- live reload SSE ---
 const reloadClients = new Set();
 const enc = new TextEncoder();
@@ -278,7 +279,6 @@ async function handleRequest(request) {
           console.log('Serving ' + path + ' from WAS ' + _spaceId);
           const ct = getContentTypeByPath(path);
           const headers = new Headers({ 'content-type': ct });
-          for (const [k, v] of Object.entries(ISOLATION_HEADERS)) headers.set(k, v);
           return new Response(await wasRes.blob(), { status: 200, headers });
         }
       } catch (e) {
