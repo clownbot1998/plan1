@@ -9,6 +9,7 @@ const cache = Cache(elf)
 const version = 'plan1-1.0.0'
 
 const HOME   = 'home'
+const WHO    = 'who'
 const ART    = 'art'
 const MUSIC  = 'music'
 const CODING = 'coding'
@@ -19,6 +20,12 @@ const THEME  = 'theme'
 const PROJECT_MANAGER = 'project-manager'
 
 const config = {
+  [WHO]: {
+    label: 'Who',
+    path: '/who',
+    icon: '🤡',
+    body: () => `<clownbot-brief></clownbot-brief>`
+  },
   [HOME]: {
     label: 'Home',
     path: '/',
@@ -82,7 +89,16 @@ const config = {
     label: 'Coding',
     path: '/coding',
     icon: '🖥',
-    body: (target) => `<ur-shell></ur-shell>`
+    body: (target) => `
+      <div style="display:flex;flex-direction:column;height:100%">
+        <div style="display:flex;gap:.4rem;padding:.4rem .8rem;background:#111;flex-shrink:0">
+          <button data-coding-tab="shell" style="font-family:'Recursive',monospace;font-size:1.2rem;padding:.2rem .8rem;background:transparent;border:1px solid #3c3c3c;color:#d4c5a9;cursor:pointer">shell</button>
+          <button data-coding-tab="agent" style="font-family:'Recursive',monospace;font-size:1.2rem;padding:.2rem .8rem;background:transparent;border:1px solid #3c3c3c;color:#d4c5a9;cursor:pointer">agent</button>
+        </div>
+        <div data-coding-panel="shell" style="flex:1;min-height:0"><ur-shell></ur-shell></div>
+        <div data-coding-panel="agent" style="flex:1;min-height:0;display:none"><open-clown></open-clown></div>
+      </div>
+    `
   },
   [SAGAS]: {
     label: 'Sagas',
@@ -155,6 +171,19 @@ $.when('click', '[data-nav]', (event) => {
   hidePanel()
 })
 
+$.when('click', '[data-coding-tab]', (event) => {
+  const tab = event.target.dataset.codingTab
+  const container = event.target.closest('[data-coding-panel]')?.parentElement || event.target.closest('div')?.parentElement
+  const root = event.target.closest('.page') || event.target.closest('my-computer')
+  if (!root) return
+  root.querySelectorAll('[data-coding-panel]').forEach(panel => {
+    panel.style.display = panel.dataset.codingPanel === tab ? '' : 'none'
+  })
+  root.querySelectorAll('[data-coding-tab]').forEach(btn => {
+    btn.style.background = btn.dataset.codingTab === tab ? 'rgba(255,255,255,.1)' : 'transparent'
+  })
+})
+
 $.when('click', '[data-post-url]', (event) => {
   event.preventDefault()
   const { postUrl } = event.target.dataset
@@ -167,7 +196,7 @@ $.head(target => {
 
   target.innerHTML = `
     <header>
-      <button data-nav="/" class="title">
+      <button data-nav="/who" class="title">
         🤡 clownbot
       </button>
       <nav class="horizontal">
@@ -175,6 +204,7 @@ $.head(target => {
         <button data-nav="/music">Music</button>
         <button data-nav="/coding">Coding</button>
         <button data-nav="/sagas">Sagas</button>
+        <button data-nav="/who">Who</button>
         <button data-panel>☰</button>
       </nav>
     </header>

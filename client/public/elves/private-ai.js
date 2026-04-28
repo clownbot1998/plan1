@@ -493,10 +493,11 @@ $.style(`
 `)
 
 export const openClown = {
-  async *chat({ model, messages, stream = true, apiKey, withTools = true, ...rest }) {
-    const { url, key } = $.learn()
+  async *chat({ model, messages, stream = true, apiKey, apiUrl, withTools = true, ...rest }) {
+    const { url: stateUrl, key } = $.learn()
+    const effectiveUrl = apiUrl || stateUrl
     const effectiveKey = apiKey || key
-    if (!url || !effectiveKey) throw new Error('openClown: missing url or key — connect via the private-ai UI first')
+    if (!effectiveUrl || !effectiveKey) throw new Error('openClown: missing url or key — set OLLAMA_HOST in .env or connect via the private-ai UI')
 
     let currentMessages = messages
 
@@ -504,7 +505,7 @@ export const openClown = {
       const body = { model, messages: currentMessages, stream, ...rest }
       if (withTools) body.tools = toolDefinitions
 
-      const response = await fetch(url + '/chat/completions', {
+      const response = await fetch(effectiveUrl + '/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${effectiveKey}` },
         body: JSON.stringify(body)

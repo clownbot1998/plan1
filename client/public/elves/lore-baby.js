@@ -201,6 +201,7 @@ $.e('click', '[data-pitch]', pitch)
 $.e('click', '[data-search]', search)
 
 const sagaDocs = [
+  { name: 'the-story-so-far', path: '/sagas/plan1/the-story-so-far.saga' },
   { name: 'elevator-pitch', path: '/cdn/sillyz.computer/en-us/elevator-pitch.saga' },
   { name: 'plan4', path: '/sagas/sillyz.computer/plan4.saga' },
   { name: 'about', path: '/sagas/sillyz.computer/about.saga' },
