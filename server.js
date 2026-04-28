@@ -277,9 +277,13 @@ async function handleRequest(request) {
         start(c) {
           ctrl = c;
           state.subs.add(c);
+          console.log(`braid SUB ${filePath} subs=${state.subs.size}`);
           c.enqueue(makeBraidBytes(state.version, '', null, state.text));
         },
-        cancel() { state.subs.delete(ctrl); },
+        cancel() {
+          state.subs.delete(ctrl);
+          console.log(`braid UNSUB ${filePath} subs=${state.subs.size}`);
+        },
       });
       return new Response(stream, {
         status: 209,
@@ -312,6 +316,7 @@ async function handleRequest(request) {
 
       // broadcast to all subscribers (parents = previous server version)
       const update = makeBraidBytes(versionHdr, prevVersion, contentRange, patchText);
+      console.log(`braid PUT ${filePath} subs=${state.subs.size} ver=${versionHdr} range=${contentRange ?? 'full'}`);
       for (const sub of state.subs) {
         try { sub.enqueue(update); } catch { state.subs.delete(sub); }
       }

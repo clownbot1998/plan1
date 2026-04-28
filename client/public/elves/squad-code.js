@@ -59,19 +59,26 @@ function connectSimpleton(target, src, initialText) {
   // mutates `acked` itself, so the server echo re-applies to the pre-edit baseline.
   let acked = initialText ?? ''
 
+  console.log(`[squad-code] subscribing to ${braidUrl(src)}`)
+
   target.simpleton = simpleton_client(braidUrl(src), {
     apply_remote_update({ state, patches }) {
-      const before = acked.length
       if (state !== undefined) {
+        console.log(`[squad-code] apply full state len=${state.length}`)
         acked = state
+        target._remote_changes = null
       } else {
+        console.log(`[squad-code] apply ${patches?.length} patch(es)`, patches?.map(p => String(p.range)))
+        const changes = []
         for (const p of patches ?? []) {
           const nums = String(p.range).match(/\d+/g)
           if (nums?.length >= 2) {
             const s = +nums[0], e = +nums[1]
             acked = acked.slice(0, s) + (p.content_text ?? '') + acked.slice(e)
+            changes.push({ from: s, to: e, insert: p.content_text ?? '' })
           }
         }
+        target._remote_changes = changes.length ? changes : null
       }
       const editorText = target.view?.state.doc.toString()
       target._remote_state = acked
@@ -225,9 +232,15 @@ $.draw(target => {
       // skip dispatch if editor already has this content (e.g. own echo from server)
       if (target._remote_state === target.view.state.doc.toString()) return
       target._applyingRemote = true
-      target.view.dispatch({
-        changes: { from: 0, to: target.view.state.doc.length, insert: target._remote_state }
-      })
+      if (target._remote_changes) {
+        // apply precise patch positions — CodeMirror maps selection through the change
+        target.view.dispatch({ changes: target._remote_changes })
+      } else {
+        // full state replace (initial load or reconnect)
+        target.view.dispatch({
+          changes: { from: 0, to: target.view.state.doc.length, insert: target._remote_state }
+        })
+      }
       target._applyingRemote = false
     }
   }
