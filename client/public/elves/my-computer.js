@@ -94,9 +94,11 @@ const config = {
         <div style="display:flex;gap:.4rem;padding:.4rem .8rem;background:#111;flex-shrink:0">
           <button data-coding-tab="shell" style="font-family:'Recursive',monospace;font-size:1.2rem;padding:.2rem .8rem;background:transparent;border:1px solid #3c3c3c;color:#d4c5a9;cursor:pointer">shell</button>
           <button data-coding-tab="agent" style="font-family:'Recursive',monospace;font-size:1.2rem;padding:.2rem .8rem;background:transparent;border:1px solid #3c3c3c;color:#d4c5a9;cursor:pointer">agent</button>
+          <button data-coding-tab="board" style="font-family:'Recursive',monospace;font-size:1.2rem;padding:.2rem .8rem;background:transparent;border:1px solid #3c3c3c;color:#d4c5a9;cursor:pointer">board</button>
         </div>
         <div data-coding-panel="shell" style="flex:1;min-height:0"><ur-shell></ur-shell></div>
         <div data-coding-panel="agent" style="flex:1;min-height:0;display:none"><open-clown></open-clown></div>
+        <div data-coding-panel="board" style="flex:1;min-height:0;display:none"><clown-board></clown-board></div>
       </div>
     `
   },

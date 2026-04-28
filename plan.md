@@ -83,3 +83,13 @@ no new deps, just check before copy/write.
 [x] fix: fp-span — solid #d79921 background, not gradient
 [x] fix: undo stack comment — they are module vars, not whisper state
 [x] fix: chromakey CPU path — gate at 2MP, skip + warn above threshold
+
+---
+
+## autonomous loop
+
+goal: clownbot can act on plan.md without a human typing the task.
+
+- [x] serve /plan.md from server.js (read root plan.md, serve as text/plain)
+- [x] open-clown: "Plan" button — fetch /plan.md, parse first unchecked item, populate task, auto-run
+- [ ] plan-view elf: render plan.md in the browser with checkboxes and progress

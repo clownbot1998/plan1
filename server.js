@@ -76,20 +76,27 @@ function safeDistPath(filePath) {
   return resolved;
 }
 
-// --- live reload SSE ---
+// --- live reload WebSocket ---
 const reloadClients = new Set();
 const enc = new TextEncoder();
 
 // --- braid collaboration state ---
-const braidState = new Map(); // filePath -> { text, version, subs: Set }
+const braidState = new Map();   // filePath -> { text, version, subs: Set }
+const braidLoading = new Map(); // filePath -> Promise<state>  (in-flight dedup)
 
 async function getBraidResource(filePath) {
   if (braidState.has(filePath)) return braidState.get(filePath);
-  let text = '';
-  try { text = await Deno.readTextFile(DIST + filePath); } catch { /* new file */ }
-  const state = { text, version: '"v0"', subs: new Set() };
-  braidState.set(filePath, state);
-  return state;
+  if (braidLoading.has(filePath)) return braidLoading.get(filePath);
+  const p = (async () => {
+    let text = '';
+    try { text = await Deno.readTextFile(DIST + filePath); } catch { /* new file */ }
+    const state = { text, version: '"v0"', subs: new Set() };
+    braidState.set(filePath, state);
+    braidLoading.delete(filePath);
+    return state;
+  })();
+  braidLoading.set(filePath, p);
+  return p;
 }
 
 function makeBraidBytes(versionHdr, parentHdr, contentRange, body) {
@@ -108,12 +115,12 @@ function makeBraidBytes(versionHdr, parentHdr, contentRange, body) {
 // --- end braid ---
 
 function broadcastReload() {
-  for (const ctrl of reloadClients) {
-    try { ctrl.enqueue(enc.encode('data: reload\n\n')); } catch { reloadClients.delete(ctrl); }
+  for (const ws of reloadClients) {
+    try { ws.send('reload'); } catch { reloadClients.delete(ws); }
   }
 }
 
-const RELOAD_SCRIPT = `<script>(()=>{const e=new EventSource('/__reload');e.onmessage=()=>location.reload()})()</script>`;
+const RELOAD_SCRIPT = `<script>(()=>{function connect(){const ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/__reload');ws.onmessage=()=>location.reload();ws.onclose=()=>setTimeout(connect,1000)}connect()})()</script>`;
 // --- end live reload ---
 
 function buildEnvScript() {
@@ -354,20 +361,13 @@ async function handleRequest(request) {
     return new Response('saved', { headers: { 'access-control-allow-origin': '*' } });
   }
 
-  // live reload — SSE stream
-  if (path === '/__reload' && request.method === 'GET') {
-    let ctrl;
-    const stream = new ReadableStream({
-      start(c) { ctrl = c; reloadClients.add(c); },
-      cancel() { reloadClients.delete(ctrl); },
-    });
-    return new Response(stream, {
-      headers: {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-        'connection': 'keep-alive',
-      },
-    });
+  // live reload — WebSocket
+  if (path === '/__reload' && request.headers.get('upgrade') === 'websocket') {
+    const { socket, response } = Deno.upgradeWebSocket(request);
+    socket.onopen = () => { reloadClients.add(socket); };
+    socket.onclose = () => { reloadClients.delete(socket); };
+    socket.onerror = () => { reloadClients.delete(socket); };
+    return response;
   }
 
   // live reload — trigger broadcast
@@ -441,6 +441,15 @@ async function handleRequest(request) {
     const bytes = await Deno.readFile(outFile)
     Deno.remove(outFile).catch(() => {})
     return new Response(bytes, { headers: { 'content-type': 'image/png' } })
+  }
+
+  if (path === '/plan.md') {
+    try {
+      const text = await Deno.readTextFile('./plan.md');
+      return new Response(text, { headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    } catch {
+      return new Response('not found', { status: 404 });
+    }
   }
 
   if (path.startsWith('/app/')) {
