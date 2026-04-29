@@ -452,6 +452,59 @@ async function handleRequest(request) {
     }
   }
 
+  // blog source — list and serve raw markdown
+  if (path === '/blog-src/') {
+    try {
+      const files = [];
+      for await (const entry of Deno.readDir('./blog')) {
+        if (entry.isFile && entry.name.endsWith('.md')) files.push(entry.name);
+      }
+      files.sort().reverse();
+      return new Response(JSON.stringify(files), { headers: { 'content-type': 'application/json' } });
+    } catch {
+      return new Response('[]', { headers: { 'content-type': 'application/json' } });
+    }
+  }
+
+  if (path.startsWith('/blog-src/')) {
+    const filename = path.slice(10);
+    if (!filename.endsWith('.md') || filename.includes('/') || filename.includes('..')) {
+      return new Response('forbidden', { status: 403 });
+    }
+    try {
+      const text = await Deno.readTextFile(`./blog/${filename}`);
+      return new Response(text, { headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    } catch {
+      return new Response('not found', { status: 404 });
+    }
+  }
+
+  // memory files — list and serve
+  if (path === '/memory/') {
+    try {
+      const files = [];
+      for await (const entry of Deno.readDir('./memory')) {
+        if (entry.isFile) files.push(entry.name);
+      }
+      return new Response(JSON.stringify(files), { headers: { 'content-type': 'application/json' } });
+    } catch {
+      return new Response('[]', { headers: { 'content-type': 'application/json' } });
+    }
+  }
+
+  if (path.startsWith('/memory/') && path !== '/memory/') {
+    const filename = path.slice(8);
+    if (filename.includes('/') || filename.includes('..')) {
+      return new Response('forbidden', { status: 403 });
+    }
+    try {
+      const text = await Deno.readTextFile(`./memory/${filename}`);
+      return new Response(text, { headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    } catch {
+      return new Response('not found', { status: 404 });
+    }
+  }
+
   if (path.startsWith('/app/')) {
     const tag = path.split('/app/')[1].split('/')[0];
     let attrs = '';

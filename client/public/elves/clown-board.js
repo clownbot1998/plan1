@@ -1,7 +1,7 @@
 import { Self } from '@plan98/types'
 
 const tag = 'clown-board'
-const $ = Self(tag, { selected: {} })
+const $ = Self(tag, { selected: {}, blogFiles: [], memoryFiles: [] })
 
 // gruvbox palette
 const C = {
@@ -152,10 +152,46 @@ const SECTIONS = [
 const ON  = { orange: C.orange,  green: C.green,  yellow: C.yellow,  blue: C.blue,  aqua: C.aqua,  purple: C.purple,  red: C.red  }
 const DIM = { orange: C.orangeD, green: C.greenD, yellow: C.yellowD, blue: C.blueD, aqua: C.aquaD, purple: C.purpleD, red: C.redD }
 
-$.draw(() => {
-  const { selected } = $.learn()
+async function loadDynamicFiles() {
+  const [blogRes, memRes] = await Promise.allSettled([
+    fetch('/blog-src/').then(r => r.ok ? r.json() : []),
+    fetch('/memory/').then(r => r.ok ? r.json() : []),
+  ])
+  $.teach({
+    blogFiles: blogRes.status === 'fulfilled' ? blogRes.value : [],
+    memoryFiles: memRes.status === 'fulfilled' ? memRes.value : [],
+  })
+}
 
-  const sections = SECTIONS.map(sec => {
+loadDynamicFiles()
+
+$.draw(() => {
+  const { selected, blogFiles, memoryFiles } = $.learn()
+
+  const dynamicSections = []
+  if (blogFiles.length) {
+    dynamicSections.push({
+      label: '/blog',
+      color: 'blue',
+      files: blogFiles.map(f => ({
+        path: `/blog-src/${f}`,
+        label: f.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/\.md$/, ''),
+      }))
+    })
+  }
+  if (memoryFiles.length) {
+    dynamicSections.push({
+      label: '/memory',
+      color: 'purple',
+      files: memoryFiles.map(f => ({
+        path: `/memory/${f}`,
+        label: f.replace(/\.md$/, ''),
+      }))
+    })
+  }
+
+  const allSections = [...SECTIONS, ...dynamicSections]
+  const sections = allSections.map(sec => {
     const onColor  = ON[sec.color]
     const dimColor = DIM[sec.color]
 

@@ -9,6 +9,7 @@ const $ = Self(tag, {
   models: [],
   response: '',
   streaming: false,
+  autoMode: false,
   toolLog: [],
   error: null,
 })
@@ -53,7 +54,7 @@ async function buildContext() {
 }
 
 $.draw(() => {
-  const { task, model, models, response, streaming, toolLog, error } = $.learn()
+  const { task, model, models, response, streaming, autoMode, toolLog, error } = $.learn()
   const tools = toolLog.map(t => `<div class="tool-call">${escHtml(t)}</div>`).join('')
   return `
     <style>
@@ -142,6 +143,24 @@ $.draw(() => {
         white-space: nowrap;
       }
       ${tag} button.plan:disabled { opacity: .4; cursor: default; }
+      ${tag} button.auto {
+        background: #282828;
+        color: #928374;
+        border: 1px solid #3c3836;
+        padding: .6rem 1.6rem;
+        font-family: 'Recursive', monospace;
+        font-size: 1.3rem;
+        font-weight: 700;
+        border-radius: 4px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      ${tag} button.auto.active {
+        background: #689d6a;
+        color: #1d2021;
+        border-color: #689d6a;
+      }
+      ${tag} button.auto:disabled { opacity: .4; cursor: default; }
       ${tag} .output {
         flex: 1;
         overflow-y: auto;
@@ -189,6 +208,7 @@ $.draw(() => {
       <div class="row">
         <button class="plan" data-plan ${streaming ? 'disabled' : ''}>Plan</button>
         <button class="act" data-act ${streaming ? 'disabled' : ''}>${streaming ? 'running…' : 'Act'}</button>
+        <button class="auto ${autoMode ? 'active' : ''}" data-auto>${autoMode ? 'Auto ●' : 'Auto'}</button>
       </div>
 
       ${error ? `<div class="error">${escHtml(error)}</div>` : ''}
@@ -255,6 +275,28 @@ async function runTask(task) {
   } finally {
     $.teach({ streaming: false })
   }
+
+  // auto loop: if still active after task, pick next unchecked and repeat
+  const { autoMode: stillAuto } = $.learn()
+  if (stillAuto) {
+    await new Promise(r => setTimeout(r, 2000))
+    const { autoMode: checkAgain } = $.learn()
+    if (!checkAgain) return
+    try {
+      const res = await fetch('/plan.md')
+      if (!res.ok) { $.teach({ autoMode: false }); return }
+      const text = await res.text()
+      const next = parseNextTask(text)
+      if (!next) {
+        $.teach({ autoMode: false, error: 'plan complete — all items checked' })
+        return
+      }
+      $.teach({ task: next, response: '', toolLog: [] })
+      await runTask(next)
+    } catch (err) {
+      $.teach({ autoMode: false, error: err.message })
+    }
+  }
 }
 
 $.when('click', '[data-plan]', async () => {
@@ -279,4 +321,29 @@ $.when('click', '[data-plan]', async () => {
 $.when('click', '[data-act]', async () => {
   const { task } = $.learn()
   await runTask(task)
+})
+
+$.when('click', '[data-auto]', async () => {
+  const { autoMode, streaming } = $.learn()
+  if (autoMode) {
+    $.teach({ autoMode: false })
+    return
+  }
+  $.teach({ autoMode: true, error: null })
+  if (!streaming) {
+    try {
+      const res = await fetch('/plan.md')
+      if (!res.ok) { $.teach({ autoMode: false }); return }
+      const text = await res.text()
+      const next = parseNextTask(text)
+      if (!next) {
+        $.teach({ autoMode: false, error: 'plan complete — all items checked' })
+        return
+      }
+      $.teach({ task: next, response: '', toolLog: [] })
+      await runTask(next)
+    } catch (err) {
+      $.teach({ autoMode: false, error: err.message })
+    }
+  }
 })

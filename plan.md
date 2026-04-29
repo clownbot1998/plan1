@@ -98,6 +98,6 @@ goal: clownbot can act on plan.md without a human typing the task.
 - [x] clown-board elf — soundboard for agent context, full system on one page, gruvbox color-coded by layer, 64px pads, toggle on/off
 - [x] braid deadlock fix — /__reload SSE → WebSocket, frees HTTP/1.1 connection pool (3 squad-code tabs + reload was hitting browser's 6-connection limit)
 - [x] braid race condition fix — getBraidResource promise cache prevents duplicate disk reads on simultaneous reconnect
-- [ ] plan-view elf: render plan.md in the browser with checkboxes and progress bar
-- [ ] clown-board: add blog posts and memory files as context sources
-- [ ] autonomous trigger: cron or server-side scheduled task that reads plan.md, finds next unchecked item, runs open-clown agent loop without human input
+- [x] plan-view elf: render plan.md in the browser with checkboxes and progress bar
+- [x] clown-board: add blog posts and memory files as context sources
+- [x] autonomous trigger: cron or server-side scheduled task that reads plan.md, finds next unchecked item, runs open-clown agent loop without human input
