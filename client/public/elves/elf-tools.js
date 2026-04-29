@@ -1,27 +1,12 @@
-import { get, put, del } from './plan98-wallet.js'
-
-// list_files needs an index because WAS has no native directory listing
-const INDEX = '/_tools_index.json'
-
-async function readIndex() {
-  try {
-    const blob = await get(INDEX)
-    if (!blob) return []
-    return JSON.parse(await blob.text())
-  } catch {
-    return []
-  }
-}
-
-async function writeIndex(paths) {
-  await put(INDEX, JSON.stringify(paths), { type: 'application/json' })
-}
+// elf-tools: file I/O via the plan1 server (dist/ filesystem + braid layer)
+// reads: plain fetch → dist/; writes: PUT /save/<path> → disk + braid broadcast
 
 async function read_file(path) {
   try {
-    const blob = await get(path)
-    if (!blob) return { error: 'not found' }
-    return { content: await blob.text() }
+    const res = await fetch(path)
+    if (res.status === 404) return { error: 'not found' }
+    if (!res.ok) return { error: `fetch failed: ${res.status}` }
+    return { content: await res.text() }
   } catch (e) {
     return { error: e.message }
   }
@@ -29,9 +14,12 @@ async function read_file(path) {
 
 async function write_file(path, content) {
   try {
-    await put(path, content, { type: 'text/plain' })
-    const index = await readIndex()
-    if (!index.includes(path)) await writeIndex([...index, path])
+    const res = await fetch('/save' + path, {
+      method: 'PUT',
+      headers: { 'content-type': 'text/plain' },
+      body: content,
+    })
+    if (!res.ok) return { error: `save failed: ${res.status}` }
     return { ok: true }
   } catch (e) {
     return { error: e.message }
@@ -40,11 +28,18 @@ async function write_file(path, content) {
 
 async function patch_file(path, find, replace) {
   try {
-    const blob = await get(path)
-    if (!blob) return { error: 'file not found' }
-    const newContent = (await blob.text()).replace(find, replace)
-    await put(path, newContent, { type: 'text/plain' })
-    return { content: newContent }
+    const res = await fetch(path)
+    if (!res.ok) return { error: 'file not found' }
+    const original = await res.text()
+    if (!original.includes(find)) return { error: 'find string not found in file' }
+    const patched = original.replace(find, replace)
+    const saveRes = await fetch('/save' + path, {
+      method: 'PUT',
+      headers: { 'content-type': 'text/plain' },
+      body: patched,
+    })
+    if (!saveRes.ok) return { error: `save failed: ${saveRes.status}` }
+    return { ok: true }
   } catch (e) {
     return { error: e.message }
   }
@@ -52,9 +47,13 @@ async function patch_file(path, find, replace) {
 
 async function list_files(dir) {
   try {
-    const index = await readIndex()
+    const res = await fetch('/file-manifest.json')
+    if (!res.ok) return { error: 'could not load file-manifest.json' }
+    const manifest = await res.json()
     const prefix = dir === '/' ? '' : dir.replace(/\/$/, '') + '/'
-    const files = dir === '/' ? index : index.filter(p => p.startsWith(prefix))
+    const files = dir === '/'
+      ? manifest.map(f => f.path)
+      : manifest.map(f => f.path).filter(p => p.startsWith(prefix))
     return { files }
   } catch (e) {
     return { error: e.message }
@@ -63,55 +62,39 @@ async function list_files(dir) {
 
 async function file_exists(path) {
   try {
-    const blob = await get(path)
-    return { exists: !!blob }
+    const res = await fetch(path, { method: 'HEAD' })
+    return { exists: res.ok }
   } catch {
     return { exists: false }
-  }
-}
-
-async function delete_file(path) {
-  try {
-    await del(path)
-    const index = await readIndex()
-    await writeIndex(index.filter(p => p !== path))
-    return { ok: true }
-  } catch (e) {
-    return { error: e.message }
   }
 }
 
 export const toolDefinitions = [
   {
     name: 'read_file',
-    description: 'Read a file and return its contents',
-    input_schema: { type: 'object', properties: { path: { type: 'string', description: 'File path' } }, required: ['path'] }
+    description: 'Read a file from the server and return its contents',
+    input_schema: { type: 'object', properties: { path: { type: 'string', description: 'File path (e.g. /elves/my-computer.js)' } }, required: ['path'] }
   },
   {
     name: 'write_file',
-    description: 'Write content to a file',
-    input_schema: { type: 'object', properties: { path: { type: 'string', description: 'File path' }, content: { type: 'string', description: 'Content to write' } }, required: ['path', 'content'] }
+    description: 'Write content to a file on the server (persists to disk)',
+    input_schema: { type: 'object', properties: { path: { type: 'string', description: 'File path' }, content: { type: 'string', description: 'Full file content to write' } }, required: ['path', 'content'] }
   },
   {
     name: 'patch_file',
-    description: 'Patch a file with find-replace',
-    input_schema: { type: 'object', properties: { path: { type: 'string', description: 'File path' }, find: { type: 'string', description: 'Text to find' }, replace: { type: 'string', description: 'Text to replace with' } }, required: ['path', 'find', 'replace'] }
+    description: 'Find and replace text in a file on the server (persists to disk)',
+    input_schema: { type: 'object', properties: { path: { type: 'string', description: 'File path' }, find: { type: 'string', description: 'Exact text to find' }, replace: { type: 'string', description: 'Text to replace it with' } }, required: ['path', 'find', 'replace'] }
   },
   {
     name: 'list_files',
-    description: 'List files in a directory',
-    input_schema: { type: 'object', properties: { dir: { type: 'string', description: 'Directory path, use "/" for all' } }, required: ['dir'] }
+    description: 'List files in a directory using the file manifest',
+    input_schema: { type: 'object', properties: { dir: { type: 'string', description: 'Directory path, use "/" for all files' } }, required: ['dir'] }
   },
   {
     name: 'file_exists',
-    description: 'Check if a file exists',
+    description: 'Check if a file exists on the server',
     input_schema: { type: 'object', properties: { path: { type: 'string', description: 'File path' } }, required: ['path'] }
   },
-  {
-    name: 'delete_file',
-    description: 'Delete a file',
-    input_schema: { type: 'object', properties: { path: { type: 'string', description: 'File path to delete' } }, required: ['path'] }
-  }
 ]
 
 export async function callTool(name, args) {
@@ -121,7 +104,6 @@ export async function callTool(name, args) {
     case 'patch_file':  return patch_file(args.path, args.find, args.replace)
     case 'list_files':  return list_files(args.dir)
     case 'file_exists': return file_exists(args.path)
-    case 'delete_file': return delete_file(args.path)
     default:            return { error: `unknown tool: ${name}` }
   }
 }
