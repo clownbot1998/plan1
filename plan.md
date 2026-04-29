@@ -101,3 +101,15 @@ goal: clownbot can act on plan.md without a human typing the task.
 - [x] plan-view elf: render plan.md in the browser with checkboxes and progress bar
 - [x] clown-board: add blog posts and memory files as context sources
 - [x] autonomous trigger: cron or server-side scheduled task that reads plan.md, finds next unchecked item, runs open-clown agent loop without human input
+
+## auto loop test
+
+- [x] add plan-view to the Coding tab in my-computer.js as a third panel alongside open-clown and clown-board
+
+---
+
+## next
+
+- [ ] braid lore-baby like squad-code
+- [ ] get shirt-flicks a and b sound effects and put them in sticky-note: a plays when the menu navigates, b plays when up/down hits first or last item (stuck)
+- [ ] integrate flip-book content into plan98-gallery to be able to embed in dream-team
