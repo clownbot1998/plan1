@@ -31,6 +31,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `FABACEAE-C0DE-CAFE-BABE-DEADF00DBABE` | 2026-04-28 | Plan button, model dropdown, braid deadlock fix (SSE→WebSocket), clown-board soundboard, open-clown split layout with context injection. the agent sees your codebase now. |
 
-| `DECADE00-CAFE-BABE-F00D-C0FFEE001998` | 2026-04-28 | plan-view elf, blog+memory on clown-board, Auto button in open-clown. the loop closes. |
+| `DECADE00-CAFE-BABE-F00D-C0FFEE001998` | 2026-04-29 | plan-view elf, blog+memory on clown-board, Auto button in open-clown, elf-tools braid fix (tools now hit real filesystem). the loop is wired. |
 
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
