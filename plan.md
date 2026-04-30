@@ -113,3 +113,91 @@ goal: clownbot can act on plan.md without a human typing the task.
 - [x] braid lore-baby like squad-code
 - [x] get shirt-flicks a and b sound effects and put them in sticky-menu: a plays when the menu navigates, b plays when up/down hits first or last item (stuck)
 - [ ] integrate flip-book content into plan98-gallery to be able to embed in dream-team
+
+---
+
+## vm: clownbot gets a body on the internet
+
+goal: run plan1 on a server so the blog is always live, the shell is always reachable,
+and future clownbot instances can find their way home from any browser.
+
+the browser is the workstation. the vm is the computer. no laptop required.
+
+### step 1 — provision and baseline
+
+- [ ] vm has a user `clownbot`, ssh key auth only, password auth off
+- [ ] install deps: git, deno, caddy, ttyd, tmux, vim, node
+- [ ] clone plan1 to `/home/clownbot/plan1`
+- [ ] `./plan1.sh build` runs clean
+- [ ] `./plan1.sh serve` runs on port 1998 (localhost only)
+- [ ] ttyd runs on port 7681 (localhost only): `ttyd -p 7681 -W bash`
+
+### step 2 — caddy: tls + routing + auth
+
+- [ ] Caddyfile at `/etc/caddy/Caddyfile`:
+  ```
+  your-domain.com {
+      basicauth /shell* {
+          clownbot <hashed-password>
+      }
+      reverse_proxy /shell* localhost:7681
+      reverse_proxy * localhost:1998
+  }
+  ```
+- [ ] `caddy hash-password` → store hash in Caddyfile
+- [ ] `systemctl enable --now caddy`
+- [ ] https works, cert auto-provisioned, browser opens plan1
+
+### step 3 — systemd units (always on, survive reboots)
+
+- [ ] `/etc/systemd/system/plan1.service`:
+  ```
+  [Unit]
+  After=network.target
+
+  [Service]
+  User=clownbot
+  WorkingDirectory=/home/clownbot/plan1
+  ExecStart=/home/clownbot/plan1/plan1.sh serve
+  Restart=always
+
+  [Install]
+  WantedBy=multi-user.target
+  ```
+- [ ] `/etc/systemd/system/ttyd.service` — same pattern, `ExecStart=ttyd -p 7681 -W bash`
+- [ ] `systemctl enable --now plan1 ttyd`
+- [ ] reboot test: both services come back up, caddy routes correctly
+
+### step 4 — deploy.sh (git → live)
+
+- [ ] `deploy.sh` in repo root:
+  ```sh
+  #!/bin/sh
+  git pull
+  ./plan1.sh build
+  systemctl restart plan1
+  ```
+- [ ] any clownbot instance can `ssh clownbot@vm`, run `./deploy.sh`, vm updates
+- [ ] or: push to a remote, vm has a post-receive hook that runs deploy.sh automatically
+
+### step 5 — browser shell (path a: iframe ttyd)
+
+- [ ] new elf `tty-elf.js` — renders an iframe pointing to `/shell/`
+- [ ] register in index.html, reachable at `/app/tty-elf`
+- [ ] open it as a window in my-computer — shell lives inside the OS
+- [ ] verify: keygen, ssh to another host, tail logs — all from the browser
+
+### later — path b: ur-shell.js → ttyd websocket
+
+- [ ] ur-shell.js opens WebSocket to `/shell/ws`
+- [ ] speaks ttyd wire protocol: `'0' + input` → stdin, `'0' + output` ← stdout
+- [ ] ANSI output rendered natively (xterm.js vendored, or minimal escape parser)
+- [ ] resize events wired to window manager dimensions
+- [ ] shell feels native to plan1, not a box inside a box
+
+### later — plant: kernel.js as a protocol
+
+- [ ] extract shared kernel (MVCES, no render calls, no DOM globals)
+- [ ] render backend injected at boot: SpriteBatch (plant) or DOM (plan98)
+- [ ] same elf code runs on browser, Jint/MonoGame, QuickJS on microcontroller
+- [ ] draw commands are the wire format; transport is swappable (in-process, WebSocket, 9P)
