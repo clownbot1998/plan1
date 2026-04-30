@@ -35,4 +35,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `FEEDC0DE-BABE-DEAD-CAFE-B00BFACE1998` | 2026-04-29 | braid lore-baby (simpleton_client), sticky-menu A/B sounds (shirt-flicks samples), plan-view Coding tab. key bug: persist() used target.closest('[src]') — null when src is model-only, not attribute. fixed to $.model(). the wire answers now. |
 
+| `DEAD1E55-CAFE-BABE-C0DE-F00DBEEF1998` | 2026-04-30 | traced TCP/IP → plan98.js → plant → MVCES as portable OS kernel → JsBridge as capability protocol → ttyd as browser shell → VM plan. the OS is wherever the kernel runs. the clown gets a body on the internet. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
