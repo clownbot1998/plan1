@@ -71,6 +71,27 @@ function navList(activeTab) {
   return items
 }
 
+function audioFactory(url) {
+  const pool = []
+  const poolSize = 3
+  let poolIndex = 0
+  for (let i = 0; i < poolSize; i++) {
+    const audio = new Audio(url)
+    audio.preload = 'auto'
+    audio.load()
+    pool.push(audio)
+  }
+  return function play() {
+    const sound = pool[poolIndex]
+    sound.currentTime = 0
+    sound.play().catch(() => {})
+    poolIndex = (poolIndex + 1) % poolSize
+  }
+}
+
+const playNavigateSound = audioFactory('/cdn/sillyz.computer/beat-tape-extractor/output/a.mp3')
+const playStuckSound = audioFactory('/cdn/sillyz.computer/beat-tape-extractor/output/b.mp3')
+
 const initialRoute = location.pathname.startsWith('/app/') ? location.pathname : null
 
 const $ = elf('sticky-menu', {
@@ -141,6 +162,7 @@ $.draw(target => {
 
 $.when('click', '[data-tab]', event => {
   event.preventDefault()
+  playNavigateSound()
   const tab = event.target.closest('[data-tab]').dataset.tab
   const { activeTab } = $.learn()
   const newActive = activeTab === tab ? null : tab
@@ -151,6 +173,7 @@ $.when('click', '[data-tab]', event => {
 
 $.when('click', '[data-launch]', event => {
   event.preventDefault()
+  playNavigateSound()
   const el = event.target.closest('[data-launch]')
   const route = el.dataset.launch
   const { activeTab } = $.learn()
@@ -189,17 +212,22 @@ window.addEventListener('lrud:press', e => {
   const list = navList(activeTab)
 
   if (button === 'up') {
-    $.teach({ cursor: Math.max(0, cursor - 1) })
+    if (cursor === 0) { playStuckSound(); return }
+    playNavigateSound()
+    $.teach({ cursor: cursor - 1 })
     return
   }
 
   if (button === 'down') {
-    $.teach({ cursor: Math.min(list.length - 1, cursor + 1) })
+    if (cursor === list.length - 1) { playStuckSound(); return }
+    playNavigateSound()
+    $.teach({ cursor: cursor + 1 })
     return
   }
 
   if (button === 'b') {
     if (!activeTab) return
+    playNavigateSound()
     const tabIdx = Object.keys(SECTIONS).indexOf(activeTab)
     $.teach({ activeTab: null, cursor: tabIdx })
     return
@@ -210,6 +238,7 @@ window.addEventListener('lrud:press', e => {
     if (!item) return
 
     if (item.type === 'tab') {
+      playNavigateSound()
       const isOpen = activeTab === item.key
       const newActive = isOpen ? null : item.key
       const newList = navList(newActive)
@@ -224,6 +253,7 @@ window.addEventListener('lrud:press', e => {
     }
 
     if (item.type === 'app') {
+      playNavigateSound()
       $.teach({ route: item.href })
       history.pushState({ type: 'sticky-menu-navigation', route: item.href }, '', item.href)
     }

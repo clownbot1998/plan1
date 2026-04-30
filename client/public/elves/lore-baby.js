@@ -15,17 +15,93 @@ import {
 } from "codemirror"
 
 import { sagaSyntaxHighlighter, sagaTheme } from './saga-highlighter.js'
+import * as braid from 'braid-http'
+import { simpleton_client } from '/cdn/braid.org/simpleton-client.js'
+import { diff_main } from '/cdn/braid.org/myers-diff1.js'
+
+self.braid_fetch = braid.fetch
+
+function braidUrl(src) {
+  return '/braid' + src
+}
+
+async function persistSave(src, $) {
+  const state = $.model()
+  const { file } = state[src] || {}
+  if (file === undefined) return
+  await fetch('/save' + src, {
+    method: 'PUT',
+    headers: { 'content-type': 'text/plain' },
+    body: file,
+  })
+}
+
+function diff(before, after) {
+  const d = diff_main(before, after, null)
+  const patches = []
+  let offset = 0
+  for (const [op, text] of d) {
+    if (op === 1) {
+      patches.push({ unit: 'text', range: [offset, offset], content: text })
+    } else if (op === -1) {
+      patches.push({ unit: 'text', range: [offset, offset + text.length], content: '' })
+      offset += text.length
+    } else {
+      offset += text.length
+    }
+  }
+  return patches
+}
+
+function connectSimpleton(target, src, initialText, $) {
+  if (target.simpleonSrc === src) return
+  target.simpleonSrc = src
+  if (target.simpleton) target.simpleton.stop?.()
+
+  let acked = initialText ?? ''
+
+  target.simpleton = simpleton_client(braidUrl(src), {
+    apply_remote_update({ state, patches }) {
+      if (state !== undefined) {
+        // don't clobber existing content with an empty server state (file not yet known to server)
+        if (!state && acked) return acked
+        acked = state
+        target._remote_changes = null
+      } else {
+        const changes = []
+        for (const p of patches ?? []) {
+          const nums = String(p.range).match(/\d+/g)
+          if (nums?.length >= 2) {
+            const s = +nums[0], e = +nums[1]
+            acked = acked.slice(0, s) + (p.content_text ?? '') + acked.slice(e)
+            changes.push({ from: s, to: e, insert: p.content_text ?? '' })
+          }
+        }
+        target._remote_changes = changes.length ? changes : null
+      }
+      const editorText = target.view?.state.doc.toString()
+      target._remote_state = acked
+      if (acked !== editorText) $.controller({ [src]: { file: acked, src } })
+      return acked
+    },
+    generate_local_diff_update(prev) {
+      const editorText = target.view?.state.doc.toString() ?? ''
+      const patches = diff(prev, editorText)
+      if (!patches.length) return null
+      return { patches, new_state: editorText }
+    },
+  })
+}
 
 function persist(target, $, _flags) {
 	return (update) => {
     if(update.changes.inserted.length < 0) return
 
-    const srcNode = target.closest('[src]')
-
-    if(srcNode) {
-      const src = srcNode.getAttribute('src')
+    const { src } = $.model()
+    if (src) {
       const file = update.view.state.doc.toString()
       $.controller({ [src]: { file, src }})
+      if (!target._applyingRemote) target.simpleton?.changed()
     }
 	}
 }
@@ -200,6 +276,11 @@ $.e('click', '[data-print]', print)
 $.e('click', '[data-pitch]', pitch)
 $.e('click', '[data-search]', search)
 
+Vim.defineEx('write', 'w', () => {
+  const { src } = $.model()
+  persistSave(src, $)
+})
+
 const sagaDocs = [
   { name: 'the-story-so-far', path: '/sagas/plan1/the-story-so-far.saga' },
   { name: 'elevator-pitch', path: '/cdn/sillyz.computer/en-us/elevator-pitch.saga' },
@@ -352,6 +433,26 @@ function insert(target, file) {
 function afterUpdate(target) {
   library(target.querySelector('.library'))
   display(target)
+
+  const { src } = $.model()
+  const { file } = $.model()[src] || {}
+  if (src && file !== undefined) {
+    connectSimpleton(target, src, file, $)
+  }
+
+  if (target.view && target._remote_state !== undefined && target._remote_state !== target._last_applied) {
+    target._last_applied = target._remote_state
+    if (target._remote_state === target.view.state.doc.toString()) return
+    target._applyingRemote = true
+    if (target._remote_changes) {
+      target.view.dispatch({ changes: target._remote_changes })
+    } else {
+      target.view.dispatch({
+        changes: { from: 0, to: target.view.state.doc.length, insert: target._remote_state }
+      })
+    }
+    target._applyingRemote = false
+  }
 }
 
 function escapeHyperText(text = '') {
