@@ -125,65 +125,37 @@ the browser is the workstation. the vm is the computer. no laptop required.
 
 ### step 1 — provision and baseline
 
-- [ ] vm has a user `clownbot`, ssh key auth only, password auth off
-- [ ] install deps: git, deno, caddy, ttyd, tmux, vim, node
-- [ ] clone plan1 to `/home/clownbot/plan1`
-- [ ] `./plan1.sh build` runs clean
-- [ ] `./plan1.sh serve` runs on port 1998 (localhost only)
-- [ ] ttyd runs on port 7681 (localhost only): `ttyd -p 7681 -W bash`
+- [x] vm has a user `clownbot`, ssh key auth only, password auth off
+- [x] install deps: git, deno, caddy, ttyd, tmux, vim, node
+- [x] clone plan1 to `/home/clownbot/plan1`
+- [x] `./plan1.sh build` runs clean
+- [x] plan1 serves on port 3000 via systemd (exe.dev proxy: port range 3000-9999)
+- [x] ttyd runs on port 7681 writable: `ttyd -p 7681 -W bash`
 
 ### step 2 — caddy: tls + routing + auth
 
-- [ ] Caddyfile at `/etc/caddy/Caddyfile`:
-  ```
-  your-domain.com {
-      basicauth /shell* {
-          clownbot <hashed-password>
-      }
-      reverse_proxy /shell* localhost:7681
-      reverse_proxy * localhost:1998
-  }
-  ```
-- [ ] `caddy hash-password` → store hash in Caddyfile
-- [ ] `systemctl enable --now caddy`
-- [ ] https works, cert auto-provisioned, browser opens plan1
+- [x] Caddyfile at `/etc/caddy/Caddyfile`: `:4000`, `/shell*` → 7681, `*` → 3000
+- [x] `systemctl enable --now caddy`
+- [x] https works via exe.dev proxy → caddy:4000 → plan1:3000
+- [ ] basicauth on `/shell*` (ttyd is currently open — add password before sharing widely)
 
 ### step 3 — systemd units (always on, survive reboots)
 
-- [ ] `/etc/systemd/system/plan1.service`:
-  ```
-  [Unit]
-  After=network.target
-
-  [Service]
-  User=clownbot
-  WorkingDirectory=/home/clownbot/plan1
-  ExecStart=/home/clownbot/plan1/plan1.sh serve
-  Restart=always
-
-  [Install]
-  WantedBy=multi-user.target
-  ```
-- [ ] `/etc/systemd/system/ttyd.service` — same pattern, `ExecStart=ttyd -p 7681 -W bash`
-- [ ] `systemctl enable --now plan1 ttyd`
+- [x] `/etc/systemd/system/plan1.service` — deno run direct, User=clownbot, Restart=always
+- [x] `/etc/systemd/system/ttyd.service` — `ttyd -p 7681 -W bash`, Restart=always
+- [x] `systemctl enable --now plan1 ttyd caddy`
 - [ ] reboot test: both services come back up, caddy routes correctly
 
 ### step 4 — deploy.sh (git → live)
 
-- [ ] `deploy.sh` in repo root:
-  ```sh
-  #!/bin/sh
-  git pull
-  ./plan1.sh build
-  systemctl restart plan1
-  ```
-- [ ] any clownbot instance can `ssh clownbot@vm`, run `./deploy.sh`, vm updates
+- [x] `deploy.sh` in repo root: git pull → build → systemctl restart plan1
+- [ ] any clownbot instance can `ssh clownbot@buffer-ruby.exe.xyz`, run `./deploy.sh`, vm updates
 - [ ] or: push to a remote, vm has a post-receive hook that runs deploy.sh automatically
 
 ### step 5 — browser shell (path a: iframe ttyd)
 
-- [ ] new elf `tty-elf.js` — renders an iframe pointing to `/shell/`
-- [ ] register in index.html, reachable at `/app/tty-elf`
+- [x] new elf `tty-elf.js` — renders an iframe pointing to `/shell/`
+- [x] register in index.html, reachable at `/app/tty-elf`
 - [ ] open it as a window in my-computer — shell lives inside the OS
 - [ ] verify: keygen, ssh to another host, tail logs — all from the browser
 
