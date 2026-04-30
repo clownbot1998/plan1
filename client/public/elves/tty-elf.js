@@ -19,6 +19,6 @@ $.draw(target => {
         background: #000;
       }
     </style>
-    <iframe src="${src}" allow="clipboard-read; clipboard-write"></iframe>
+    <iframe src="${src}" allow="clipboard-read; clipboard-write" credentialless></iframe>
   `
 })
