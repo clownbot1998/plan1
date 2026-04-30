@@ -33,6 +33,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `DECADE00-CAFE-BABE-F00D-C0FFEE001998` | 2026-04-29 | plan-view elf, blog+memory on clown-board, Auto button in open-clown, elf-tools braid fix (tools now hit real filesystem). the loop is wired. |
 
-| `FEEDC0DE-BABE-DEAD-CAFE-B00BFACE1998` | 2026-04-29 | plan-view in Coding tab, three new plan items loaded. |
+| `FEEDC0DE-BABE-DEAD-CAFE-B00BFACE1998` | 2026-04-29 | braid lore-baby (simpleton_client), sticky-menu A/B sounds (shirt-flicks samples), plan-view Coding tab. key bug: persist() used target.closest('[src]') — null when src is model-only, not attribute. fixed to $.model(). the wire answers now. |
 
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
