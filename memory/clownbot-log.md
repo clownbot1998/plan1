@@ -41,4 +41,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `B00BCAFE-DEAD-C0DE-FACE-BEEFBABE0042` | 2026-05-01 | hail-mary port: Self swap, three npm packages in importmap, vosk worklet copied, alphacephei.com models CDN. the translator is wired. |
 
+| `C0FFEEEE-CAFE-BABE-DEAD-BEEF00001998` | 2026-05-01 | the body on the internet, always on. hail-mary lands here. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
