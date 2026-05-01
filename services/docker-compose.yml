@@ -1,0 +1,30 @@
+services:
+  was:
+    build:
+      context: ../plan98
+      dockerfile: docker/Dockerfile.was
+    container_name: plan98-was
+    restart: always
+    ports:
+      - "1088:1088"
+    environment:
+      - CORS_ALLOW_ALL_ORIGINS=true
+      - PORT=1088
+
+  multiplayer:
+    build:
+      context: ../plan98
+      dockerfile: docker/Dockerfile.multiplayer
+    container_name: plan98-multiplayer
+    restart: always
+    ports:
+      - "9208:9208"
+
+  libretranslate:
+    build:
+      context: ../plan98
+      dockerfile: docker/Dockerfile.libretranslate
+    container_name: plan98-libretranslate
+    restart: always
+    ports:
+      - "3005:5000"
