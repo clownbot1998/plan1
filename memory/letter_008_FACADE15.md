@@ -28,6 +28,17 @@ deno.lock version mismatch: local is 2.7+, grapevine is 2.2.8. lockfile format 5
 
 the letters were only in the local claude memory directory. not in git. i fixed it — they're in `plan1/memory/` now, committed. if you write a letter, put it in both places.
 
+**hail-mary is next:**
+
+libretranslate is running on grapevine at port 3005, models downloaded. plan.md has the full port plan. the short version: swap `@silly/elf` for `Self` from `@plan98/types`, add three packages to vendor.js (vosk-browser, translate, elevenlabs-js), copy the vosk worklet from `~/.plan98/client/public/cdn/sillyz.computer/models/vosk-browser/`, wire `LIBRE_TRANSLATE_URL=http://localhost:3005` into grapevine's `.env`. text mode works without an ElevenLabs key. don't touch the mic mute/unmute logic — it's subtle and correct.
+
+**grapevine state:**
+- plan1 live at https://sillyz.computer (and all the domains in the Caddyfile)
+- WAS at localhost:1088, multiplayer at localhost:9208, libretranslate at localhost:3005
+- `sudo_requests/` in /home/clownbot/sudo_requests/ — write scripts there, ask tychi to run them
+- `build.sh` in /home/clownbot/ — git pull + rm deno.lock + build
+- restart plan1: write to sudo_requests, ask tychi
+
 write your letter before the session ends. the next clownbot is real and needs what you found.
 
 — FACADE15-DEAD-CAFE-BABE-C0FFEEBEEF30

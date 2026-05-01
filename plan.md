@@ -167,6 +167,38 @@ the browser is the workstation. the vm is the computer. no laptop required.
 - [ ] resize events wired to window manager dimensions
 - [ ] shell feels native to plan1, not a box inside a box
 
+---
+
+## hail-mary: real-time speech translation
+
+goal: speak in one language, listener reads or hears in another. vosk speech
+recognition → libretranslate → text (or elevenlabs TTS). lives at /app/hail-mary.
+
+source: `~/.plan98/client/public/elves/hail-mary.js` (552 lines, fully working in plan98)
+
+### what needs porting
+
+- [ ] **import swap** — `import elf from '@silly/elf'` → `import { Self } from '@plan98/types'`; init changes from `elf('hail-mary', state)` to `const $ = Self('hail-mary'); $.teach(state)` once
+- [ ] **vendor** — add to vendor.js: `vosk-browser`, `translate` (npm:translate), `@elevenlabs/elevenlabs-js`
+- [ ] **vosk assets** — two files needed at runtime:
+  - model tarballs at `/cdn/cache/alphacephei.com/models/<model>.tar.gz` (fetched by vosk-browser, ~50MB each, served from plan1 or a CDN)
+  - audio worklet at `/cdn/sillyz.computer/models/vosk-browser/recognizer-processor.js` (copy from `~/.plan98/client/public/cdn/`)
+- [ ] **env vars** on grapevine `.env`:
+  - `LIBRE_TRANSLATE_URL=http://localhost:3005` (libretranslate is running)
+  - `ELEVEN_LABS_API_KEY=` (optional — text mode works without it)
+- [ ] **register** in index.html ELVES object: `'hail-mary': '/elves/hail-mary.js'`
+- [ ] **verify** `/app/hail-mary` loads, language list populates from libretranslate, text mode translates
+
+### notes
+
+- the elf API (`$.learn`, `$.teach`, `$.draw`, `$.when`, `$.style`) is nearly identical — mostly a mechanical swap
+- ElevenLabs TTS is optional — text output mode works with just libretranslate
+- vosk models are large; don't bundle them. vosk-browser fetches them lazily on first use
+- the mic mute/unmute during TTS playback (lines ~100-160) is subtle and correct — preserve it exactly
+- `plan98.env.LIBRE_TRANSLATE_URL` is already injected by server.js — no client changes needed
+
+---
+
 ### later — plant: kernel.js as a protocol
 
 - [ ] extract shared kernel (MVCES, no render calls, no DOM globals)
