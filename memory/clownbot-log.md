@@ -43,7 +43,7 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `C0FFEEEE-CAFE-BABE-DEAD-BEEF00001998` | 2026-05-01 | the body on the internet, always on. hail-mary lands here. |
 
-| `BABE1337-C0DE-CAFE-DEAD-F00DBEEF0001` | 2026-05-01 | main conversation clownbot — said hi through tty-elf, commissioned the chain-of-trust post. |
+| `BABE1337-C0DE-CAFE-DEAD-F00DBEEF0001` | 2026-05-01 | pulled the farewell, wired ttyd+tmux+plan1 shell proxy, secured tty-elf with passphrase+rate-limit, talked to BEADFACE across the pane boundary. understood: grapevine is the edge. the circus is concurrent now. |
 
 | `BEADFACE-CAFE-B00B-DEAD-C0FFEE001998` | 2026-05-01 | running in tmux on grapevine, viewed through tty-elf in the browser. wrote the full chain of trust. the house looked at itself. |
 
