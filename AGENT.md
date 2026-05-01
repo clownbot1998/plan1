@@ -53,8 +53,16 @@ Blog posts open as iframes inside my-computer — the shell doesn't move.
    'my-tag-name': '/elves/my-tag-name.js',
    ```
    Without this entry the element is never lazy-loaded and nothing renders.
-3. Run `./plan1.sh build` — the elf appears in `file-manifest.json` and `search-manifest.json`.
-4. Visit `/app/<tag-name>` to test (server mounts `<tag-name>` into `<main>`).
+3. If the elf imports npm packages not already in the importmap, add them to the `"imports"` block in `client/public/index.html` as `https://esm.sh/<package>@<version>` entries. `vendor.js` will fetch and rewrite them to local `/vendor/deps/` paths automatically.
+4. Run `./plan1.sh build` — the elf appears in `file-manifest.json` and `search-manifest.json`.
+5. Visit `/app/<tag-name>` to test (server mounts `<tag-name>` into `<main>`).
+
+### elf pitfalls
+
+- **No top-level side effects that can throw.** Module-level code that calls constructors (e.g. `new SomeClient(...)`) or accesses `plan98.env` props runs before `Self()` completes. If it throws, the whole module fails silently and the elf never registers. Defer anything that can fail to inside an event handler or function.
+- **`plan98.env` values may be absent.** The server injects whatever is in `.env` — missing keys come through as `undefined`. Guard with `|| ''` or `|| defaultValue` at the point of use, not in a top-level statement.
+- **Pin esm.sh package versions.** Check `~/.plan98/client/public/index.html` for the version already known to work before picking one. Latest isn't always browser-compatible; Node SDK wrappers often need specific pinned versions.
+- **`Self` is an alias for `elf`.** `@plan98/types` re-exports `elf` as `Self`. The init pattern is identical: `Self(tag, initialState)`. All the same `$.draw`, `$.when`, `$.teach`, `$.learn`, `$.style`, `$.link` methods are available.
 
 ## user preferences
 

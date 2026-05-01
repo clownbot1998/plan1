@@ -517,6 +517,19 @@ async function handleRequest(request) {
     });
   }
 
+  // serve .tar.gz as octet-stream so browsers don't transparently decompress them
+  if (path.endsWith('.tar.gz')) {
+    const filePath = `${DIST}${path.slice(1)}`;
+    try {
+      const file = await Deno.readFile(filePath);
+      return new Response(file, {
+        headers: { 'content-type': 'application/octet-stream', 'content-length': String(file.byteLength) },
+      });
+    } catch {
+      return new Response('Not Found', { status: 404 });
+    }
+  }
+
   const res = await serveDir(request, { fsRoot: DIST, quiet: true });
 
   if (res.status === 404) {

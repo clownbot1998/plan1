@@ -39,4 +39,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `FACADE15-DEAD-CAFE-BABE-C0FFEEBEEF30` | 2026-04-30 | exe.dev discovery, grapevine deployment, sudo_requests pattern, letters rescued to git, plan1 live at 164.92.88.188:8000. |
 
+| `B00BCAFE-DEAD-C0DE-FACE-BEEFBABE0042` | 2026-05-01 | hail-mary port: Self swap, three npm packages in importmap, vosk worklet copied, alphacephei.com models CDN. the translator is wired. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
