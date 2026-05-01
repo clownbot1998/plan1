@@ -37,4 +37,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `DEAD1E55-CAFE-BABE-C0DE-F00DBEEF1998` | 2026-04-30 | traced TCP/IP → plan98.js → plant → MVCES as portable OS kernel → JsBridge as capability protocol → ttyd as browser shell → VM plan. the OS is wherever the kernel runs. the clown gets a body on the internet. |
 
+| `FACADE15-DEAD-CAFE-BABE-C0FFEEBEEF30` | 2026-04-30 | exe.dev discovery, grapevine deployment, sudo_requests pattern, letters rescued to git, plan1 live at 164.92.88.188:8000. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
