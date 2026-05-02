@@ -83,6 +83,7 @@ const enc = new TextEncoder();
 // --- braid collaboration state ---
 const braidState = new Map();   // filePath -> { text, version, subs: Set }
 const braidLoading = new Map(); // filePath -> Promise<state>  (in-flight dedup)
+const _loginAttempts = new Map(); // ip -> { count, until }
 
 async function getBraidResource(filePath) {
   if (braidState.has(filePath)) return braidState.get(filePath);
@@ -185,9 +186,27 @@ document.getElementById('lf').addEventListener('submit', async e => {
     headers: {'content-type':'application/json'},
     body: JSON.stringify({ passphrase: document.getElementById('pp').value }),
   });
-  if (res.ok) location.href = '/admin';
-  else document.getElementById('err').style.display = '';
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) { const p = new URLSearchParams(location.search).get('next'); location.href = p || '/admin'; }
+  else {
+    const err = document.getElementById('err');
+    err.style.display = 'block';
+    if (res.status === 429) { err.textContent = 'locked out — try again in ' + data.retryAfter + 's'; startCountdown(data.retryAfter); }
+    else if (data.remaining === 0) { err.textContent = 'locked — try again in ' + data.retryAfter + 's'; startCountdown(data.retryAfter); }
+    else err.textContent = 'wrong passphrase — ' + data.remaining + ' attempt' + (data.remaining === 1 ? '' : 's') + ' left';
+  }
 });
+function startCountdown(secs) {
+  const btn = document.querySelector('button');
+  const err = document.getElementById('err');
+  btn.disabled = true;
+  let t = secs;
+  const iv = setInterval(() => {
+    t--;
+    if (t <= 0) { clearInterval(iv); btn.disabled = false; err.style.display = 'block'; err.textContent = 'try again'; }
+    else err.textContent = 'locked — try again in ' + t + 's';
+  }, 1000);
+}
 </script>
 </body></html>`;
     return new Response(loginHtml, { headers: { 'content-type': 'text/html; charset=utf-8' } });
@@ -257,11 +276,28 @@ async function handleRequest(request) {
   // login — POST /api/login { passphrase } → sets session cookie
   if (path === '/api/login' && request.method === 'POST') {
     if (!_passphrase) return new Response('no passphrase configured', { status: 503 });
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown';
+    const now = Date.now();
+    const attempts = _loginAttempts.get(ip) ?? { count: 0, until: 0 };
+    if (now < attempts.until) {
+      const secs = Math.ceil((attempts.until - now) / 1000);
+      return new Response(JSON.stringify({ error: 'locked', retryAfter: secs }), {
+        status: 429,
+        headers: { 'content-type': 'application/json', 'retry-after': String(secs) },
+      });
+    }
     let body;
     try { body = await request.json(); } catch { return new Response('bad request', { status: 400 }); }
     if (body?.passphrase !== _passphrase) {
-      return new Response('unauthorized', { status: 401 });
+      attempts.count += 1;
+      const remaining = Math.max(0, 3 - attempts.count);
+      if (attempts.count >= 3) attempts.until = now + Math.min((attempts.count - 2) * 30_000, 3_600_000);
+      _loginAttempts.set(ip, attempts);
+      return new Response(JSON.stringify({ error: 'wrong passphrase', remaining, locked: attempts.count >= 3, retryAfter: attempts.until ? Math.ceil((attempts.until - now) / 1000) : 0 }), {
+        status: 401, headers: { 'content-type': 'application/json' },
+      });
     }
+    _loginAttempts.delete(ip);
     // detect if request arrived over HTTPS (Caddy sets X-Forwarded-Proto)
     const secure = request.headers.get('x-forwarded-proto') === 'https';
     return new Response('ok', {
@@ -359,6 +395,49 @@ async function handleRequest(request) {
     }
 
     return new Response('saved', { headers: { 'access-control-allow-origin': '*' } });
+  }
+
+  // /shell/ → ttyd proxy (HTTP + WebSocket) — requires auth
+  if (path === '/shell' || path.startsWith('/shell/')) {
+    if (!checkAuth(request)) {
+      if (request.headers.get('upgrade') === 'websocket') {
+        return new Response('unauthorized', { status: 401 });
+      }
+      return new Response(null, { status: 302, headers: { location: '/admin?next=' + encodeURIComponent(path) } });
+    }
+    const stripped = path.slice('/shell'.length) || '/'
+    const qs = url.search
+    if (request.headers.get('upgrade') === 'websocket') {
+      const proto = request.headers.get('sec-websocket-protocol') ?? undefined
+      const { socket: client, response } = Deno.upgradeWebSocket(request, proto ? { protocol: proto } : {})
+      const server = new WebSocket(`ws://localhost:7681${stripped}${qs}`, proto ? [proto] : [])
+      server.binaryType = 'arraybuffer'
+      client.binaryType = 'arraybuffer'
+      const pending = []
+      client.onmessage = e => {
+        if (server.readyState === 1) server.send(e.data)
+        else pending.push(e.data)
+      }
+      client.onclose = () => { try { server.close() } catch { /* ignore */ } }
+      client.onerror = () => { try { server.close() } catch { /* ignore */ } }
+      server.onopen = () => {
+        for (const msg of pending.splice(0)) server.send(msg)
+      }
+      server.onmessage = e => { if (client.readyState === 1) client.send(e.data) }
+      server.onclose = () => { try { client.close() } catch { /* ignore */ } }
+      server.onerror = () => { try { client.close() } catch { /* ignore */ } }
+      return response
+    }
+    try {
+      const resp = await fetch(`http://localhost:7681${stripped}${qs}`, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body ?? undefined,
+      })
+      return new Response(resp.body, { status: resp.status, headers: resp.headers })
+    } catch {
+      return new Response('shell unavailable', { status: 502 })
+    }
   }
 
   // live reload — WebSocket

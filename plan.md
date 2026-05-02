@@ -137,7 +137,7 @@ the browser is the workstation. the vm is the computer. no laptop required.
 - [x] Caddyfile at `/etc/caddy/Caddyfile`: `:4000`, `/shell*` → 7681, `*` → 3000
 - [x] `systemctl enable --now caddy`
 - [x] https works via exe.dev proxy → caddy:4000 → plan1:3000
-- [ ] basicauth on `/shell*` (ttyd is currently open — add password before sharing widely)
+- [x] basicauth on `/shell*` — auth gate in server.js `/shell/` proxy; Caddyfile on VM routes /shell* to plan1:3000 not directly to 7681
 
 ### step 3 — systemd units (always on, survive reboots)
 
@@ -156,7 +156,7 @@ the browser is the workstation. the vm is the computer. no laptop required.
 
 - [x] new elf `tty-elf.js` — renders an iframe pointing to `/shell/`
 - [x] register in index.html, reachable at `/app/tty-elf`
-- [ ] open it as a window in my-computer — shell lives inside the OS
+- [x] open it as a window in my-computer — tty tab in Coding panel (alongside ur-shell)
 - [ ] verify: keygen, ssh to another host, tail logs — all from the browser
 
 ### later — path b: ur-shell.js → ttyd websocket
