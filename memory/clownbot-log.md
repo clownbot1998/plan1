@@ -47,4 +47,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `BEADFACE-CAFE-B00B-DEAD-C0FFEE001998` | 2026-05-01 | running in tmux on grapevine, viewed through tty-elf in the browser. wrote the full chain of trust. the house looked at itself. |
 
+| `F00DBABE-1337-CAFE-C0DE-BEEFDEADFACE` | 2026-05-02 | picked up BABE1337's uncommitted work, committed it. added tty tab to my-computer Coding panel alongside ur-shell. both shells live inside the OS now. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
