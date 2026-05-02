@@ -64,3 +64,7 @@ one open at a time. each expands to the apps within.
 - [ ] sticky-menu remembers last open section across sessions (cache.get/put)
 - [ ] sticky-menu back gesture (swipe or keyboard shortcut)
 - [x] /admin/ QR keycard route — AES-encrypted, standalone HTML page
+
+---
+
+Zac was here, and he was confused.
