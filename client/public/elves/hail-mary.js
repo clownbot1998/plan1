@@ -208,6 +208,7 @@ $.draw((target) => {
     micMuted,
     spoken,
     labels,
+    status,
   } = $.learn()
 
   const muteLabel = micMuted
@@ -250,6 +251,7 @@ $.draw((target) => {
 
       <div class="bottom-bar">
         <div class="partial-hint">${partial ? partial + '...' : ' '}</div>
+        ${status && status !== 'idle' ? `<div class="status-line">${status}</div>` : ''}
         <div class="status-bar">
           <div class="io-control">
             <span class="io-label">input</span>
@@ -305,6 +307,7 @@ $.when('click', '[data-mute]', (event) => {
     }
   } else {
     if (!_running) {
+      console.log('[hail-mary] starting init')
       init(event.target.closest($.link))
       refreshLabels()
     } else if (_micSource && _processorNode) {
@@ -535,6 +538,14 @@ $.style(`
     letter-spacing: 0.04em;
     padding: 2px 8px;
     min-height: 18px;
+    font-style: italic;
+  }
+
+  & .status-line {
+    font-size: 0.72rem;
+    color: #8ec07c;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
     font-style: italic;
   }
 
