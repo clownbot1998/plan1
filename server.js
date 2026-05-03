@@ -398,6 +398,27 @@ async function handleRequest(request) {
     return new Response('saved', { headers: { 'access-control-allow-origin': '*' } });
   }
 
+  // /api/translate → libretranslate proxy (avoids mixed-content + CORS from browser)
+  if (path === '/api/translate') {
+    const libreUrl = safeEnv('LIBRE_TRANSLATE_URL')
+    if (!libreUrl) return new Response('LIBRE_TRANSLATE_URL not configured', { status: 503 })
+    try {
+      const body = await request.text()
+      const resp = await fetch(`${libreUrl}/translate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      })
+      const data = await resp.text()
+      return new Response(data, {
+        status: resp.status,
+        headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
+      })
+    } catch (e) {
+      return new Response(JSON.stringify({ error: String(e) }), { status: 502, headers: { 'content-type': 'application/json' } })
+    }
+  }
+
   // /shell/ → ttyd proxy (HTTP + WebSocket) — requires auth
   if (path === '/shell' || path.startsWith('/shell/')) {
     if (!checkAuth(request)) {

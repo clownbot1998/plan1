@@ -4,7 +4,7 @@ import translate from 'translate'
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js'
 
 translate.engine = 'libre'
-translate.url = (plan98.env.LIBRE_TRANSLATE_URL || '') + '/translate'
+translate.url = '/api/translate'
 
 const VOICE_ID = 'nPczCjzI2devNBz1zQrb'
 
