@@ -129,6 +129,7 @@ function buildEnvScript() {
     OLLAMA_HOST:         safeEnv('OLLAMA_HOST',    'http://localhost:11434/v1'),
     OLLAMA_KEY:          safeEnv('OLLAMA_KEY',      'ollama'),
     ANTHROPIC_API_KEY:   safeEnv('ANTHROPIC_API_KEY'),
+    LIBRE_TRANSLATE_URL: safeEnv('LIBRE_TRANSLATE_URL'),
     PLAN98_WAS_HOST:     safeEnv('PLAN98_WAS_HOST', 'http://localhost:1088'),
     PLAN98_WAS_SPACE_ID: _spaceId,
     PLAN98_WAS_SIGNER:   _signerJson,
