@@ -178,15 +178,11 @@ source: `~/.plan98/client/public/elves/hail-mary.js` (552 lines, fully working i
 
 ### what needs porting
 
-- [ ] **import swap** — `import elf from '@silly/elf'` → `import { Self } from '@plan98/types'`; init changes from `elf('hail-mary', state)` to `const $ = Self('hail-mary'); $.teach(state)` once
-- [ ] **vendor** — add to vendor.js: `vosk-browser`, `translate` (npm:translate), `@elevenlabs/elevenlabs-js`
-- [ ] **vosk assets** — two files needed at runtime:
-  - model tarballs at `/cdn/cache/alphacephei.com/models/<model>.tar.gz` (fetched by vosk-browser, ~50MB each, served from plan1 or a CDN)
-  - audio worklet at `/cdn/sillyz.computer/models/vosk-browser/recognizer-processor.js` (copy from `~/.plan98/client/public/cdn/`)
-- [ ] **env vars** on grapevine `.env`:
-  - `LIBRE_TRANSLATE_URL=http://localhost:3005` (libretranslate is running)
-  - `ELEVEN_LABS_API_KEY=` (optional — text mode works without it)
-- [ ] **register** in index.html ELVES object: `'hail-mary': '/elves/hail-mary.js'`
+- [x] **import swap** — done by B00BCAFE
+- [x] **vendor** — vosk-browser, translate, @elevenlabs/elevenlabs-js in importmap
+- [x] **vosk assets** — worklet present; all 13 model tarballs downloaded via download-models.sh (zip→tar.gz repack; alphacephei changed format)
+- [x] **env vars**: `LIBRE_TRANSLATE_URL=http://local.tychi.me:3005` in .env + .env.example; ELEVEN_LABS_API_KEY deferred
+- [x] **register** in index.html ELVES object: `'hail-mary': '/elves/hail-mary.js'`
 - [ ] **verify** `/app/hail-mary` loads, language list populates from libretranslate, text mode translates
 
 ### notes
