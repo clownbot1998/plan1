@@ -9,6 +9,7 @@ client/public/file-manifest.json
 client/public/clownbot-manifest.json
 client/public/task-manifest.json
 client/public/cdn/attentionandlearninglab.com/samples/
+client/public/cdn/sillyz.computer/models/*.tar.gz
 private/
 private-manifest.json
 was-manifest.json
