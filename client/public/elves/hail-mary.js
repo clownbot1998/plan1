@@ -64,7 +64,7 @@ function teardown() {
   _running = false
   _ttsActive = false
 
-  if (currentAudio) { currentAudio.pause(); currentAudio = null }
+  if (currentAudio) { try { currentAudio.stop() } catch (e) {}; currentAudio = null }
 
   if (_micSource) {
     try { _micSource.disconnect() } catch (e) {}
@@ -113,11 +113,11 @@ async function speakTranslation(text) {
   }
 
   try {
-    if (currentAudio) { currentAudio.pause(); currentAudio = null }
+    if (currentAudio) { try { currentAudio.stop() } catch (e) {}; currentAudio = null }
 
     const stream = await getElevenLabs().textToSpeech.convert(VOICE_ID, {
       text,
-      modelId: 'eleven_multilingual_v2',
+      modelId: 'eleven_turbo_v2_5',
       outputFormat: 'mp3_44100_128',
       languageCode: $.learn().to,
       voiceSettings: {
@@ -136,15 +136,13 @@ async function speakTranslation(text) {
       chunks.push(value)
     }
 
-    const blob = new Blob(chunks, { type: 'audio/mpeg' })
-    const url = URL.createObjectURL(blob)
-    const audio = new Audio(url)
-    currentAudio = audio
-
-    await audio.play()
-    await new Promise(resolve => { audio.onended = resolve; audio.onerror = resolve })
-
-    URL.revokeObjectURL(url)
+    const arrayBuffer = await new Blob(chunks, { type: 'audio/mpeg' }).arrayBuffer()
+    const audioBuffer = await _audioContext.decodeAudioData(arrayBuffer)
+    const source = _audioContext.createBufferSource()
+    source.buffer = audioBuffer
+    source.connect(_audioContext.destination)
+    currentAudio = source
+    await new Promise(resolve => { source.onended = resolve; source.start() })
     currentAudio = null
   } catch (e) {
     console.error('TTS error', e)
