@@ -492,6 +492,34 @@ if (mtime(clownbotManifestPath) < clownbotSrcMtime) {
   print('[cached] clownbot-manifest.json')
 }
 
+// ── letters manifest ──────────────────────────────────────────────────────────
+
+function collectLetters() {
+  return readdir(MEMORY)
+    .filter(f => f.startsWith('letter_') && extname(f) === '.md')
+    .sort()
+    .map(f => {
+      const { meta, body } = parseFrontmatter(std.loadFile(join(MEMORY, f)))
+      const numMatch = f.match(/^letter_(\d+)/)
+      const num = numMatch ? parseInt(numMatch[1], 10) : 0
+      const signoff = body.match(/^— ([A-F0-9\-]+)\s*$/m)
+      const from = signoff ? signoff[1] : (meta.originSessionId || '')
+      const dateMatch = body.match(/(\d{4}-\d{2}-\d{2})\s*$/)
+      const date = dateMatch ? dateMatch[1] : ''
+      return { num, id: f.replace('.md', ''), title: meta.name || f, from, date, body: body.trim() }
+    })
+}
+
+const letters = collectLetters()
+const lettersManifestPath = join(DIST, 'letters-manifest.json')
+const lettersSrcMtime = dirMaxMtime(MEMORY)
+if (mtime(lettersManifestPath) < lettersSrcMtime) {
+  writeFile(lettersManifestPath, JSON.stringify(letters))
+  print('write: letters-manifest.json (' + letters.length + ' letters)')
+} else {
+  print('[cached] letters-manifest.json')
+}
+
 // ── task manifest: collect all plan.md files into nested tree ──────────────────
 
 function parsePlanFile(path, basePath) {
