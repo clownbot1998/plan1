@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # Download vosk speech recognition models for hail-mary.
-# alphacephei.com distributes .zip; we repack as .tar.gz for vosk-browser.
+# alphacephei.com distributes .zip; vosk-browser extracts zip natively.
 set -e
 
 DEST="client/public/cdn/sillyz.computer/models"
-TMP=$(mktemp -d)
-trap "rm -rf $TMP" EXIT
 
 models=(
   "vosk-model-small-en-us-0.15"
@@ -24,15 +22,13 @@ models=(
 )
 
 for model in "${models[@]}"; do
-  dest="$DEST/${model}.tar.gz"
+  dest="$DEST/${model}.zip"
   if [ -f "$dest" ]; then
     echo "skip: $model (already exists)"
     continue
   fi
   echo "downloading $model..."
-  curl -L -o "$TMP/${model}.zip" "https://alphacephei.com/vosk/models/${model}.zip"
-  (cd "$TMP" && unzip -q "${model}.zip")
-  tar -czf "$dest" -C "$TMP" "$model"
+  curl -L -o "$dest" "https://alphacephei.com/vosk/models/${model}.zip"
   echo "ok: $dest"
 done
 

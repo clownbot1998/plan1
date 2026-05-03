@@ -17,19 +17,19 @@ function getElevenLabs() {
 }
 
 const VOSK_LANGUAGES = [
-  { name: 'English (US)',    code: 'en', model: 'vosk-model-small-en-us-0.15.tar.gz' },
-  { name: 'English (India)', code: 'en', model: 'vosk-model-small-en-in-0.4.tar.gz' },
-  { name: 'German',          code: 'de', model: 'vosk-model-small-de-0.15.tar.gz' },
-  { name: 'French',          code: 'fr', model: 'vosk-model-small-fr-pguyot-0.3.tar.gz' },
-  { name: 'Spanish',         code: 'es', model: 'vosk-model-small-es-0.42.tar.gz' },
-  { name: 'Portuguese',      code: 'pt', model: 'vosk-model-small-pt-0.3.tar.gz' },
-  { name: 'Russian',         code: 'ru', model: 'vosk-model-small-ru-0.22.tar.gz' },
-  { name: 'Italian',         code: 'it', model: 'vosk-model-small-it-0.22.tar.gz' },
-  { name: 'Dutch',           code: 'nl', model: 'vosk-model-small-nl-0.22.tar.gz' },
-  { name: 'Turkish',         code: 'tr', model: 'vosk-model-small-tr-0.3.tar.gz' },
-  { name: 'Farsi',           code: 'fa', model: 'vosk-model-small-fa-0.42.tar.gz' },
-  { name: 'Chinese',         code: 'zh', model: 'vosk-model-small-cn-0.22.tar.gz' },
-  { name: 'Catalan',         code: 'ca', model: 'vosk-model-small-ca-0.4.tar.gz' },
+  { name: 'English (US)',    code: 'en', model: 'vosk-model-small-en-us-0.15.zip' },
+  { name: 'English (India)', code: 'en', model: 'vosk-model-small-en-in-0.4.zip' },
+  { name: 'German',          code: 'de', model: 'vosk-model-small-de-0.15.zip' },
+  { name: 'French',          code: 'fr', model: 'vosk-model-small-fr-pguyot-0.3.zip' },
+  { name: 'Spanish',         code: 'es', model: 'vosk-model-small-es-0.42.zip' },
+  { name: 'Portuguese',      code: 'pt', model: 'vosk-model-small-pt-0.3.zip' },
+  { name: 'Russian',         code: 'ru', model: 'vosk-model-small-ru-0.22.zip' },
+  { name: 'Italian',         code: 'it', model: 'vosk-model-small-it-0.22.zip' },
+  { name: 'Dutch',           code: 'nl', model: 'vosk-model-small-nl-0.22.zip' },
+  { name: 'Turkish',         code: 'tr', model: 'vosk-model-small-tr-0.3.zip' },
+  { name: 'Farsi',           code: 'fa', model: 'vosk-model-small-fa-0.42.zip' },
+  { name: 'Chinese',         code: 'zh', model: 'vosk-model-small-cn-0.22.zip' },
+  { name: 'Catalan',         code: 'ca', model: 'vosk-model-small-ca-0.4.zip' },
 ]
 
 const MODELS_PATH = '/cdn/sillyz.computer/models/'
@@ -105,10 +105,7 @@ function teardown() {
 // Drop-if-busy: if ElevenLabs is already speaking, skip the new result.
 // Never queue — stale audio is worse than silence.
 async function speakTranslation(text) {
-  if (_ttsActive) {
-    console.log('[hail-mary] tts busy, dropping:', text)
-    return
-  }
+  if (_ttsActive) return
   _ttsActive = true
 
   if (_micSource && _processorNode) {
@@ -337,8 +334,18 @@ async function init(target) {
     const channel = new MessageChannel()
     _channel = channel
 
+    const modelUrl = MODELS_PATH + sourceModel
     $.teach({ status: 'loading model...' })
-    const model = await Vosk.createModel(MODELS_PATH + sourceModel)
+    const model = await new Promise((resolve, reject) => {
+      const m = new Vosk.Model(modelUrl)
+      m.on('load', (v) => {
+        if (v && v.result) resolve(m)
+        else reject(new Error('load result false: ' + JSON.stringify(v)))
+      })
+      m.on('error', (e) => {
+        reject(new Error('model error: ' + JSON.stringify(e)))
+      })
+    })
     model.registerPort(channel.port1)
     _model = model
 

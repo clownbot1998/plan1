@@ -261,8 +261,15 @@ function addIsolation(res) {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
 }
 
+// Pages that use blob workers with fetch (vosk-browser) can't run under COEP —
+// Safari treats blob workers as null-origin, blocking same-origin fetches.
+// ffmpeg pages still need COEP for SharedArrayBuffer.
+const NO_COEP_PATHS = ['/app/hail-mary'];
+
 Deno.serve({ port: PORT }, async (request) => {
   const res = await handleRequest(request);
+  const { pathname } = new URL(request.url);
+  if (NO_COEP_PATHS.some(p => pathname.startsWith(p))) return res;
   return addIsolation(res);
 });
 
@@ -618,13 +625,20 @@ async function handleRequest(request) {
     });
   }
 
-  // serve .tar.gz as octet-stream so browsers don't transparently decompress them
-  if (path.endsWith('.tar.gz')) {
+  // serve .tar.gz / .zip with exact content-length so vosk worker doesn't truncate
+  if (path.endsWith('.tar.gz') || path.endsWith('.zip')) {
     const filePath = `${DIST}${path.slice(1)}`;
     try {
       const file = await Deno.readFile(filePath);
       return new Response(file, {
-        headers: { 'content-type': 'application/octet-stream', 'content-length': String(file.byteLength) },
+        headers: {
+          'content-type': path.endsWith('.zip') ? 'application/zip' : 'application/octet-stream',
+          'content-length': String(file.byteLength),
+          'content-encoding': 'identity',
+          'cache-control': 'no-transform',
+          'access-control-allow-origin': '*',
+          'cross-origin-resource-policy': 'cross-origin',
+        },
       });
     } catch {
       return new Response('Not Found', { status: 404 });

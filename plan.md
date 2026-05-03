@@ -180,10 +180,14 @@ source: `~/.plan98/client/public/elves/hail-mary.js` (552 lines, fully working i
 
 - [x] **import swap** — done by B00BCAFE
 - [x] **vendor** — vosk-browser, translate, @elevenlabs/elevenlabs-js in importmap
-- [x] **vosk assets** — worklet present; all 13 model tarballs downloaded via download-models.sh (zip→tar.gz repack; alphacephei changed format)
+- [x] **vosk assets** — 13 model zips downloaded via download-models.sh; alphacephei distributes zip natively, vosk-browser extracts zip natively
 - [x] **env vars**: `LIBRE_TRANSLATE_URL=http://local.tychi.me:3005` in .env + .env.example; ELEVEN_LABS_API_KEY deferred
 - [x] **register** in index.html ELVES object: `'hail-mary': '/elves/hail-mary.js'`
-- [ ] **verify** `/app/hail-mary` loads, language list populates from libretranslate, text mode translates
+- [x] **verify** — end-to-end working: vosk loads model, mic granted, speech recognized and translated
+- [x] **CORS fix** — model responses get `access-control-allow-origin: *` + `cross-origin-resource-policy: cross-origin`; blob worker in Safari treats fetches as cross-origin
+- [x] **COEP fix** — hail-mary page excluded from COEP headers (Safari blob worker null-origin blocks fetches under COEP:credentialless)
+- [x] **zip serving** — server.js bypasses serveDir for .zip/.tar.gz with exact content-length; `content-encoding: identity` + `cache-control: no-transform` to prevent proxy mangling
+- [x] **build binary fix** — added zip/gz/tar to BINARY_EXTS in build.js; `std.loadFile` was corrupting zip files by treating them as text
 
 ### notes
 

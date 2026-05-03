@@ -66,6 +66,7 @@ const BINARY_EXTS = new Set([
   'mp3', 'ogg', 'wav',
   'mp4', 'webm', 'mov', 'ogv',
   'wasm', 'pdf',
+  'zip', 'gz', 'tar',
 ])
 
 function copyFile(src, dst) {
