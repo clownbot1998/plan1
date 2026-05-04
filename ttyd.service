@@ -1,0 +1,12 @@
+[Unit]
+Description=ttyd (clownbot tty)
+After=network.target
+
+[Service]
+User=clownbot
+ExecStart=/home/clownbot/bin/ttyd -p 7681 --writable /home/clownbot/plan1/clownbot-session.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
