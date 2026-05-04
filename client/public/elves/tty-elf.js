@@ -63,8 +63,9 @@ function afterUpdate(target) {
   target._vvReady = true
 
   function fit() {
-    const h = window.visualViewport ? window.visualViewport.height : window.innerHeight
-    target.style.height = h + 'px'
+    const vv = window.visualViewport
+    target.style.top    = (vv ? vv.offsetTop  : 0) + 'px'
+    target.style.height = (vv ? vv.height : window.innerHeight) + 'px'
   }
 
   function blockScroll(e) { e.preventDefault() }

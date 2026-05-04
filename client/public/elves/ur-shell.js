@@ -53,6 +53,16 @@ const paperPocketHelp = () => {
 
 let fileSystem = null
 
+// set theme before first paint so html:has(ur-shell) and body:has(ur-shell)
+// don't flash the fallback color
+;(function() {
+  const t = getTheme()
+  if (t) {
+    document.documentElement.style.setProperty('--root-theme', t)
+    document.body.style.setProperty('--root-theme', t)
+  }
+})()
+
 const $ = Self('ur-shell', {
   messages: [],
   history: [],
@@ -354,16 +364,34 @@ function beforeUpdate(target) {
 }
 
 function afterUpdate(target) {
+  if (target.parentElement?.tagName === 'MAIN' && !target._scrollLocked) {
+    target._scrollLocked = true
+
+    document.addEventListener('touchstart', (e) => {
+      const el = e.target.closest('.scroll-back')
+      if (el) el._touchStartY = e.touches[0].clientY
+    }, { passive: true })
+
+    document.addEventListener('touchmove', (e) => {
+      const el = e.target.closest('.scroll-back')
+      if (!el) { e.preventDefault(); return }
+
+      const dy = e.touches[0].clientY - (el._touchStartY || e.touches[0].clientY)
+      const atTop    = el.scrollTop <= 0
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1
+
+      if ((dy > 0 && atTop) || (dy < 0 && atBottom)) e.preventDefault()
+    }, { passive: false })
+  }
+
   //replaceCursor(target)
 
   {
     const { messages } = $.learn()
     if(target.lastIndex !== messages.length -1) {
       target.lastIndex = messages.length - 1
-      const lastChild = target.querySelector('.messages .message:last-child')
-      if(lastChild) {
-        target.querySelector('.scroll-back').scrollTop = lastChild.offsetTop
-      }
+      const scrollBack = target.querySelector('.scroll-back')
+      if (scrollBack) scrollBack.scrollTop = scrollBack.scrollHeight
     }
   }
 
@@ -375,13 +403,16 @@ function afterUpdate(target) {
     if(target.theme !== theme) {
       target.theme = theme
       document.body.style.setProperty('--root-theme', theme)
+      document.documentElement.style.setProperty('--root-theme', theme)
     }
   }
 
   {
-    const elem = document.querySelector('[name="messageText"]')
-    if(elem) {
-      elem.focus()
+    // only auto-focus on non-touch devices — on mobile this triggers the
+    // keyboard on every render, fighting the viewport resize
+    if (!window.matchMedia('(pointer: coarse)').matches) {
+      const elem = document.querySelector('[name="messageText"]')
+      if(elem) elem.focus()
     }
   }
 }
@@ -595,6 +626,20 @@ export async function loadModule(message, options = {}) {
 }
 
 $.style(`
+  html:has(&),
+  body:has(&) {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+    background: linear-gradient(335deg, rgba(0,0,0,.8), rgba(0,0,0,.9)), var(--root-theme, mediumseagreen);
+  }
+
+  main > & {
+    position: fixed;
+    inset: 0;
+  }
+
   & {
     display: grid;
     grid-template-rows: 1fr auto;
@@ -657,7 +702,10 @@ $.style(`
 
   & .scroll-back {
     height: 100%;
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   & .messages {
@@ -665,6 +713,7 @@ $.style(`
     display: flex;
     flex-direction: column;
     justify-content: end;
+    min-height: 100%;
   }
   & .message {
     overflow: auto;
