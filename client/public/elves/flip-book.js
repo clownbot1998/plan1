@@ -2536,6 +2536,42 @@ async function saveFlipbook(target) {
   await fbCache.put(FB_INDEX_KEY, [...index, entry], 'json')
 }
 
+// writes a flipbook post to /plan98-gallery/public.json in WAS so plan98-gallery and dream-team can display it
+async function publishToGallery(target) {
+  const id = target.id
+  if (!id?.startsWith('/')) throw new Error('flip-book must have a path-based id (starting with /) to share')
+  const { frames, fps, canvasW, canvasH } = $.learn()
+  const src = wasCanvasPath(id)
+  const thumb = frames.length ? `${id}/frame-${frames[0]}.png` : null
+  const timelinePath = '/plan98-gallery/public.json'
+  const resource = {
+    uri: timelinePath,
+    cid: crypto.randomUUID(),
+    author: { moniker: 'clownbot', group: 'plan1' },
+    record: {
+      $type: 'computer.sillyz.data.flipbook',
+      id,
+      src,
+      thumb,
+      frames: frames.length,
+      fps,
+      canvasW,
+      canvasH,
+      createdAt: new Date().toISOString()
+    }
+  }
+  let existing = []
+  try {
+    const blob = await wasGet(timelinePath)
+    if (blob) {
+      const data = JSON.parse(await blob.text())
+      existing = data.timeline || []
+    }
+  } catch {}
+  await wasDel(timelinePath).catch(() => null)
+  await wasPut(timelinePath, JSON.stringify({ timeline: [...existing, resource] }), { type: 'application/json' })
+}
+
 async function loadGalleryList(el, target) {
   el.innerHTML = '<div class="gallery-empty">loading…</div>'
   const index = await readFbIndex()
@@ -2862,6 +2898,7 @@ function renderView(view){
     <div class="gallery-list" data-gallery-list><div class="gallery-empty">loading…</div></div>
     <div class="overlay-title" style="margin-top:.75rem;">save current</div>
     <button class="row-btn" data-gallery-save>↑ save flipbook</button>
+    <button class="row-btn" style="margin-top:.4rem;" data-gallery-share>↑ share to gallery</button>
   `
   return ''
 }
@@ -3017,6 +3054,23 @@ $.when('click','[data-pick-fill]',event=>{
 })
 $.when('click','[data-close-overlay]',event=>{const r=event.target.closest(tag);if(r)closeOverlay(r)})
 $.when('click','[data-new-frame]',event=>{const r=event.target.closest(tag);if(r)addFrame(r)})
+
+// publish current flipbook to plan98-gallery timeline so it appears in dream-team
+$.when('click','[data-gallery-share]', async event => {
+  const btn = event.target.closest('[data-gallery-share]')
+  const root = event.target.closest(tag)
+  if (!root || !btn) return
+  btn.disabled = true
+  btn.textContent = 'sharing…'
+  try {
+    await publishToGallery(root)
+    btn.textContent = 'shared ✓'
+  } catch(e) {
+    console.warn('gallery share failed', e)
+    btn.textContent = e.message?.includes('path-based') ? 'needs path id' : 'share failed'
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = '↑ share to gallery' }, 2000)
+})
 $.when('click','[data-toggle-camera]', async event => {
   const root = event.target.closest(tag); if (!root) return
   const { videoEnabled } = $.learn()

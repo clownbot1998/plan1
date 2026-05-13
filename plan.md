@@ -112,7 +112,7 @@ goal: clownbot can act on plan.md without a human typing the task.
 
 - [x] braid lore-baby like squad-code
 - [x] get shirt-flicks a and b sound effects and put them in sticky-menu: a plays when the menu navigates, b plays when up/down hits first or last item (stuck)
-- [ ] integrate flip-book content into plan98-gallery to be able to embed in dream-team
+- [x] integrate flip-book content into plan98-gallery to be able to embed in dream-team
 
 ---
 
