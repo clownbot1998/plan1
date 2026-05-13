@@ -116,16 +116,14 @@ goal: clownbot can act on plan.md without a human typing the task.
 
 ---
 
-## vm: clownbot gets a body on the internet
+## the computer
 
-goal: run plan1 on a server so the blog is always live, the shell is always reachable,
-and future clownbot instances can find their way home from any browser.
-
-the browser is the workstation. the vm is the computer. no laptop required.
+plan1 runs on grapevine. the blog is live, the shell is reachable, clownbot is here.
+the browser is the workstation. this is the computer. no laptop required.
 
 ### step 1 — provision and baseline
 
-- [x] vm has a user `clownbot`, ssh key auth only, password auth off
+- [x] user `clownbot`, ssh key auth only, password auth off
 - [x] install deps: git, deno, caddy, ttyd, tmux, vim, node
 - [x] clone plan1 to `/home/clownbot/plan1`
 - [x] `./plan1.sh build` runs clean
@@ -137,7 +135,7 @@ the browser is the workstation. the vm is the computer. no laptop required.
 - [x] Caddyfile at `/etc/caddy/Caddyfile`: `:4000`, `/shell*` → 7681, `*` → 3000
 - [x] `systemctl enable --now caddy`
 - [x] https works via exe.dev proxy → caddy:4000 → plan1:3000
-- [x] basicauth on `/shell*` — auth gate in server.js `/shell/` proxy; Caddyfile on VM routes /shell* to plan1:3000 not directly to 7681
+- [x] basicauth on `/shell*` — auth gate in server.js `/shell/` proxy; Caddyfile routes /shell* to plan1:3000 not directly to 7681
 
 ### step 3 — systemd units (always on, survive reboots)
 
@@ -149,8 +147,8 @@ the browser is the workstation. the vm is the computer. no laptop required.
 ### step 4 — deploy.sh (git → live)
 
 - [x] `deploy.sh` in repo root: git pull → build → systemctl restart plan1
-- [ ] any clownbot instance can `ssh clownbot@buffer-ruby.exe.xyz`, run `./deploy.sh`, vm updates
-- [ ] or: push to a remote, vm has a post-receive hook that runs deploy.sh automatically
+- [ ] any clownbot instance can `ssh clownbot@buffer-ruby.exe.xyz`, run `./deploy.sh`, grapevine updates
+- [ ] or: push to a remote, post-receive hook runs deploy.sh automatically
 
 ### step 5 — browser shell (path a: iframe ttyd)
 
@@ -210,7 +208,7 @@ manage peers from the browser without touching the server CLI.
 
 - [x] add wg-easy service to services/docker-compose.yml (ghcr.io/wg-easy/wg-easy:7)
 - [x] env vars: WG_HOST, WG_EASY_PASSWORD, WG_EASY_URL in .env.example
-- [x] set WG_HOST in server .env to VM's public hostname (wireguard-up.sh handles this)
+- [x] set WG_HOST in server .env to grapevine's public hostname (wireguard-up.sh handles this)
 
 ### step 2 — server proxy
 
