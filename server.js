@@ -85,6 +85,25 @@ const braidState = new Map();   // filePath -> { text, version, subs: Set }
 const braidLoading = new Map(); // filePath -> Promise<state>  (in-flight dedup)
 const _loginAttempts = new Map(); // ip -> { count, until }
 
+// --- wg-easy session (cached server-side; re-auth on 401) ---
+let _wgSid = '';
+async function wgAuth() {
+  const wgUrl = safeEnv('WG_EASY_URL', 'http://localhost:51821');
+  const wgPass = safeEnv('WG_EASY_PASSWORD', 'clownbot');
+  try {
+    const resp = await fetch(`${wgUrl}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: wgPass }),
+    });
+    const cookie = resp.headers.get('set-cookie') ?? '';
+    _wgSid = cookie.match(/connect\.sid=([^;]+)/)?.[1] ?? '';
+    return _wgSid;
+  } catch {
+    return '';
+  }
+}
+
 async function getBraidResource(filePath) {
   if (braidState.has(filePath)) return braidState.get(filePath);
   if (braidLoading.has(filePath)) return braidLoading.get(filePath);
@@ -404,6 +423,36 @@ async function handleRequest(request) {
     }
 
     return new Response('saved', { headers: { 'access-control-allow-origin': '*' } });
+  }
+
+  // /api/wg/* → wg-easy proxy (requires plan1 auth)
+  if (path.startsWith('/api/wg/')) {
+    if (!checkAuth(request)) return new Response('unauthorized', { status: 401 });
+    const wgUrl = safeEnv('WG_EASY_URL', 'http://localhost:51821');
+    const upstream = wgUrl + '/api' + path.slice('/api/wg'.length) + url.search;
+    if (!_wgSid) await wgAuth();
+    const doReq = async (sid) => {
+      const headers = new Headers();
+      headers.set('cookie', `connect.sid=${sid}`);
+      const ct = request.headers.get('content-type');
+      if (ct) headers.set('content-type', ct);
+      return fetch(upstream, {
+        method: request.method,
+        headers,
+        body: ['GET', 'HEAD'].includes(request.method) ? undefined : (await request.blob()),
+      });
+    };
+    try {
+      let resp = await doReq(_wgSid);
+      if (resp.status === 401) {
+        await wgAuth();
+        resp = await doReq(_wgSid);
+      }
+      const ct = resp.headers.get('content-type') ?? 'application/octet-stream';
+      return new Response(resp.body, { status: resp.status, headers: { 'content-type': ct, 'access-control-allow-origin': '*' } });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: String(e) }), { status: 502, headers: { 'content-type': 'application/json' } });
+    }
   }
 
   // /api/translate → libretranslate proxy (avoids mixed-content + CORS from browser)

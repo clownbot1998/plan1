@@ -199,6 +199,37 @@ source: `~/.plan98/client/public/elves/hail-mary.js` (552 lines, fully working i
 
 ---
 
+---
+
+## wireguard: clownbot gets a private network
+
+goal: connect plan1, clownbot devices, and future nodes over a WireGuard mesh.
+manage peers from the browser without touching the server CLI.
+
+### step 1 — wg-easy service
+
+- [x] add wg-easy service to services/docker-compose.yml (ghcr.io/wg-easy/wg-easy:7)
+- [x] env vars: WG_HOST, WG_EASY_PASSWORD, WG_EASY_URL in .env.example
+- [ ] set WG_HOST in server .env to VM's public hostname
+
+### step 2 — server proxy
+
+- [x] `/api/wg/*` route in server.js — auth-gated, proxies to wg-easy REST API
+- [x] wg-easy session cached server-side, re-auths on 401
+
+### step 3 — wireguard-elf
+
+- [x] `wireguard-elf.js` — list peers, add/remove, enable/disable, QR code + .conf download
+- [x] register in index.html, reachable at `/app/wireguard-elf`
+
+### step 4 — provision
+
+- [ ] `provision-server.sh`: install wireguard kernel module (`apt-get install -y wireguard`)
+- [ ] `provision-server.sh`: bring up wireguard container with `docker compose ... --profile wireguard up -d`
+- [ ] reboot test: wireguard service survives restart
+
+---
+
 ### later — plant: kernel.js as a protocol
 
 - [ ] extract shared kernel (MVCES, no render calls, no DOM globals)
