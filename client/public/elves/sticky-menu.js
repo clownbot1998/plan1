@@ -9,6 +9,7 @@ const SECTIONS = {
       { label: 'Source Code', href: '/app/source-code' },
       { label: 'ur-shell',    href: '/app/ur-shell' },
       { label: 'Private AI',  href: '/app/private-ai' },
+      { label: 'Hail Mary',   href: '/app/hail-mary' },
     ]
   },
   sketch: {
@@ -71,21 +72,23 @@ function navList(activeTab) {
   return items
 }
 
+let _ctx = null
+function getCtx() {
+  if (!_ctx) _ctx = new AudioContext()
+  return _ctx
+}
+
 function audioFactory(url) {
-  const pool = []
-  const poolSize = 3
-  let poolIndex = 0
-  for (let i = 0; i < poolSize; i++) {
-    const audio = new Audio(url)
-    audio.preload = 'auto'
-    audio.load()
-    pool.push(audio)
-  }
+  let buffer = null
+  fetch(url).then(r => r.arrayBuffer()).then(ab => getCtx().decodeAudioData(ab)).then(b => { buffer = b }).catch(() => {})
   return function play() {
-    const sound = pool[poolIndex]
-    sound.currentTime = 0
-    sound.play().catch(() => {})
-    poolIndex = (poolIndex + 1) % poolSize
+    if (!buffer) return
+    const ctx = getCtx()
+    if (ctx.state === 'suspended') ctx.resume()
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    src.connect(ctx.destination)
+    src.start(0)
   }
 }
 
