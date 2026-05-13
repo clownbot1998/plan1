@@ -135,6 +135,12 @@ EOF"
 
 ssh clownbot@"${TARGET#*@}" "docker compose -f /home/clownbot/plan98/docker-compose.services.yml up -d --build 2>&1 | tail -10"
 
+# ── wireguard ─────────────────────────────────────────────────────────────────
+
+echo "==> wireguard"
+S "apt-get install -y wireguard 2>&1 | grep -E 'already|newly|error'"
+ssh clownbot@"${TARGET#*@}" "docker compose -f /home/clownbot/plan1/services/docker-compose.yml --env-file /home/clownbot/plan1/.env up -d wireguard 2>&1 | tail -5"
+
 echo ""
 echo "done."
 echo "plan1:         http://$(echo $TARGET | cut -d@ -f2):8000"

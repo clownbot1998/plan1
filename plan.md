@@ -210,7 +210,7 @@ manage peers from the browser without touching the server CLI.
 
 - [x] add wg-easy service to services/docker-compose.yml (ghcr.io/wg-easy/wg-easy:7)
 - [x] env vars: WG_HOST, WG_EASY_PASSWORD, WG_EASY_URL in .env.example
-- [ ] set WG_HOST in server .env to VM's public hostname
+- [x] set WG_HOST in server .env to VM's public hostname (wireguard-up.sh handles this)
 
 ### step 2 — server proxy
 
@@ -224,9 +224,9 @@ manage peers from the browser without touching the server CLI.
 
 ### step 4 — provision
 
-- [ ] `provision-server.sh`: install wireguard kernel module (`apt-get install -y wireguard`)
-- [ ] `provision-server.sh`: bring up wireguard container with `docker compose ... --profile wireguard up -d`
-- [ ] reboot test: wireguard service survives restart
+- [x] `provision-server.sh`: install wireguard kernel module (`apt-get install -y wireguard`)
+- [x] `provision-server.sh`: bring up wireguard container with `docker compose --env-file .env up -d wireguard`
+- [ ] reboot test: wireguard container survives restart
 
 ---
 
