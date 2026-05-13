@@ -8,8 +8,17 @@ COMPOSE=$PLAN1/services/docker-compose.yml
 WG_HOST=local.tychi.me
 WG_PASS=clownbot
 
+if [ "$(id -u)" = "0" ]; then
+  echo "error: run as clownbot, not root (sudo is used internally for apt)" >&2
+  exit 1
+fi
+
 echo "==> kernel module"
-sudo apt-get install -y wireguard 2>&1 | grep -E "already|newly|error"
+if dpkg -l wireguard 2>/dev/null | grep -q '^ii'; then
+  echo "already installed"
+else
+  sudo apt-get install -y wireguard 2>&1 | grep -E "already|newly|error"
+fi
 
 echo "==> .env"
 set_env() {
@@ -25,7 +34,7 @@ set_env WG_EASY_PASSWORD "$WG_PASS"
 set_env WG_EASY_URL      "http://localhost:51821"
 
 echo "==> wireguard container"
-docker compose -f "$COMPOSE" up -d wireguard
+docker compose -f "$COMPOSE" --env-file "$ENV" up -d wireguard
 
 echo "==> waiting for wg-easy..."
 for i in $(seq 1 20); do
@@ -37,9 +46,8 @@ for i in $(seq 1 20); do
 done
 
 echo "==> restarting plan1 (picks up new env)"
-sudo systemctl restart plan1
-sleep 2
-sudo systemctl is-active plan1
+"$PLAN1/plan1.sh" stop || true
+"$PLAN1/plan1.sh" serve
 
 echo ""
 echo "done. open /app/wireguard-elf, add a peer named ipad, scan the QR."
