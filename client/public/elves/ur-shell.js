@@ -145,6 +145,18 @@ function stripAnsi(str) {
     .replace(/\r/g, '\n')
 }
 
+function sendTtyResize(ws) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return
+  const cols = Math.floor(window.innerWidth / 9) || 80
+  const rows = Math.floor(window.innerHeight / 18) || 24
+  const json = JSON.stringify({ columns: cols, rows })
+  const enc = new TextEncoder().encode(json)
+  const frame = new Uint8Array(1 + enc.length)
+  frame[0] = 0x34  // '4' = resize in ttyd protocol
+  frame.set(enc, 1)
+  ws.send(frame.buffer)
+}
+
 function appendTtyOutput(text) {
   const clean = stripAnsi(text)
   if (!clean) return
@@ -448,6 +460,7 @@ Type \`<elf-name>\` to load a custom element.
     ws.onopen = () => {
       ws.send(JSON.stringify({ AuthToken: '' }))
       $.teach({ ttyConnected: true, modality: 'tty' })
+      sendTtyResize(ws)
     }
     ws.onmessage = (event) => {
       if (event.data instanceof ArrayBuffer) {
@@ -457,8 +470,11 @@ Type \`<elf-name>\` to load a custom element.
         if (event.data[0] === '0') appendTtyOutput(event.data.slice(1))
       }
     }
+    const onResize = () => sendTtyResize(ws)
+    window.addEventListener('resize', onResize)
     ws.onclose = () => {
       ttySocket = null
+      window.removeEventListener('resize', onResize)
       clearTimeout(ttyFlushTimer)
       if (ttyBuffer.trim()) flushTtyBuffer()
       $.teach({ ttyConnected: false, modality: null })
@@ -466,6 +482,7 @@ Type \`<elf-name>\` to load a custom element.
     }
     ws.onerror = () => {
       ttySocket = null
+      window.removeEventListener('resize', onResize)
       $.teach({ ttyConnected: false, modality: null })
       $.teach({ body: 'shell unavailable — ttyd not running on this host', author: 'assistant' }, mergeMessage)
     }
