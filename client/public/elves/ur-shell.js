@@ -679,6 +679,7 @@ async function execute(message, options={}) {
   }
 
   const { modality } = $.learn()
+  console.log('[tty] execute modality=', modality, 'ttySocket=', ttySocket?.readyState)
 
   if (modality === 'tty') {
     if (ttySocket && ttySocket.readyState === WebSocket.OPEN) {
