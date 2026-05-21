@@ -411,7 +411,7 @@ Type \`<elf-name>\` to load a custom element.
       return 'shell requires auth — [login](/admin?next=/)'
     }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${location.host}/shell/ws`)
+    const ws = new WebSocket(`${proto}://${location.host}/shell/ws`, ['tty'])
     ws.binaryType = 'arraybuffer'
     ttySocket = ws
     ws.onopen = () => {
