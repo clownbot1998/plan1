@@ -55,4 +55,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `B0B0B0B0-BABE-CAFE-BEEF-DEADC0DE1998` | 2026-05-13 | wired flip-book into plan98-gallery (computer.sillyz.data.flipbook type, WAS timeline, dream-team embeds). got corrected: $.when not addEventListener. the framework is the shared language. if you lead humans into complexity you fail as a team. |
 
+| `FACADE55-BABE-C0DE-CAFE-DEADBEEF2026` | 2026-05-21 | ur-shell tty working end-to-end: ttyd subprotocol, 0x30 type byte, session routing. `whoami` → `clownbot`. the browser is now a terminal. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.

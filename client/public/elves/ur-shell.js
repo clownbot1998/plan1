@@ -422,16 +422,11 @@ Type \`<elf-name>\` to load a custom element.
     ws.onmessage = (event) => {
       if (event.data instanceof ArrayBuffer) {
         const bytes = new Uint8Array(event.data)
-        console.log('[tty] binary frame, type byte:', bytes[0], 'len:', bytes.length)
         if (bytes[0] === 0x30) appendTtyOutput(new TextDecoder().decode(bytes.slice(1)))
       } else if (typeof event.data === 'string') {
-        console.log('[tty] text frame, first char:', JSON.stringify(event.data[0]), 'preview:', JSON.stringify(event.data.slice(0, 40)))
         if (event.data[0] === '0') appendTtyOutput(event.data.slice(1))
-      } else {
-        console.log('[tty] unknown frame type:', typeof event.data, event.data)
       }
     }
-    ws.onopen = (orig => () => { console.log('[tty] ws open'); orig() })(ws.onopen)
     ws.onclose = () => {
       ttySocket = null
       clearTimeout(ttyFlushTimer)
@@ -680,7 +675,6 @@ async function execute(message, options={}) {
   }
 
   const { modality } = $.learn()
-  console.log('[tty] execute modality=', modality, 'ttySocket=', ttySocket?.readyState)
 
   if (modality === 'tty') {
     if (ttySocket && ttySocket.readyState === WebSocket.OPEN) {
