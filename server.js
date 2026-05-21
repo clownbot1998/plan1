@@ -504,6 +504,33 @@ async function handleRequest(request) {
     }
   }
 
+  // /shell/tools → MCP-shaped JSON index of PATH commands
+  if (path === '/shell/tools') {
+    if (!checkAuth(request)) return new Response('unauthorized', { status: 401 })
+    const pathDirs = (Deno.env.get('PATH') || '').split(':').filter(Boolean)
+    const seen = new Set()
+    for (const dir of pathDirs) {
+      try {
+        for await (const entry of Deno.readDir(dir)) {
+          if (entry.isFile || entry.isSymlink) seen.add(entry.name)
+        }
+      } catch { /* skip inaccessible */ }
+    }
+    const tools = [...seen].sort().map(name => ({
+      name,
+      description: `run ${name}`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          args: { type: 'string', description: 'arguments to pass' }
+        }
+      }
+    }))
+    return new Response(JSON.stringify({ tools }, null, 2), {
+      headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' }
+    })
+  }
+
   // /api/anthropic → Anthropic messages API proxy
   if (path === '/api/anthropic') {
     const apiKey = safeEnv('ANTHROPIC_API_KEY')
