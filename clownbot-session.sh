@@ -3,6 +3,11 @@
 SESSION=clownbot
 DIR=/home/clownbot/plan1
 
+# clean up stale socket if server is gone
+if [ -S "$TMUX_TMPDIR/default" ] || [ -S "/tmp/tmux-$(id -u)/default" ]; then
+  tmux start-server 2>/dev/null || rm -f "/tmp/tmux-$(id -u)/default" 2>/dev/null
+fi
+
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   # window 0: shell — for vim, bash, general ops
   tmux new-session -d -s "$SESSION" -n shell -c "$DIR"
