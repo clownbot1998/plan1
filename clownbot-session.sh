@@ -11,8 +11,8 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux new-window -t "$SESSION" -n claude -c "$DIR"
   tmux send-keys -t "${SESSION}:claude" "claude" Enter
 
-  # land on shell window by default
-  tmux select-window -t "${SESSION}:shell"
+  # land on claude window by default
+  tmux select-window -t "${SESSION}:claude"
 fi
 
-exec tmux attach-session -t "$SESSION"
+exec tmux attach-session -t "${SESSION}:claude"
