@@ -412,6 +412,12 @@ Type \`<elf-name>\` to load a custom element.
     $.teach({ modality: 'auth', secureEntry: true })
     return 'passphrase:'
   },
+  'agent': async () => {
+    $.teach({ modality: 'agent' })
+    const { agent } = await import('./clownbot-agent.js')
+    const reply = await agent(null)
+    return reply
+  },
   'art': () => {
     loadPath('/app/flip-book')
     return 'opening flip-book...'
