@@ -159,7 +159,7 @@ function flushTtyBuffer() {
   const output = ttyBuffer
   ttyBuffer = ''
   $.teach({ ttyLive: '' })
-  $.teach({ body: output, author: 'assistant' }, mergeMessage)
+  $.teach({ body: output, author: 'assistant', tty: true }, mergeMessage)
 }
 
 async function startVosk() {
@@ -419,9 +419,12 @@ Type \`<elf-name>\` to load a custom element.
       $.teach({ ttyConnected: true, modality: 'tty' })
     }
     ws.onmessage = (event) => {
-      if (!(event.data instanceof ArrayBuffer)) return
-      const bytes = new Uint8Array(event.data)
-      if (bytes[0] === 0x01) appendTtyOutput(new TextDecoder().decode(bytes.slice(1)))
+      if (event.data instanceof ArrayBuffer) {
+        const bytes = new Uint8Array(event.data)
+        if (bytes[0] === 0x01) appendTtyOutput(new TextDecoder().decode(bytes.slice(1)))
+      } else if (typeof event.data === 'string') {
+        if (event.data[0] === '0') appendTtyOutput(event.data.slice(1))
+      }
     }
     ws.onclose = () => {
       ttySocket = null
@@ -471,7 +474,7 @@ $.draw((target) => {
   const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading } = $.learn()
 
   const log = messages.map((message) => `
-    <div class="message -${message.author}">${message.author === 'assistant' && ttyConnected ? `<pre class="tty-out">${escapeHyperText(message.body||'')}</pre>` : marked(message.body||'').trim()}</div>
+    <div class="message -${message.author}">${message.tty ? `<pre class="tty-out">${escapeHyperText(message.body||'')}</pre>` : marked(message.body||'').trim()}</div>
   `).join('')
 
   return `
