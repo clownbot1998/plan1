@@ -256,6 +256,26 @@ function done(response) {
   $.teach({ body: response, author: 'assistant' }, mergeMessage)
 }
 
+async function auth(passphrase, { normalMode }) {
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ passphrase }),
+    })
+    if (res.ok) {
+      normalMode()
+      return 'logged in'
+    }
+    const data = await res.json().catch(() => ({}))
+    if (data.remaining === 0) { normalMode(); return 'too many attempts — try again later' }
+    return `wrong passphrase${data.remaining != null ? ` — ${data.remaining} left` : ''}`
+  } catch {
+    normalMode()
+    return 'login failed'
+  }
+}
+
 const modalities = {
   async agent(program) {
     if (program === 'exit' || program === 'quit') {
@@ -388,6 +408,10 @@ Type \`<elf-name>\` to load a custom element.
     return next
   },
 
+  'admin': () => {
+    $.teach({ modality: 'auth', secureEntry: true })
+    return 'passphrase:'
+  },
   'art': () => {
     loadPath('/app/flip-book')
     return 'opening flip-book...'
