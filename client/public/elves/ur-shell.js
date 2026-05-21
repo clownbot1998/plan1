@@ -680,6 +680,17 @@ async function execute(message, options={}) {
 
   const { modality } = $.learn()
 
+  if (modality === 'tty') {
+    if (ttySocket && ttySocket.readyState === WebSocket.OPEN) {
+      const frame = new Uint8Array(message.length + 2)
+      frame[0] = 0x01
+      for (let i = 0; i < message.length; i++) frame[i + 1] = message.charCodeAt(i)
+      frame[frame.length - 1] = 0x0d
+      ttySocket.send(frame.buffer)
+    }
+    return
+  }
+
   if(modalities[modality]) {
     const result = await modalities[modality](message)
     if(result) {
