@@ -286,6 +286,34 @@ function addIsolation(res) {
 // ffmpeg pages still need COEP for SharedArrayBuffer.
 const NO_COEP_PATHS = ['/app/hail-mary', '/app/ur-shell'];
 
+const TTYD_BIN = '/home/clownbot/bin/ttyd'
+const SESSION_PORTS = new Map() // sessionName → port
+
+async function spawnTtydSession(sessionName) {
+  if (SESSION_PORTS.has(sessionName)) {
+    const port = SESSION_PORTS.get(sessionName)
+    try { await fetch(`http://localhost:${port}/`); return port } catch { SESSION_PORTS.delete(sessionName) }
+  }
+  // find a free port in 7700-7900
+  let port = null
+  for (let p = 7700; p < 7900; p++) {
+    if ([...SESSION_PORTS.values()].includes(p)) continue
+    try { const l = Deno.listen({ port: p }); l.close(); port = p; break } catch { /* in use */ }
+  }
+  if (!port) return null
+  const tmuxArgs = sessionName === 'new'
+    ? ['tmux', 'new-session']
+    : ['tmux', 'new-session', '-A', '-s', sessionName]
+  new Deno.Command(TTYD_BIN, { args: ['-p', String(port), '--once', '--writable', ...tmuxArgs] }).spawn()
+  if (sessionName !== 'new') SESSION_PORTS.set(sessionName, port)
+  // wait for ttyd to be ready (up to 2s)
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 100))
+    try { const r = await fetch(`http://localhost:${port}/`); if (r.ok) return port } catch { /* not yet */ }
+  }
+  return null
+}
+
 Deno.serve({ port: PORT }, async (request) => {
   const res = await handleRequest(request);
   const { pathname } = new URL(request.url);
@@ -512,11 +540,14 @@ async function handleRequest(request) {
       return new Response(null, { status: 302, headers: { location: '/admin?next=' + encodeURIComponent(path) } });
     }
     const stripped = path.slice('/shell'.length) || '/'
-    const qs = url.search
+    const sessionName = url.searchParams.get('session')
+    const ttydPort = sessionName ? await spawnTtydSession(sessionName) : 7681
+    if (!ttydPort) return new Response('session unavailable', { status: 502 })
+    const qs = sessionName ? '' : url.search
     if (request.headers.get('upgrade') === 'websocket') {
       const proto = request.headers.get('sec-websocket-protocol') ?? undefined
       const { socket: client, response } = Deno.upgradeWebSocket(request, proto ? { protocol: proto } : {})
-      const server = new WebSocket(`ws://localhost:7681${stripped}${qs}`, proto ? [proto] : [])
+      const server = new WebSocket(`ws://localhost:${ttydPort}${stripped}${qs}`, proto ? [proto] : [])
       server.binaryType = 'arraybuffer'
       client.binaryType = 'arraybuffer'
       const pending = []
@@ -535,7 +566,7 @@ async function handleRequest(request) {
       return response
     }
     try {
-      const resp = await fetch(`http://localhost:7681${stripped}${qs}`, {
+      const resp = await fetch(`http://localhost:${ttydPort}${stripped}${qs}`, {
         method: request.method,
         headers: request.headers,
         body: request.body ?? undefined,

@@ -404,14 +404,15 @@ Type \`<elf-name>\` to load a custom element.
     loadPath('/app/tty-elf')
     return 'connecting to clownbot...'
   },
-  'tty': async () => {
+  'tty': async (sessionArg) => {
     if (ttySocket) { ttySocket.close(); ttySocket = null }
     const authCheck = await fetch('/shell/', { method: 'HEAD' })
     if (authCheck.status === 401 || authCheck.redirected && authCheck.url.includes('admin')) {
       return 'shell requires auth — [login](/admin?next=/)'
     }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${location.host}/shell/ws`, ['tty'])
+    const session = sessionArg || 'new'
+    const ws = new WebSocket(`${proto}://${location.host}/shell/ws?session=${encodeURIComponent(session)}`, ['tty'])
     ws.binaryType = 'arraybuffer'
     ttySocket = ws
     ws.onopen = () => {
