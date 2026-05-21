@@ -2,6 +2,13 @@ import { Self } from '@plan98/types'
 import { marked } from 'marked'
 import { showModal, hideModal } from '@plan98/modal'
 import $paperPocket, { sideEffects, systemMenu, getTheme, afterUpdateTheme } from './paper-pocket.js'
+import Vosk from 'vosk-browser'
+import { agent } from './clownbot-agent.js'
+
+const SL = 'https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.16.0/cdn/assets/icons'
+function icon(name) {
+  return `<span class="icon" style="--i:url('${SL}/${name}.svg')"></span>`
+}
 
 function decodeHtmlEntities(text) {
   const textarea = document.createElement("textarea");
@@ -53,6 +60,22 @@ const paperPocketHelp = () => {
 
 let fileSystem = null
 
+// tty websocket
+let ttySocket = null
+let ttyBuffer = ''
+let ttyFlushTimer = null
+
+// vosk voice
+const VOSK_MODEL_URL = '/cdn/sillyz.computer/models/vosk-model-small-en-us-0.15.zip'
+const VOSK_WORKLET = '/cdn/sillyz.computer/models/vosk-browser/recognizer-processor.js'
+let _voskModel = null
+let _voskRecognizer = null
+let _voskAudioCtx = null
+let _voskStream = null
+let _voskSource = null
+let _voskProcessor = null
+let _voskCommitted = ''
+
 // set theme before first paint so html:has(ur-shell) and body:has(ur-shell)
 // don't flash the fallback color
 ;(function() {
@@ -71,6 +94,10 @@ const $ = Self('ur-shell', {
   messageDraft: '',
   messageHeight: null,
   cwd: null,
+  ttyConnected: false,
+  ttyLive: '',
+  listening: false,
+  voskLoading: false,
 })
 
 export function sh(message) {
@@ -106,6 +133,92 @@ function mergeMessage(state, payload) {
       payload
     ]
   }
+}
+
+function stripAnsi(str) {
+  return str
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
+    .replace(/\x1b[=>]/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+}
+
+function appendTtyOutput(text) {
+  const clean = stripAnsi(text)
+  if (!clean) return
+  ttyBuffer += clean
+  $.teach({ ttyLive: ttyBuffer })
+  clearTimeout(ttyFlushTimer)
+  ttyFlushTimer = setTimeout(flushTtyBuffer, 400)
+}
+
+function flushTtyBuffer() {
+  if (!ttyBuffer.trim()) { ttyBuffer = ''; $.teach({ ttyLive: '' }); return }
+  const output = ttyBuffer
+  ttyBuffer = ''
+  $.teach({ ttyLive: '' })
+  $.teach({ body: output, author: 'assistant' }, mergeMessage)
+}
+
+async function startVosk() {
+  if (_voskRecognizer) return
+  $.teach({ voskLoading: true })
+  try {
+    const channel = new MessageChannel()
+    if (!_voskModel) {
+      _voskModel = await new Promise((resolve, reject) => {
+        const m = new Vosk.Model(VOSK_MODEL_URL)
+        m.on('load', v => (v && v.result) ? resolve(m) : reject(new Error('model load failed')))
+        m.on('error', e => reject(new Error('model error: ' + JSON.stringify(e))))
+      })
+    }
+    _voskModel.registerPort(channel.port1)
+    const sampleRate = 48000
+    const recognizer = new _voskModel.KaldiRecognizer(sampleRate)
+    recognizer.setWords(false)
+    _voskRecognizer = recognizer
+    _voskStream = await navigator.mediaDevices.getUserMedia({
+      video: false,
+      audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1, sampleRate },
+    })
+    _voskAudioCtx = new AudioContext()
+    await _voskAudioCtx.audioWorklet.addModule(VOSK_WORKLET)
+    _voskProcessor = new AudioWorkletNode(_voskAudioCtx, 'recognizer-processor', {
+      channelCount: 1, numberOfInputs: 1, numberOfOutputs: 1,
+    })
+    _voskProcessor.port.postMessage({ action: 'init', recognizerId: recognizer.id }, [channel.port2])
+    _voskProcessor.connect(_voskAudioCtx.destination)
+    _voskSource = _voskAudioCtx.createMediaStreamSource(_voskStream)
+    _voskSource.connect(_voskProcessor)
+    recognizer.on('partialresult', (msg) => {
+      const partial = msg.result?.partial || ''
+      const committed = _voskCommitted
+      $.teach({ messageText: committed + (partial ? (committed ? ' ' : '') + partial : '') })
+    })
+    recognizer.on('result', (msg) => {
+      const text = msg.result?.text || ''
+      if (!text) return
+      _voskCommitted = _voskCommitted ? _voskCommitted + ' ' + text : text
+      $.teach({ messageText: _voskCommitted })
+    })
+    $.teach({ listening: true, voskLoading: false })
+  } catch (e) {
+    console.error('vosk error', e)
+    $.teach({ voskLoading: false })
+    stopVosk()
+  }
+}
+
+function stopVosk() {
+  if (_voskProcessor) { try { _voskProcessor.disconnect() } catch (e) {} ; _voskProcessor = null }
+  if (_voskSource) { try { _voskSource.disconnect() } catch (e) {} ; _voskSource = null }
+  if (_voskRecognizer) { try { _voskRecognizer.remove() } catch (e) {} ; _voskRecognizer = null }
+  if (_voskStream) { _voskStream.getTracks().forEach(t => t.stop()); _voskStream = null }
+  if (_voskAudioCtx) { try { _voskAudioCtx.close() } catch (e) {} ; _voskAudioCtx = null }
+  _voskCommitted = ''
+  $.teach({ listening: false, voskLoading: false })
 }
 
 const killCommands = ['exit', 'quit', 'escape']
@@ -145,14 +258,15 @@ function done(response) {
 
 const modalities = {
   async agent(program) {
-    if((program === 'exit' || program === 'quit')) {
+    if (program === 'exit' || program === 'quit') {
       $.teach({ modality: null })
+      await agent(null)
       return 'Have a good one or two!'
     }
     $.teach({ thinking: true })
     const message = await agent(program, {
-      partial,
-      done
+      partial: (text) => $.teach({ thinkingFace: text }),
+      done: () => $.teach({ thinkingFace: null }),
     })
     $.teach({ thinking: false })
     return message
@@ -189,7 +303,23 @@ const modalities = {
     if(imports.runJs) {
       return JSON.stringify(await imports.runJs(program), '', 2)
     }
-  }
+  },
+
+  async tty(program) {
+    if (program === 'exit' || program === 'quit') {
+      if (ttySocket) ttySocket.close()
+      return
+    }
+    if (!ttySocket || ttySocket.readyState !== WebSocket.OPEN) {
+      return 'shell not connected'
+    }
+    const enc = new TextEncoder().encode(program + '\r')
+    const msg = new Uint8Array(1 + enc.length)
+    msg[0] = 0x01
+    msg.set(enc, 1)
+    ttySocket.send(msg)
+    return null
+  },
 
 }
 
@@ -274,6 +404,35 @@ Type \`<elf-name>\` to load a custom element.
     loadPath('/app/tty-elf')
     return 'connecting to clownbot...'
   },
+  'tty': async () => {
+    if (ttySocket) { ttySocket.close(); ttySocket = null }
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    const ws = new WebSocket(`${proto}://${location.host}/shell/ws`)
+    ws.binaryType = 'arraybuffer'
+    ttySocket = ws
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ AuthToken: '' }))
+      $.teach({ ttyConnected: true, modality: 'tty' })
+    }
+    ws.onmessage = (event) => {
+      if (!(event.data instanceof ArrayBuffer)) return
+      const bytes = new Uint8Array(event.data)
+      if (bytes[0] === 0x01) appendTtyOutput(new TextDecoder().decode(bytes.slice(1)))
+    }
+    ws.onclose = () => {
+      ttySocket = null
+      clearTimeout(ttyFlushTimer)
+      if (ttyBuffer.trim()) flushTtyBuffer()
+      $.teach({ ttyConnected: false, modality: null })
+      $.teach({ body: 'shell disconnected', author: 'assistant' }, mergeMessage)
+    }
+    ws.onerror = () => {
+      ttySocket = null
+      $.teach({ ttyConnected: false, modality: null })
+      $.teach({ body: 'shell unavailable — ttyd not running on this host', author: 'assistant' }, mergeMessage)
+    }
+    return 'opening shell...'
+  },
   'js': () => {
     import('./js-repl.js').then((module) => {
       imports.runJs = module.runJs
@@ -305,10 +464,10 @@ function mount(target) {
 
 $.draw((target) => {
   mount(target)
-  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace } = $.learn()
+  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading } = $.learn()
 
   const log = messages.map((message) => `
-    <div class="message -${message.author}">${marked(message.body||'').trim()}</div>
+    <div class="message -${message.author}">${message.author === 'assistant' && ttyConnected ? `<pre class="tty-out">${escapeHyperText(message.body||'')}</pre>` : marked(message.body||'').trim()}</div>
   `).join('')
 
   return `
@@ -320,6 +479,7 @@ $.draw((target) => {
               ${marked(thinkingFace || '').trim()}
             </div>
           `:''}
+          ${ttyLive ? `<div class="message -assistant"><pre class="tty-out">${escapeHyperText(ttyLive)}</pre></div>` : ''}
         </div>
       </div>
       <form>
@@ -328,23 +488,26 @@ $.draw((target) => {
             <flying-disk></flying-disk>
           </div>
         ` : ''}
-
-        ${secureEntry ? `
-          <input
-            type="password"
-            data-bind
-            name="messageText"
-            placeholder="help"
-            value="${escapeHyperText(messageText)}">
-        ` : `
-          <textarea
-            data-bind
-            name="messageText"
-            placeholder="help"
-            ${messageHeight ? `style="height: ${messageHeight}px"`:''}
-            value="${escapeHyperText(messageText)}"
-          ></textarea>
-        `}
+        <div class="compose-row">
+          <button type="button" class="compose-btn mic-btn${listening ? ' -active' : ''}${voskLoading ? ' -loading' : ''}" data-mic>${icon(voskLoading ? 'hourglass-split' : listening ? 'record-circle' : 'mic')}</button>
+          ${secureEntry ? `
+            <input
+              type="password"
+              data-bind
+              name="messageText"
+              placeholder="help"
+              value="${escapeHyperText(messageText)}">
+          ` : `
+            <textarea
+              data-bind
+              name="messageText"
+              placeholder="${ttyConnected ? 'say or type a command' : 'help'}"
+              ${messageHeight ? `style="height: ${messageHeight}px"`:''}
+              value="${escapeHyperText(messageText)}"
+            ></textarea>
+          `}
+          <button type="submit" class="compose-btn send-btn">${icon('send')}</button>
+        </div>
       </form>
   `
 }, {
@@ -453,6 +616,15 @@ function clearCursor(target) {
 }
 
 
+$.when('click', '[data-mic]', async () => {
+  const { listening } = $.learn()
+  if (listening) {
+    stopVosk()
+  } else {
+    await startVosk()
+  }
+})
+
 $.when('keypress', 'form [name="messageText"]', (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
@@ -479,6 +651,7 @@ async function execute(message, options={}) {
     $.teach({ body: message, author: 'human' }, mergeMessage)
   }
 
+  _voskCommitted = ''
   $.teach({ historyCursor: null, messageHeight: null, messageText: '', messageDraft: '' })
 
   if(message.startsWith('<')) {
@@ -681,6 +854,54 @@ $.style(`
     pointer-events: none;
   }
 
+  & .icon {
+    display: inline-block;
+    width: 1em; height: 1em;
+    background: currentColor;
+    -webkit-mask: var(--i) center/contain no-repeat;
+    mask: var(--i) center/contain no-repeat;
+    vertical-align: middle;
+  }
+
+  & .compose-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: end;
+  }
+
+  & .compose-btn {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 8px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: rgba(255,255,255,.5);
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  & .mic-btn { font-size: .85rem; }
+  & .mic-btn.-active { color: #fb4934; }
+  & .mic-btn.-loading { opacity: .5; }
+
+  & .send-btn { color: var(--root-theme, mediumseagreen); font-size: 1.1rem; }
+  & .send-btn:hover { color: white; }
+
+  & .tty-out {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: 'Recursive', monospace;
+    font-variation-settings: "MONO" 1;
+    font-size: .85rem;
+    margin: 0;
+  }
+
   & form input,
   & form textarea {
     width: 100%;
@@ -809,6 +1030,7 @@ $.when('keydown', '[name="messageText"]', (event) => {
 
 $.when('input', '[name="messageText"]', (event) => {
   const { value } = event.target;
+  _voskCommitted = value
   $.teach({ messageDraft: value, messageHeight: event.target.scrollHeight })
 });
 

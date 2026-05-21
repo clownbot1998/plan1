@@ -284,7 +284,7 @@ function addIsolation(res) {
 // Pages that use blob workers with fetch (vosk-browser) can't run under COEP —
 // Safari treats blob workers as null-origin, blocking same-origin fetches.
 // ffmpeg pages still need COEP for SharedArrayBuffer.
-const NO_COEP_PATHS = ['/app/hail-mary'];
+const NO_COEP_PATHS = ['/app/hail-mary', '/app/ur-shell'];
 
 Deno.serve({ port: PORT }, async (request) => {
   const res = await handleRequest(request);
@@ -470,6 +470,33 @@ async function handleRequest(request) {
       return new Response(data, {
         status: resp.status,
         headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
+      })
+    } catch (e) {
+      return new Response(JSON.stringify({ error: String(e) }), { status: 502, headers: { 'content-type': 'application/json' } })
+    }
+  }
+
+  // /api/anthropic → Anthropic messages API proxy
+  if (path === '/api/anthropic') {
+    const apiKey = safeEnv('ANTHROPIC_API_KEY')
+    if (!apiKey) return new Response('ANTHROPIC_API_KEY not configured', { status: 503 })
+    try {
+      const body = await request.text()
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body,
+      })
+      return new Response(resp.body, {
+        status: resp.status,
+        headers: {
+          'content-type': resp.headers.get('content-type') || 'application/json',
+          'access-control-allow-origin': '*',
+        },
       })
     } catch (e) {
       return new Response(JSON.stringify({ error: String(e) }), { status: 502, headers: { 'content-type': 'application/json' } })
@@ -691,6 +718,27 @@ async function handleRequest(request) {
         },
       });
     } catch {
+      // proxy missing model zips from alphacephei.com so blob workers get same-origin response
+      if (path.endsWith('.zip') && path.includes('/models/vosk-')) {
+        const modelFile = path.split('/').pop();
+        const upstream = `https://alphacephei.com/vosk/models/${modelFile}`;
+        try {
+          const upstreamRes = await fetch(upstream);
+          if (upstreamRes.ok) {
+            const data = await upstreamRes.arrayBuffer();
+            return new Response(data, {
+              headers: {
+                'content-type': 'application/zip',
+                'content-length': String(data.byteLength),
+                'content-encoding': 'identity',
+                'cache-control': 'no-transform',
+                'access-control-allow-origin': '*',
+                'cross-origin-resource-policy': 'cross-origin',
+              },
+            });
+          }
+        } catch { /* fall through */ }
+      }
       return new Response('Not Found', { status: 404 });
     }
   }

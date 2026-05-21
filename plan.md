@@ -142,7 +142,7 @@ the browser is the workstation. this is the computer. no laptop required.
 - [x] `/etc/systemd/system/plan1.service` — deno run direct, User=clownbot, Restart=always
 - [x] `/etc/systemd/system/ttyd.service` — `ttyd -p 7681 -W bash`, Restart=always
 - [x] `systemctl enable --now plan1 ttyd caddy`
-- [ ] reboot test: both services come back up, caddy routes correctly
+- [x] reboot test: both services come back up, caddy routes correctly
 
 ### step 4 — deploy.sh (git → live)
 
@@ -159,9 +159,11 @@ the browser is the workstation. this is the computer. no laptop required.
 
 ### later — path b: ur-shell.js → ttyd websocket
 
-- [ ] ur-shell.js opens WebSocket to `/shell/ws`
-- [ ] speaks ttyd wire protocol: `'0' + input` → stdin, `'0' + output` ← stdout
-- [ ] ANSI output rendered natively (xterm.js vendored, or minimal escape parser)
+- [x] ur-shell.js opens WebSocket to `/shell/ws`
+- [x] speaks ttyd wire protocol: binary 0x01 prefix for input/output
+- [x] ANSI output stripped, rendered as `<pre>` in message stream
+- [x] voice input via vosk (English model) — partials in textarea, final result auto-sends
+- [x] compose-row layout: mic (left) | textarea (center) | send (right)
 - [ ] resize events wired to window manager dimensions
 - [ ] shell feels native to plan1, not a box inside a box
 
