@@ -56,6 +56,7 @@ const _serverSecret = safeEnv('PLAN1_SESSION_SECRET') || crypto.randomUUID();
 const _sessionToken = _passphrase ? await sha256hex(_passphrase + _serverSecret) : '';
 
 const SESSION_COOKIE = 'plan1_session';
+const _deployKey = safeEnv('PLAN1_DEPLOY_KEY');
 
 function checkAuth(request) {
   if (!_sessionToken) return true; // no passphrase set = open (localhost dev)
@@ -502,6 +503,24 @@ async function handleRequest(request) {
     } catch (e) {
       return new Response(JSON.stringify({ error: String(e) }), { status: 502, headers: { 'content-type': 'application/json' } })
     }
+  }
+
+  // /api/deploy — git pull + build + restart; auth via X-Deploy-Key header or ?key= param
+  if (path === '/api/deploy' && request.method === 'POST') {
+    const key = request.headers.get('x-deploy-key') || url.searchParams.get('key')
+    if (!_deployKey || key !== _deployKey) return new Response('unauthorized', { status: 401 })
+    const dir = new URL(import.meta.url).pathname.replace('/server.js', '')
+    const run = async (cmd) => {
+      const p = new Deno.Command('bash', { args: ['-c', cmd], cwd: dir, stdout: 'piped', stderr: 'piped' })
+      const { stdout, stderr } = await p.output()
+      return new TextDecoder().decode(stdout) + new TextDecoder().decode(stderr)
+    }
+    const log = []
+    log.push(await run('git pull 2>&1'))
+    log.push(await run('./plan1.sh build 2>&1'))
+    // restart: replace current process
+    new Deno.Command('bash', { args: ['-c', `sleep 1 && kill -HUP ${Deno.pid}`], cwd: dir }).spawn()
+    return new Response(log.join('\n'), { headers: { 'content-type': 'text/plain' } })
   }
 
   // /shell/tools → MCP-shaped JSON index of PATH commands
