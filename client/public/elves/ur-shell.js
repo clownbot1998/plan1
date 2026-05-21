@@ -406,6 +406,10 @@ Type \`<elf-name>\` to load a custom element.
   },
   'tty': async () => {
     if (ttySocket) { ttySocket.close(); ttySocket = null }
+    const authCheck = await fetch('/shell/', { method: 'HEAD' })
+    if (authCheck.status === 401 || authCheck.redirected && authCheck.url.includes('admin')) {
+      return 'shell requires auth — [login](/admin?next=/)'
+    }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     const ws = new WebSocket(`${proto}://${location.host}/shell/ws`)
     ws.binaryType = 'arraybuffer'
