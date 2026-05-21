@@ -315,7 +315,7 @@ const modalities = {
     }
     const enc = new TextEncoder().encode(program + '\r')
     const msg = new Uint8Array(1 + enc.length)
-    msg[0] = 0x01
+    msg[0] = 0x30
     msg.set(enc, 1)
     ttySocket.send(msg)
     return null
@@ -422,7 +422,7 @@ Type \`<elf-name>\` to load a custom element.
       if (event.data instanceof ArrayBuffer) {
         const bytes = new Uint8Array(event.data)
         console.log('[tty] binary frame, type byte:', bytes[0], 'len:', bytes.length)
-        if (bytes[0] === 0x01) appendTtyOutput(new TextDecoder().decode(bytes.slice(1)))
+        if (bytes[0] === 0x30) appendTtyOutput(new TextDecoder().decode(bytes.slice(1)))
       } else if (typeof event.data === 'string') {
         console.log('[tty] text frame, first char:', JSON.stringify(event.data[0]), 'preview:', JSON.stringify(event.data.slice(0, 40)))
         if (event.data[0] === '0') appendTtyOutput(event.data.slice(1))
@@ -683,10 +683,10 @@ async function execute(message, options={}) {
 
   if (modality === 'tty') {
     if (ttySocket && ttySocket.readyState === WebSocket.OPEN) {
-      const frame = new Uint8Array(message.length + 2)
-      frame[0] = 0x01
-      for (let i = 0; i < message.length; i++) frame[i + 1] = message.charCodeAt(i)
-      frame[frame.length - 1] = 0x0d
+      const enc = new TextEncoder().encode(message + '\r')
+      const frame = new Uint8Array(1 + enc.length)
+      frame[0] = 0x30
+      frame.set(enc, 1)
       ttySocket.send(frame.buffer)
     }
     return
