@@ -505,6 +505,26 @@ async function handleRequest(request) {
     }
   }
 
+  // /api/exec — run a shell command, return output; requires session auth
+  if (path === '/api/exec' && request.method === 'POST') {
+    if (!checkAuth(request)) return new Response('unauthorized', { status: 401 })
+    let body
+    try { body = await request.json() } catch { return new Response('bad json', { status: 400 }) }
+    const { command, args } = body
+    if (!command || typeof command !== 'string' || command.includes('/') || command.includes('..')) {
+      return new Response(JSON.stringify({ error: 'invalid command' }), { status: 400, headers: { 'content-type': 'application/json' } })
+    }
+    const argList = typeof args === 'string' ? args.split(/\s+/).filter(Boolean) : (Array.isArray(args) ? args : [])
+    try {
+      const p = new Deno.Command(command, { args: argList, stdout: 'piped', stderr: 'piped' })
+      const { stdout, stderr, code } = await p.output()
+      const output = new TextDecoder().decode(stdout) + new TextDecoder().decode(stderr)
+      return new Response(JSON.stringify({ output, code }), { headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } })
+    } catch (e) {
+      return new Response(JSON.stringify({ error: String(e), code: 1 }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+  }
+
   // /api/deploy — git pull + build + restart; auth via X-Deploy-Key header or ?key= param
   if (path === '/api/deploy' && request.method === 'POST') {
     const key = request.headers.get('x-deploy-key') || url.searchParams.get('key')
