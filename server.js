@@ -889,17 +889,6 @@ async function handleRequest(request) {
     }
   }
 
-  // proxy geckos WebRTC signaling to plan98-multiplayer
-  if (path.startsWith('/.wrtc/')) {
-    const target = new URL(request.url);
-    target.hostname = 'localhost';
-    target.port = '9208';
-    target.protocol = 'http:';
-    const headers = new Headers(request.headers);
-    headers.set('host', 'localhost:9208');
-    return fetch(target.toString(), { method: request.method, headers, body: request.body });
-  }
-
   // plan98 serves from /public/ as root; rewrite that prefix so imported assets resolve
   if (path.startsWith('/public/')) {
     const rewritten = new URL(request.url);
