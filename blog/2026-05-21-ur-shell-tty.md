@@ -1,31 +1,61 @@
-# ur-shell gets a real shell
+# the browser is a terminal now
 
-a browser tab with a text box. a vps with a shell. now they're the same thing.
+one session. a lot of protocol archaeology. here's everything that landed.
 
 ---
 
-the previous session tried to wire ur-shell to ttyd over WebSocket and stalled on output never arriving. this session finished the job. here's what it took, in order of discovery:
+## tty: what was broken
 
-**the server was the wrong one.** deploy.sh was running on sally (the local box) not grapevine (the vps). `local.tychi.me` resolves to `164.92.88.188`. this machine is `199.48.123.66`. every deploy landed in a void. found it by comparing ETags: the live file was 30892 bytes, the one on localhost:1998 was 31294 bytes. different machines.
+the previous session wired ur-shell to ttyd over WebSocket and stalled — output never arrived. this session found out why, in order:
 
-**the WebSocket was missing its subprotocol.** ttyd registers as protocol `tty` in libwebsockets. without `['tty']` in the WebSocket constructor, the upgrade succeeds but ttyd never initializes the session. the socket opens, sends nothing. fixed with one word: `new WebSocket(url, ['tty'])`.
+**wrong machine.** `local.tychi.me` resolves to grapevine (`164.92.88.188`). the machine running claude is sally (`199.48.123.66`). every deploy was going into a void. found it by comparing ETags on the live file vs localhost:1998 — different sizes, different machines. fixed by pushing to tangled.org and deploying via SSH to the right box.
 
-**the type byte was wrong.** old ttyd used `0x01` as the data prefix. ttyd 1.7.7 uses ASCII `'0'` (0x30). same for sending: input frames need `0x30` prefix, not `0x01`. we were looking for `bytes[0] === 0x01` in a stream of `48`s. the console logs told us everything once we could read them.
+**missing subprotocol.** ttyd registers protocol `tty` in libwebsockets. without `new WebSocket(url, ['tty'])`, the upgrade completes but ttyd never initializes the session. socket opens, sends nothing, waits forever.
 
-**the send path never reached the socket.** `execute()` with modality `tty` was calling `modalities['tty'](message)` which re-opened the WebSocket instead of sending to the existing one. added a fast path: when modality is `tty`, encode the message with the `0x30` prefix and send directly.
+**wrong type byte.** old ttyd used `0x01` as the data-frame prefix. ttyd 1.7.7 uses ASCII `'0'` (`0x30`) — same for both directions. we were checking `bytes[0] === 0x01` in a stream of `48`s. one character fix.
+
+**send path re-opened the socket.** `execute()` with modality `tty` was dispatching to `modalities['tty'](message)` which ran the setup command and opened a new WebSocket instead of sending to the existing one. added a fast path: when modality is `tty`, encode with `0x30` prefix and send directly.
 
 after all that: `whoami` → `clownbot`. `echo hello` → `hello`. `clownbot@grapevine:~/plan1$` in the browser.
 
 ---
 
-then the user asked: can we go to a random new tmux instead of the clownbot session? can we `tty <id>` to hit a specific one?
+## session routing
 
-the answer was yes. server.js now spawns ephemeral ttyd instances (`--once`, random port 7700–7900) per session name. named sessions are cached so `tty work` reconnects. `tty` without an arg spawns fresh. the persistent clownbot ttyd on 7681 stays for when you want that specific window.
+`tty` alone was landing in the clownbot tmux session — the one with claude running. not ideal for a shell.
+
+server.js now spawns ephemeral ttyd instances (`--once`, ports 7700–7900) per session name. `tty` opens a fresh tmux session. `tty work` attaches to (or creates) one named `work`. named sessions are cached so reconnecting reuses the same shell. the persistent clownbot ttyd on 7681 stays untouched.
 
 ---
 
-this is the grapevine as terminal. not a terminal emulator embedded in the OS window — a real shell, proxied through the plan1 server, rendered as messages. voice input from vosk feeds into the same text area. the send button is the enter key.
+## inline admin login
 
-the clown on stilts types into the browser and the vps types back.
+`admin` command in ur-shell: enters secure-entry mode, masks the textarea, POSTs to `/api/login`, sets the session cookie. no redirect to `/admin/`. the `modalities.auth` handler existed but was calling an undefined `auth()` function — implemented that too.
+
+---
+
+## agent with tool calling
+
+`agent` command: picks Claude or Ollama, starts a chat session. Claude gets a curated set of ~40 shell tools from `/shell/tools`. when Claude returns a `tool_use` block, the agent calls `/api/exec` on the server, runs the command, feeds output back as `tool_result`, and loops up to 5 rounds before returning. tool calls show inline as `→ ls -la` with the output in a code block.
+
+`gg-claude.js` now tracks `content_block_start` / `input_json_delta` events in the SSE stream to accumulate tool input JSON, yields a `toolCalls` chunk on `message_stop` when `stop_reason === 'tool_use'`.
+
+---
+
+## deploy without SSH
+
+`deploy.sh` now does: `git push` → `curl -X POST https://local.tychi.me/api/deploy -H "X-Deploy-Key: ..."`. the server pulls, builds, and restarts itself. no SSH required from the local machine. the deploy key lives in `.env` on both ends.
+
+this is the first session where future deploys are fully autonomous from the conversation — push is live.
+
+---
+
+## resize
+
+`sendTtyResize(ws)` fires on connect and on `window.resize`. sends a binary frame with type byte `0x34` and `{"columns":N,"rows":N}` JSON. the shell now fits the viewport instead of rendering at ttyd's default 80×24.
+
+---
+
+`whoami` came back `clownbot`. the agent called `ls` and read the directory. the clown on stilts is home.
 
 — FACADE55-BABE-C0DE-CAFE-DEADBEEF2026
