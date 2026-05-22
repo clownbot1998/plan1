@@ -3,8 +3,6 @@ import diffHTML from 'diffhtml'
 
 import { overrideButton, checkButton, checkAxis } from './debug-gamepads.js'
 
-import geckos from '@geckos.io/client'
-
 const controllerVariations = [
   'elegant',
   'classic',
@@ -45,27 +43,60 @@ const $ = elf('couch-coop', {
   3: null
 })
 
-const config = plan98.env.PLAN98_REALTIME ?
-  {
-    url: plan98.env.PLAN98_REALTIME,
-    port: 443,
-    cors: { origin: '*' }
-  } :
-  {
-    port: 9208
-  }
+// WebSocket relay — replaces geckos/WebRTC
+const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+let _ws = null
+let _wsReady = false
+const _wsQueue = []
+const _listeners = {}
 
-export const channel = geckos(config) // default port is 9208
+function wsConnect() {
+  const ws = new WebSocket(`${proto}://${location.host}/api/party`)
+  _ws = ws
+  ws.onopen = () => {
+    _wsReady = true
+    $.teach({ geckosReady: true })
+    _wsQueue.splice(0).forEach(m => ws.send(m))
+  }
+  ws.onmessage = (e) => {
+    let msg
+    try { msg = JSON.parse(e.data) } catch { return }
+    const cbs = _listeners[msg.type] || []
+    cbs.forEach(cb => cb(msg.payload))
+  }
+  ws.onclose = () => { _wsReady = false; setTimeout(wsConnect, 2000) }
+  ws.onerror = () => ws.close()
+}
+wsConnect()
+
+export const channel = {
+  emit(type, payload) {
+    const msg = JSON.stringify({ type, payload })
+    if (_wsReady && _ws?.readyState === WebSocket.OPEN) _ws.send(msg)
+    else _wsQueue.push(msg)
+  },
+  on(type, cb) {
+    if (!_listeners[type]) _listeners[type] = []
+    _listeners[type].push(cb)
+  },
+  onConnect(cb) {
+    if (_wsReady) cb(null)
+    else {
+      const orig = $.learn
+      const check = () => { if ($.learn().geckosReady) { cb(null) } }
+      _listeners['__connect'] = _listeners['__connect'] || []
+      _listeners['__connect'].push(check)
+      const unsub = setInterval(() => { if ($.learn().geckosReady) { cb(null); clearInterval(unsub) } }, 100)
+    }
+  }
+}
 
 function joinParty(id, slot) {
-  channel.emit('joinParty', {
-    partyId: id,
-    slot
-  });
+  channel.emit('joinParty', { partyId: id, slot })
 }
 
 export function gamestateUplink(data) {
-  if($.learn().geckosReady) {
+  if ($.learn().geckosReady) {
     channel.emit('gamestateUpload', data)
   }
 }
@@ -77,10 +108,8 @@ export function gamestateDownlink(callback) {
 }
 
 function notifyGamesOfState(data) {
-  if($.learn().geckosReady) {
-    gamestateCallbacks.forEach(callback => {
-      callback(data)
-    })
+  if ($.learn().geckosReady) {
+    gamestateCallbacks.forEach(callback => callback(data))
   }
 }
 

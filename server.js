@@ -290,6 +290,7 @@ const NO_COEP_PATHS = ['/app/hail-mary', '/app/ur-shell'];
 
 const TTYD_BIN = '/home/clownbot/bin/ttyd'
 const SESSION_PORTS = new Map() // sessionName → port
+const partyRooms = new Map()   // partyId → { host, slots[4] }
 
 async function spawnTtydSession(sessionName) {
   if (SESSION_PORTS.has(sessionName)) {
@@ -650,6 +651,53 @@ async function handleRequest(request) {
     socket.onopen = () => { reloadClients.add(socket); };
     socket.onclose = () => { reloadClients.delete(socket); };
     socket.onerror = () => { reloadClients.delete(socket); };
+    return response;
+  }
+
+  // /api/party — WebSocket multiplayer relay for couch-coop
+  if (path === '/api/party' && request.headers.get('upgrade') === 'websocket') {
+    const { socket, response } = Deno.upgradeWebSocket(request);
+    socket.onopen = () => {
+      socket._partyId = null;
+      socket._isHost = false;
+      socket._slot = null;
+    };
+    socket.onmessage = (e) => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+      const { type, payload } = msg;
+
+      if (type === 'joinParty') {
+        const { partyId, slot } = payload;
+        socket._partyId = partyId;
+        if (!partyRooms.has(partyId)) partyRooms.set(partyId, { host: null, slots: new Array(4).fill(null) });
+        const room = partyRooms.get(partyId);
+        if (slot === 'host') {
+          socket._isHost = true;
+          room.host = socket;
+        } else {
+          socket._slot = parseInt(slot);
+          room.slots[socket._slot] = socket;
+          if (room.host) room.host.send(JSON.stringify({ type: 'playerJoined', payload: { slot } }));
+        }
+      } else if (type === 'gamestateUpload') {
+        const room = partyRooms.get(socket._partyId);
+        if (!room) return;
+        room.slots.forEach(s => { if (s && s.readyState === WebSocket.OPEN) s.send(JSON.stringify({ type: 'gamestateDownload', payload })); });
+      } else if (type === 'gamepadSnapshot') {
+        const room = partyRooms.get(socket._partyId);
+        if (room?.host?.readyState === WebSocket.OPEN) room.host.send(JSON.stringify({ type: 'gamepadUpdate', payload }));
+      }
+    };
+    socket.onclose = () => {
+      if (!socket._partyId) return;
+      const room = partyRooms.get(socket._partyId);
+      if (!room) return;
+      if (socket._isHost) { room.host = null; }
+      else if (socket._slot !== null) { room.slots[socket._slot] = null; }
+      if (!room.host && room.slots.every(s => !s)) partyRooms.delete(socket._partyId);
+    };
+    socket.onerror = socket.onclose;
     return response;
   }
 
