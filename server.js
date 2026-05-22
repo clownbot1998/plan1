@@ -841,6 +841,13 @@ async function handleRequest(request) {
     }
   }
 
+  // plan98 serves from /public/ as root; rewrite that prefix so imported assets resolve
+  if (path.startsWith('/public/')) {
+    const rewritten = new URL(request.url);
+    rewritten.pathname = path.slice('/public'.length);
+    return fetch(rewritten.toString());
+  }
+
   const res = await serveDir(request, { fsRoot: DIST, quiet: true });
 
   if (res.status === 404) {
