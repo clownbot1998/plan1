@@ -154,6 +154,7 @@ function buildEnvScript() {
     PLAN98_WAS_HOST:     safeEnv('PLAN98_WAS_HOST', 'http://localhost:1088'),
     PLAN98_WAS_SPACE_ID: _spaceId,
     PLAN98_WAS_SIGNER:   _signerJson,
+    PLAN98_REALTIME:     safeEnv('PLAN98_REALTIME'),
   };
   const entries = Object.entries(env).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(', ');
   return `<script>plan98 = { env: { ${entries} }, registry: {} }</script>`;
