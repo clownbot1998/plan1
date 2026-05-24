@@ -140,7 +140,9 @@ function mount(target) {
       joinParty(target.id, 'host')
 
       channel.on('gamepadUpdate', ({ gamepad, slot, id }) => {
-        $.teach({ id, gamepad }, mergeSlot(slot))
+        const update = {}
+        update[slot] = { id, gamepad }
+        $.teach(update)
       })
 
       channel.on('error', (error) => {
@@ -152,18 +154,6 @@ function mount(target) {
   }
 
   $.teach({ booting: false })
-}
-
-function mergeSlot(slot) {
-  return (state, payload) => {
-    return {
-      ...state,
-      [slot]: {
-        ...state[slot],
-        ...payload
-      }
-    }
-  }
 }
 
 
