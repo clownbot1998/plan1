@@ -335,13 +335,14 @@ const actionEffects = {
     tiles.map((slot) => {
       if(players[slot]) {
         $.teach({
+          _slot: slot,
           dead: false,
           settingsOpen: false,
           streak: 0,
           score: newScore(),
           health: newHealth(),
           enemies: newEnemies()
-        }, mergePlayer(slot))
+        }, mergePlayer())
       }
     })
 
@@ -611,7 +612,8 @@ function processSettings(players, slot, gamepad) {
 
   $.teach({
     ...data,
-  }, mergePlayer(slot))
+    _slot: slot,
+  }, mergePlayer())
 }
 
 function releaseAll() {
@@ -648,11 +650,12 @@ const rpcHandlers = {
         if(!player) {
           $.teach({
             ...newPlayer,
+            _slot: slot,
             id,
             instrument: defaultInstruments[slot],
             circleKey: 'C',
             frequencyOffset: 0
-          }, mergePlayer(slot))
+          }, mergePlayer())
           player = $.learn().players[slot]
         }
         let {
@@ -771,12 +774,13 @@ const rpcHandlers = {
         attackNotes(slot, newNotes)
 
         $.teach({
+          _slot: slot,
           id,
           frequencyOffset,
           settingsOpen,
           circleIndex,
           activeNotes: notes
-        }, mergePlayer(slot))
+        }, mergePlayer())
       }
     })
   }
@@ -825,10 +829,10 @@ function score(slot, note) {
       if(scoringType === 'cooperative') {
         syncBoard(nextFrame)
       } else {
-        $.teach(nextFrame, mergePlayer(slot))
+        $.teach({ ...nextFrame, _slot: slot }, mergePlayer())
       }
     } else {
-      $.teach({ streak: 0 }, mergePlayer(slot))
+      $.teach({ streak: 0, _slot: slot }, mergePlayer())
     }
   }
 }
@@ -852,20 +856,21 @@ function syncBoard(nextFrame) {
   const { players, tiles } = $.learn()
   tiles.map((slot) => {
     if(players[slot]) {
-      $.teach(nextFrame, mergePlayer(slot))
+      $.teach({ ...nextFrame, _slot: slot }, mergePlayer())
     }
   })
 }
 
-function mergePlayer(slot) {
+function mergePlayer() {
   return (state, payload) => {
+    const { _slot, ...rest } = payload
     return {
       ...state,
       players: {
         ...state.players,
-        [slot]: {
-          ...state.players[slot],
-          ...payload
+        [_slot]: {
+          ...state.players[_slot],
+          ...rest
         }
       }
     }
@@ -1316,9 +1321,10 @@ function enemyLoop() {
 
 
         $.teach({
+          _slot: slot,
           enemies: nextWave,
         },
-          mergePlayer(slot)
+          mergePlayer()
         )
 
         return { dead }
@@ -1457,14 +1463,16 @@ $.when('animationend', '.split-screen .enemy-sprite', (event) => {
 
       if(health === 0) {
         $.teach({
+          _slot: slot,
           enemies: newEnemies,
           dead: true,
-        }, mergePlayer(slot))
+        }, mergePlayer())
       } else {
         $.teach({
+          _slot: slot,
           enemies: newEnemies,
           health: nextHealth
-        }, mergePlayer(slot))
+        }, mergePlayer())
       }
     }
     return
