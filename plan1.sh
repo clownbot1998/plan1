@@ -205,9 +205,46 @@ case "$CMD" in
       [ -f "$f" ] && qjs --std "$f"
     done
     ;;
+  ship)
+    # build → serve locally → prompt → commit → push → deploy
+    echo "── building ──"
+    "$0" build
+
+    # start local server if not running
+    if ! ([ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null); then
+      "$0" serve
+    fi
+
+    echo ""
+    echo "open http://localhost:$PORT to test"
+    echo ""
+    read -r -p "did you test and it works? [y/N] " answer
+    case "$answer" in
+      [yY]*)
+        echo "── committing ──"
+        git -C "$SCRIPT_DIR" add -A
+        read -r -p "commit message: " msg
+        git -C "$SCRIPT_DIR" commit -m "$msg"
+        git -C "$SCRIPT_DIR" push
+        echo "── deploying ──"
+        DEPLOY_KEY=$(grep PLAN1_DEPLOY_KEY "$SCRIPT_DIR/.env" 2>/dev/null | cut -d= -f2)
+        PLAN1_HOST=$(grep PLAN1_HOST "$SCRIPT_DIR/.env" 2>/dev/null | cut -d= -f2)
+        if [ -n "$DEPLOY_KEY" ] && [ -n "$PLAN1_HOST" ]; then
+          curl -s -X POST "${PLAN1_HOST}/api/deploy?key=${DEPLOY_KEY}" | tail -3
+        else
+          echo "no PLAN1_DEPLOY_KEY or PLAN1_HOST in .env — skipping remote deploy"
+        fi
+        ;;
+      *)
+        echo "aborted — nothing committed"
+        exit 1
+        ;;
+    esac
+    ;;
   *)
-    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|sync|deploy|watch|test|reverse-client|bootstrap]"
+    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|sync|deploy|ship|watch|test|reverse-client|bootstrap]"
     echo "  build  — generates blog pages + vendors deps into dist/"
+    echo "  ship   — build, serve locally, prompt to confirm, commit + push + deploy"
     echo "  sync   — uploads dist/ bootstrap files to WAS"
     echo "  deploy   — build + sync"
     echo "  private  — sync private/ to WAS (--pull to restore, --dry-run to preview)"
