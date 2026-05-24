@@ -10,7 +10,14 @@ const instruments = ['piano', 'bass-electric', 'bassoon', 'cello', 'clarinet', '
 
 const scoringTypes = ['cooperative', 'competitive']
 
-Tone.Transport.start();
+async function startAudio() {
+  await Tone.start()
+  Tone.Transport.start()
+  document.removeEventListener('pointerdown', startAudio)
+  document.removeEventListener('keydown', startAudio)
+}
+document.addEventListener('pointerdown', startAudio)
+document.addEventListener('keydown', startAudio)
 
 const defaultInstruments = ['piano', 'piano', 'piano', 'piano']
 
