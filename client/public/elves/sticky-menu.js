@@ -24,6 +24,7 @@ const SECTIONS = {
       { label: 'Open Clown',   href: '/app/my-computer' },
       { label: 'Paper Pocket', href: '/app/paper-pocket' },
       { label: 'Multi Task',   href: '/app/multi-task' },
+      { label: 'Couch Coop',   href: '/app/couch-coop' },
     ]
   },
   blog: {
