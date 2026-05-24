@@ -162,7 +162,7 @@ function loadInstrument(slot, instrument) {
   playerInstruments[slot] = null
   const synth = SampleLibrary.load({
     instruments: instrument,
-    baseUrl: (self.plan98.env.HEAVY_ASSET_CDN_URL || '') + "/private/tychi.1998.social/SourceCode/tonejs-instruments/samples/",
+    baseUrl: (self.plan98.env.HEAVY_ASSET_CDN_URL || 'https://cdn.plan98.org') + "/private/tychi.1998.social/SourceCode/tonejs-instruments/samples/",
     onload() {
       Tone.Transport.bpm.value = parseInt(getBpm())
       synth.release = .5;
