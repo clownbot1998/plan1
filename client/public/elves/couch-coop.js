@@ -55,13 +55,9 @@ const config = plan98.env.PLAN98_REALTIME ?
     port: 9208
   }
 
-console.log('[couch-coop] PLAN98_REALTIME:', plan98.env.PLAN98_REALTIME)
-console.log('[couch-coop] geckos config:', JSON.stringify(config))
 export const channel = geckos(config) // default port is 9208
-console.log('[couch-coop] channel created:', channel)
 
 function joinParty(id, slot) {
-  console.log('[couch-coop] joinParty emit:', { partyId: id, slot })
   channel.emit('joinParty', {
     partyId: id,
     slot
@@ -96,20 +92,16 @@ function mount(target) {
     const slot = target.getAttribute('slot')
     slotIndex = parseInt(slot)
 
-    console.log('[couch-coop] controller registering onConnect, slot:', slot)
     channel.onConnect(error => {
-      console.log('[couch-coop] controller onConnect fired, error:', error)
       if (error) {
         console.error(error.message)
         return
       }
       $.teach({ geckosReady: true })
 
-      console.log('[couch-coop] controller target.id:', target.id)
       joinParty(target.id, slotIndex)
 
       channel.on('gamestateDownload', (data) => {
-        console.log('[couch-coop] gamestateDownload received:', data)
         notifyGamesOfState(data)
       })
 
@@ -127,16 +119,13 @@ function mount(target) {
   } else {
     // host
 
-    console.log('[couch-coop] host registering onConnect')
     channel.onConnect(error => {
-      console.log('[couch-coop] host onConnect fired, error:', error)
       if (error) {
         console.error(error.message)
         return
       }
       $.teach({ geckosReady: true })
 
-      console.log('[couch-coop] host target.id:', target.id)
       joinParty(target.id, 'host')
 
       channel.on('gamepadUpdate', ({ gamepad, slot, id }) => {
