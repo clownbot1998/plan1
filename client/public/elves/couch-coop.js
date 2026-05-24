@@ -55,7 +55,10 @@ const config = plan98.env.PLAN98_REALTIME ?
     port: 9208
   }
 
+console.log('[couch-coop] PLAN98_REALTIME:', plan98.env.PLAN98_REALTIME)
+console.log('[couch-coop] geckos config:', JSON.stringify(config))
 export const channel = geckos(config) // default port is 9208
+console.log('[couch-coop] channel created:', channel)
 
 function joinParty(id, slot) {
   channel.emit('joinParty', {
@@ -92,7 +95,9 @@ function mount(target) {
     const slot = target.getAttribute('slot')
     slotIndex = parseInt(slot)
 
+    console.log('[couch-coop] controller registering onConnect, slot:', slot)
     channel.onConnect(error => {
+      console.log('[couch-coop] controller onConnect fired, error:', error)
       if (error) {
         console.error(error.message)
         return
@@ -119,7 +124,9 @@ function mount(target) {
   } else {
     // host
 
+    console.log('[couch-coop] host registering onConnect')
     channel.onConnect(error => {
+      console.log('[couch-coop] host onConnect fired, error:', error)
       if (error) {
         console.error(error.message)
         return
