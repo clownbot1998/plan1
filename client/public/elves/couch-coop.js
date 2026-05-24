@@ -61,6 +61,7 @@ export const channel = geckos(config) // default port is 9208
 console.log('[couch-coop] channel created:', channel)
 
 function joinParty(id, slot) {
+  console.log('[couch-coop] joinParty emit:', { partyId: id, slot })
   channel.emit('joinParty', {
     partyId: id,
     slot
@@ -104,9 +105,11 @@ function mount(target) {
       }
       $.teach({ geckosReady: true })
 
+      console.log('[couch-coop] controller target.id:', target.id)
       joinParty(target.id, slotIndex)
 
       channel.on('gamestateDownload', (data) => {
+        console.log('[couch-coop] gamestateDownload received:', data)
         notifyGamesOfState(data)
       })
 
@@ -133,6 +136,7 @@ function mount(target) {
       }
       $.teach({ geckosReady: true })
 
+      console.log('[couch-coop] host target.id:', target.id)
       joinParty(target.id, 'host')
 
       channel.on('gamepadUpdate', ({ gamepad, slot, id }) => {
