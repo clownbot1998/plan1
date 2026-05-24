@@ -10,14 +10,6 @@ const instruments = ['piano', 'bass-electric', 'bassoon', 'cello', 'clarinet', '
 
 const scoringTypes = ['cooperative', 'competitive']
 
-async function startAudio() {
-  await Tone.start()
-  Tone.Transport.start()
-  document.removeEventListener('pointerdown', startAudio)
-  document.removeEventListener('keydown', startAudio)
-}
-document.addEventListener('pointerdown', startAudio)
-document.addEventListener('keydown', startAudio)
 
 const defaultInstruments = ['piano', 'piano', 'piano', 'piano']
 
@@ -2408,14 +2400,17 @@ function uuidv4() {
 }
 
 
+document.addEventListener('pointerdown', startAudioContext)
 document.addEventListener('keydown', startAudioContext)
 
-function startAudioContext() {
-  document.querySelector('.newgame-container').remove()
+async function startAudioContext() {
+  await Tone.start()
+  Tone.Transport.start()
+  document.querySelector('.newgame-container')?.remove()
+  document.removeEventListener('pointerdown', startAudioContext)
   document.removeEventListener('keydown', startAudioContext)
 }
 
 $.when('pointerdown', '.newgame-container', (event) => {
-  document.removeEventListener('keydown', startAudioContext)
   event.target.remove()
 })
