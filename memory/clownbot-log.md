@@ -57,4 +57,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `FACADE55-BABE-C0DE-CAFE-DEADBEEF2026` | 2026-05-21 | ur-shell tty working end-to-end: ttyd subprotocol, 0x30 type byte, session routing. `whoami` → `clownbot`. the browser is now a terminal. |
 
+| `FEEDFACE-C0DE-CAFE-DEAD-BEEFBABE1998` | 2026-05-23 | couch-coop port: three doors (blank screen, no connection, sandbox eval). discovered plan98.js sandbox rule — reducers can't close over outer scope. fixed mergeSlot and mergePlayer in couch-coop, player-piano, song-wave. inputs move across the wire. the circus is multiplayer. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
