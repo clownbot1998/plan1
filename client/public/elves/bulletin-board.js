@@ -96,6 +96,7 @@ const $ = Self(tag, {
   resizing: null,
   mode: 'pan',
   menuOpen: false,
+  launchHref: null,
   panX: initialPanX,
   panY: initialPanY,
   panXmod: 0,
@@ -133,6 +134,9 @@ function boardUrl(id) {
 }
 
 function subscribe(target) {
+  if (!history.state?.type) {
+    history.replaceState({ type: 'bulletin-board-launch', href: null }, '', location.href)
+  }
   const id = target.id || 'default'
   braid.fetch(boardUrl(id), {
     subscribe: true,
@@ -190,6 +194,7 @@ function createCard(x, y, w, h) {
         text: '',
         color: '#fffde7',
         saga: '',
+        href: '',
         createdAt: Date.now(),
         startDate: '',
         endDate: '',
@@ -360,6 +365,7 @@ function renderCard(id, card, focused, linkSource) {
       <textarea class="card-body" data-card-id="${id}" ${isFocused ? '' : 'tabindex="-1"'}
         placeholder="...">${escapeHtml(card.text || '')}</textarea>
       <button class="card-resize-se" data-resize="${id}" data-direction="se"></button>
+      ${card.href ? `<button class="card-play" data-play-card="${id}" title="open"><sl-icon name="play-fill"></sl-icon></button>` : ''}
     </div>
   `
 }
@@ -376,6 +382,7 @@ function renderSidebarBody(id, cards, edgeTypes = {}) {
     <dl class="sidebar-dl">
       <dt>Position</dt><dd><span class="sidebar-pos">x ${Math.round(card.x)}, y ${Math.round(card.y)}</span></dd>
       <dt>Size</dt><dd><span class="sidebar-sz">${Math.round(card.w)} × ${Math.round(card.h)}</span></dd>
+      <dt>Href</dt><dd><input class="sidebar-href" type="url" data-href-card="${id}" value="${escapeHtml(card.href || '')}" placeholder="https://..."></dd>
       <dt>Start</dt><dd><input class="sidebar-date" type="date" data-date-field="startDate" data-card-id="${id}" value="${card.startDate || ''}"></dd>
       <dt>End</dt><dd><input class="sidebar-date" type="date" data-date-field="endDate" data-card-id="${id}" value="${card.endDate || ''}"></dd>
       <dt>Links out</dt><dd>${linkEntries.length > 0 ? linkEntries.map(([lid, l]) => {
@@ -629,6 +636,19 @@ function patchCardsLayer(cardsLayer, cards, focused, linkSource, grabbing) {
       if (ta && document.activeElement !== ta) {
         ta.value = card.text || ''
       }
+
+      // Sync play button
+      const existingPlay = el.querySelector('.card-play')
+      if (card.href && !existingPlay) {
+        const btn = document.createElement('button')
+        btn.className = 'card-play'
+        btn.dataset.playCard = id
+        btn.title = `open`
+        btn.innerHTML = '<sl-icon name="play-fill"></sl-icon>'
+        el.appendChild(btn)
+      } else if (!card.href && existingPlay) {
+        existingPlay.remove()
+      }
     }
   }
 
@@ -639,17 +659,26 @@ function patchCardsLayer(cardsLayer, cards, focused, linkSource, grabbing) {
 }
 
 function renderCompassButtons(mode) {
-  const actions = [
-    { cls: 'c-pan',    icon: '✛', label: 'pan',      m: 'pan'      },
-    { cls: 'c-create', icon: '✦', label: 'create',   m: 'create'   },
-    { cls: 'c-link',   icon: '⇢', label: 'link',     m: 'link'     },
-    { cls: 'c-dream',  icon: '✧', label: 'daydream', m: 'daydream' },
-  ]
-  return actions.map(a => `
-    <button class="${a.cls}${mode === a.m ? ' active' : ''}" data-mode="${a.m}" title="${a.label}">
-      <span>${a.icon}</span>
+  return `
+    <button class="c-manage${mode === 'manage' ? ' active' : ''}" data-mode="manage" title="manage cards">
+      <sl-icon name="pencil-square"></sl-icon>
     </button>
-  `).join('')
+    <button class="c-browse" data-action="browse" title="browse files">
+      <sl-icon name="folder2-open"></sl-icon>
+    </button>
+    <button class="c-qr" data-action="qr" title="share via QR">
+      <sl-icon name="qr-code"></sl-icon>
+    </button>
+    <button class="c-move${mode === 'pan' ? ' active' : ''}" data-mode="pan" title="move canvas">
+      <sl-icon name="arrows-move"></sl-icon>
+    </button>
+    <button class="c-link${mode === 'link' ? ' active' : ''}" data-mode="link" title="link cards">
+      <sl-icon name="link-45deg"></sl-icon>
+    </button>
+    <button class="c-camera" data-action="camera" title="camera">
+      <sl-icon name="camera-fill"></sl-icon>
+    </button>
+  `
 }
 
 // ── draw ──────────────────────────────────────────────────────────────────────
@@ -679,7 +708,7 @@ function mount(target) {
       <div class="create-preview"></div>
     </div>
     <div class="the-compass" data-open="false" style="--belt-offset-x:0px; --belt-offset-y:0px;">
-      <button class="root" data-toggle-menu title="menu (drag to move)">${modeIcon(mode)}</button>
+      <button class="root" data-toggle-menu title="menu (drag to move)"><sl-icon name="joystick"></sl-icon></button>
       ${renderCompassButtons(mode)}
     </div>
     <div class="card-sidebar" data-open="false">
@@ -692,6 +721,8 @@ function mount(target) {
         <div class="sidebar-body"></div>
       </div>
     </div>
+    <div class="card-launch" data-open="false"></div>
+    <div class="camera-overlay" data-open="false"></div>
   `
 
   target.querySelector('.bulletin-canvas').style.backgroundImage = stars
@@ -701,7 +732,7 @@ function mount(target) {
 function update(target) {
   const { panX, panY, zoom, cards, mode, menuOpen, beltOffsetX, beltOffsetY,
           focusedCard, linkSource, isDrawing, createStartX, createStartY, createX, createY,
-          sidebarOpen, sidebarCard, grabbing, edgeTypes } = $.learn()
+          sidebarOpen, sidebarCard, grabbing, edgeTypes, launchHref } = $.learn()
 
   const workspace = target.querySelector('.workspace')
   workspace.style.setProperty('--pan-x', panX + 'px')
@@ -713,12 +744,19 @@ function update(target) {
   compass.style.setProperty('--belt-offset-x', beltOffsetX + 'px')
   compass.style.setProperty('--belt-offset-y', beltOffsetY + 'px')
 
-  const rootBtn = compass.querySelector('.root')
-  if (rootBtn) rootBtn.textContent = modeIcon(mode)
-
   compass.querySelectorAll('[data-mode]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode)
   })
+
+  const launchEl = target.querySelector('.card-launch')
+  if (launchEl) {
+    const currentHref = launchEl.dataset.href || ''
+    launchEl.dataset.open = launchHref ? 'true' : 'false'
+    if ((launchHref || '') !== currentHref) {
+      launchEl.dataset.href = launchHref || ''
+      launchEl.innerHTML = launchHref ? `<iframe src="${escapeHtml(launchHref)}"></iframe>` : ''
+    }
+  }
 
   const cardsLayer = target.querySelector('.cards-layer')
   patchCardsLayer(cardsLayer, cards, focusedCard, linkSource, grabbing)
@@ -804,7 +842,7 @@ $.when('pointerdown', '.bulletin-canvas', e => {
     return
   }
 
-  if (mode === 'create') {
+  if (mode === 'manage') {
     const [cx, cy] = clientToCanvas(e.clientX, e.clientY, host)
     $.teach({ isDrawing: true, createStartX: cx, createStartY: cy, createX: 0, createY: 0 })
   }
@@ -823,7 +861,7 @@ $.when('pointermove', '.bulletin-canvas', e => {
     return
   }
 
-  if (mode === 'create' && isDrawing) {
+  if (mode === 'manage' && isDrawing) {
     const host = e.target.closest(tag)
     const [cx, cy] = clientToCanvas(e.clientX, e.clientY, host)
     $.teach({ createX: cx - createStartX, createY: cy - createStartY })
@@ -841,7 +879,7 @@ $.when('pointerup', '.bulletin-canvas', e => {
     return
   }
 
-  if (mode === 'create' && isDrawing) {
+  if (mode === 'manage' && isDrawing) {
     const w = Math.abs(createX)
     const h = Math.abs(createY)
     if (w > 40 && h > 40) {
@@ -1157,7 +1195,20 @@ document.addEventListener('pointermove', e => {
     const dx = e.clientX - lastBeltX
     const dy = e.clientY - lastBeltY
     if (!beltDragMoved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) beltDragMoved = true
-    if (beltDragMoved) $.teach({ beltOffsetX: beltOffsetX + dx, beltOffsetY: beltOffsetY + dy })
+    if (beltDragMoved) {
+      const host = document.querySelector(tag)
+      const compassEl = host?.querySelector('.the-compass')
+      const hostW = host ? host.clientWidth : window.innerWidth
+      const hostH = host ? host.clientHeight : window.innerHeight
+      const cW = compassEl ? compassEl.offsetWidth : 160
+      const cH = compassEl ? compassEl.offsetHeight : 160
+      const newX = beltOffsetX + dx
+      const newY = beltOffsetY + dy
+      $.teach({
+        beltOffsetX: Math.max(-(hostW - cW), Math.min(0, newX)),
+        beltOffsetY: Math.max(-(hostH - cH), Math.min(0, newY)),
+      })
+    }
     lastBeltX = e.clientX
     lastBeltY = e.clientY
   }
@@ -1247,6 +1298,121 @@ $.when('click', '[data-mode]', e => {
   const btn = e.target.closest('[data-mode]')
   if (!btn) return
   $.teach({ mode: btn.dataset.mode, menuOpen: false, linkSource: null })
+})
+
+// ── sidebar href field ────────────────────────────────────────────────────────
+
+$.when('change', '.sidebar-href', e => {
+  const id = e.target.dataset.hrefCard
+  if (!id) return
+  updateCard(id, { href: e.target.value.trim() })
+  save(e.target.closest(tag))
+})
+
+// ── play button: launch card href in full-screen iframe ───────────────────────
+
+$.when('click', '.card-play', e => {
+  e.stopPropagation()
+  const btn = e.target.closest('[data-play-card]')
+  if (!btn) return
+  const { cards } = $.learn()
+  const href = cards[btn.dataset.playCard]?.href
+  if (!href) return
+  $.teach({ launchHref: href })
+  history.pushState({ type: 'bulletin-board-launch', href }, '', href)
+})
+
+// ── compass action buttons ────────────────────────────────────────────────────
+
+$.when('click', '[data-action]', e => {
+  const btn = e.target.closest('[data-action]')
+  if (!btn) return
+  const action = btn.dataset.action
+  $.teach({ menuOpen: false })
+
+  if (action === 'qr') {
+    const url = location.href
+    showModal(`<div data-modal-close style="display:flex;align-items:center;justify-content:center;min-height:100%;padding:2rem;box-sizing:border-box;"><div style="width:240px;background:white;padding:1rem;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.2);"><qr-code src="${escapeHtml(url)}" no-link="true"></qr-code><p style="text-align:center;font-family:'Recursive',sans-serif;font-size:.65rem;word-break:break-all;margin:.5rem 0 0;color:#555;">${escapeHtml(url)}</p></div></div>`)
+    return
+  }
+
+  if (action === 'browse') {
+    const href = '/app/lore-baby'
+    $.teach({ launchHref: href })
+    history.pushState({ type: 'bulletin-board-launch', href }, '', href)
+    return
+  }
+
+  if (action === 'camera') {
+    openCamera()
+    return
+  }
+})
+
+// ── camera overlay (imperative — not through $.draw) ─────────────────────────
+
+let _cameraStream = null
+
+async function openCamera() {
+  const host = document.querySelector(tag)
+  if (!host) return
+  const overlay = host.querySelector('.camera-overlay')
+  if (!overlay) return
+
+  try {
+    _cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+    const video = document.createElement('video')
+    video.muted = true; video.autoplay = true; video.playsInline = true
+    video.style.cssText = 'width:100%;max-width:480px;border-radius:6px;display:block;'
+    video.srcObject = _cameraStream
+
+    const closeBtn = document.createElement('button')
+    closeBtn.className = 'camera-close-btn'
+    closeBtn.innerHTML = '✕'
+    closeBtn.onclick = closeCamera
+
+    const captureBtn = document.createElement('button')
+    captureBtn.className = 'camera-capture-btn'
+    captureBtn.innerHTML = '<sl-icon name="camera-fill"></sl-icon> capture'
+    captureBtn.onclick = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = video.videoWidth || 640
+      canvas.height = video.videoHeight || 480
+      canvas.getContext('2d').drawImage(video, 0, 0)
+      const a = document.createElement('a')
+      a.href = canvas.toDataURL('image/png')
+      a.download = `capture-${Date.now()}.png`
+      a.click()
+    }
+
+    overlay.innerHTML = ''
+    overlay.appendChild(closeBtn)
+    overlay.appendChild(video)
+    overlay.appendChild(captureBtn)
+    overlay.dataset.open = 'true'
+    await video.play().catch(() => {})
+  } catch {
+    overlay.innerHTML = '<p class="camera-err">Camera access denied</p>'
+    overlay.dataset.open = 'true'
+  }
+}
+
+function closeCamera() {
+  if (_cameraStream) {
+    _cameraStream.getTracks().forEach(t => t.stop())
+    _cameraStream = null
+  }
+  const overlay = document.querySelector(`${tag} .camera-overlay`)
+  if (overlay) { overlay.innerHTML = ''; overlay.dataset.open = 'false' }
+}
+
+// ── launch iframe: popstate closes it ────────────────────────────────────────
+
+window.addEventListener('popstate', e => {
+  const { type, href } = e.state || {}
+  if (type === 'bulletin-board-launch') {
+    $.teach({ launchHref: href || null })
+  }
 })
 
 // ── styles ────────────────────────────────────────────────────────────────────
@@ -1435,45 +1601,56 @@ $.style(`
     bottom: 0; right: 0;
     z-index: 10;
     display: grid;
-    grid-template-columns: repeat(6, 2rem);
-    grid-template-rows: repeat(6, 2rem);
-    width: calc(6 * 2rem);
-    height: calc(6 * 2rem);
+    grid-template-columns: repeat(6, calc(10rem / 6));
+    grid-template-rows: repeat(6, calc(10rem / 6));
+    width: 10rem;
+    height: 10rem;
     pointer-events: none;
     transform: translate(var(--belt-offset-x, 0), var(--belt-offset-y, 0));
   }
 
   & .the-compass button {
+    position: relative;
     pointer-events: all;
-    background: #1a1a1a;
-    border: 1px solid rgba(255,255,255,.15);
+    border: none;
     border-radius: 50%;
-    color: rgba(255,255,255,.85);
+    color: #fff;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: .9rem;
-    box-shadow: 0 2px 6px rgba(0,0,0,.3);
-    transition: background .1s, color .1s, transform .15s, opacity .15s;
+    font-size: 1.1rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,.35);
+    transition: transform .15s, opacity .15s, filter .1s;
     touch-action: none;
     user-select: none;
+    overflow: hidden;
   }
 
   & .the-compass button * { pointer-events: none; }
-  & .the-compass button:hover  { background: #333; color: #fff; }
-  & .the-compass button.active { background: dodgerblue; color: #fff; border-color: dodgerblue; }
+  & .the-compass button:hover { filter: brightness(1.18); }
+  & .the-compass button.active { box-shadow: 0 0 0 3px rgba(255,255,255,.6), 0 2px 8px rgba(0,0,0,.35); filter: brightness(1.1); }
 
-  & .the-compass .root     { grid-row: 5/7; grid-column: 5/7; z-index: 1; cursor: grab; }
+  & .the-compass .root {
+    grid-row: 3/5; grid-column: 3/5;
+    background: #1a1a1a;
+    border: 2px solid rgba(255,255,255,.3);
+    z-index: 1;
+    cursor: grab;
+    font-size: 1.3rem;
+  }
   & .the-compass .root:active { cursor: grabbing; }
-  & .the-compass .c-pan    { grid-row: 5/7; grid-column: 3/5; }
-  & .the-compass .c-create { grid-row: 3/5; grid-column: 5/7; }
-  & .the-compass .c-link   { grid-row: 1/3; grid-column: 5/7; }
-  & .the-compass .c-edit   { grid-row: 1/3; grid-column: 3/5; }
-  & .the-compass .c-dream  { grid-row: 3/5; grid-column: 3/5; }
+
+  /* hex petals — 1 o'clock clockwise */
+  & .the-compass .c-manage { grid-row: 1/3; grid-column: 4/6; background: firebrick; }
+  & .the-compass .c-browse { grid-row: 3/5; grid-column: 5/7; background: darkorange; }
+  & .the-compass .c-qr     { grid-row: 5/7; grid-column: 4/6; background: gold; color: #333; }
+  & .the-compass .c-move   { grid-row: 5/7; grid-column: 2/4; background: mediumseagreen; }
+  & .the-compass .c-link   { grid-row: 3/5; grid-column: 1/3; background: dodgerblue; }
+  & .the-compass .c-camera { grid-row: 1/3; grid-column: 2/4; background: mediumpurple; }
 
   & .the-compass[data-open="false"] button:not(.root) {
-    opacity: 0; pointer-events: none; transform: scale(0.3);
+    opacity: 0; pointer-events: none; transform: scale(0.4);
   }
   & .the-compass[data-open="true"] button:not(.root) {
     opacity: 1; pointer-events: all; transform: scale(1);
@@ -1692,6 +1869,101 @@ $.style(`
   & .sidebar-editor:focus {
     border-color: dodgerblue;
     box-shadow: 0 0 0 2px rgba(30,144,255,.15);
+  }
+
+  /* ── play button ── */
+
+  & .card-play {
+    position: absolute;
+    bottom: 3px; left: 3px;
+    width: 18px; height: 18px;
+    background: none;
+    border: none;
+    color: var(--card-contrast, #1a1a1a);
+    opacity: 0.35;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: .75rem;
+    padding: 0;
+    pointer-events: all;
+    z-index: 3;
+    transition: opacity .1s;
+    border-radius: 2px;
+  }
+  & .card-play:hover { opacity: 1; }
+
+  /* ── card launch overlay ── */
+
+  & .card-launch {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: none;
+    pointer-events: none;
+  }
+  & .card-launch[data-open="true"] {
+    display: block;
+    pointer-events: all;
+  }
+  & .card-launch iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+  }
+
+  /* ── camera overlay ── */
+
+  & .camera-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 60;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    background: rgba(0,0,0,.85);
+    backdrop-filter: blur(6px);
+    padding: 2rem;
+    box-sizing: border-box;
+  }
+  & .camera-overlay[data-open="true"] { display: flex; }
+
+  & .camera-close-btn {
+    position: absolute;
+    top: .75rem; right: .75rem;
+    background: rgba(255,255,255,.15);
+    border: 1px solid rgba(255,255,255,.3);
+    color: white;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: .9rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+  & .camera-close-btn:hover { background: rgba(255,255,255,.25); }
+
+  & .camera-capture-btn {
+    background: mediumpurple;
+    border: none;
+    color: white;
+    padding: .5rem 1.25rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'Recursive', sans-serif;
+    font-size: .85rem;
+    display: flex; align-items: center; gap: .4rem;
+  }
+  & .camera-capture-btn:hover { filter: brightness(1.15); }
+
+  & .camera-err {
+    color: rgba(255,255,255,.6);
+    font-family: 'Recursive', sans-serif;
+    font-size: .85rem;
+    text-align: center;
   }
 
   /* edge modal renders outside this element — all styles are inlined in renderEdgeModal */
