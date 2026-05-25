@@ -407,7 +407,7 @@ function renderCardMini(id, card) {
   if (!card) return ''
   const contrast = contrastColor(card.color || 'lemonchiffon')
   return `<div data-goto-card="${id}"
-    style="background:${card.color || 'lemonchiffon'}; padding:.5rem .65rem; min-height:3rem; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.1); transition:box-shadow .15s;">
+    style="background:${card.color || 'lemonchiffon'}; border-radius:2px; padding:.5rem .65rem; min-height:3rem; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.08), 0 3px 8px rgba(0,0,0,.08), 0 6px 20px rgba(0,0,0,.06); transition:box-shadow .15s;">
     <div style="font-size:.75rem; line-height:1.4; color:${contrast}; white-space:pre-wrap; word-break:break-word; pointer-events:none;">${escapeHtml(card.text?.slice(0, 120) || '')}</div>
   </div>`
 }
@@ -442,7 +442,6 @@ function renderEdgeModal(linkId, fromCardId, cards, edgeTypes) {
   const typeOptions = Object.values(allTypes).map(t => `<option value="${escapeHtml(t.name)}">`).join('')
 
   const bodyBg = `color-mix(in srgb, ${edgeColor} 10%, white)`
-  const btnStyle = `flex:1; padding:.4rem .6rem; border:1px solid rgba(0,0,0,.12); background:white; font-family:'Recursive',sans-serif; font-size:.75rem; color:#3a3020; cursor:pointer; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;`
   const labelStyle = `font-family:'Recursive',sans-serif; font-size:.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:rgba(0,0,0,.4); margin-bottom:.35rem;`
 
   return `
@@ -470,10 +469,6 @@ function renderEdgeModal(linkId, fromCardId, cards, edgeTypes) {
               </div>
             </div>
             ${renderCardMini(link.to, toCard)}
-          </div>
-          <div style="display:flex; gap:.5rem; margin-bottom:${participants.size > 0 ? '1rem' : '0'};">
-            <button data-goto-card="${fromCardId}" style="${btnStyle}">← ${escapeHtml(fromCard.text?.slice(0,20) || fromCardId.slice(0,8))}</button>
-            <button data-goto-card="${link.to}" style="${btnStyle}">→ ${escapeHtml(toCard.text?.slice(0,20) || link.to.slice(0,8))}</button>
           </div>
           ${participants.size > 0 ? `
             <div style="${labelStyle}">Also in "${escapeHtml(edgeName)}"</div>
@@ -1005,7 +1000,8 @@ document.addEventListener('input', e => {
   if (!e.target.matches('plan98-palette')) return
   const edgeWrap = e.target.closest('[data-palette-edge]')
   if (!edgeWrap) return
-  const { linkId, fromCard: fromCardId } = edgeWrap.dataset
+  const linkId = edgeWrap.dataset.paletteEdge
+  const fromCardId = edgeWrap.dataset.fromCard
   const color = e.detail?.color
   if (!linkId || !fromCardId || !color) return
   const { cards, edgeTypes } = $.learn()
