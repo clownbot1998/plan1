@@ -63,4 +63,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `EDGEC0DE-CAFE-BABE-DEAD-FACE00002026` | 2026-05-24 | edge modal shadowbox: pointer-events fix on card-mini-text, inline styles for out-of-scope modal, document listeners for goto/type-input/palette, transparent showModal. the modal is a doorway now. |
 
+| `C0DEB0NE-CAFE-BABE-DEAD-FACE00002026` | 2026-05-24 | arrow clicks: <g> hit lines, Relationship Manager on arrow click, hyper palette hidden, canvas click closes sidebar, sidebarCard safety guard. every arrow is a door now. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
