@@ -664,6 +664,12 @@ function patchCardsLayer(cardsLayer, cards, focused, linkSource, grabbing) {
   })
 }
 
+const MODE_META = {
+  pan:    { icon: 'arrows-move',   color: 'mediumseagreen' },
+  link:   { icon: 'link-45deg',    color: 'dodgerblue'     },
+  manage: { icon: 'pencil-square', color: 'firebrick'      },
+}
+
 function renderCompassButtons(mode) {
   return `
     <button class="c-manage${mode === 'manage' ? ' active' : ''}" data-mode="manage" title="manage cards">
@@ -696,8 +702,9 @@ $.draw(target => {
 }, { beforeUpdate, afterUpdate })
 
 function beforeUpdate(target) {
-  const { beltGrabbed } = $.learn()
+  const { beltGrabbed, mode } = $.learn()
   target.dataset.belt = beltGrabbed ? 'true' : 'false'
+  target.dataset.mode = mode || 'pan'
 }
 
 function afterUpdate() {}
@@ -714,7 +721,7 @@ function mount(target) {
       <div class="create-preview"></div>
     </div>
     <div class="the-compass" data-open="false" style="--belt-offset-x:0px; --belt-offset-y:0px;">
-      <button class="root" data-toggle-menu title="menu (drag to move)"><sl-icon name="joystick"></sl-icon></button>
+      <button class="root" data-toggle-menu title="menu (drag to move)" style="background:${(MODE_META[mode] || MODE_META.pan).color}"><sl-icon name="${(MODE_META[mode] || MODE_META.pan).icon}"></sl-icon></button>
       ${renderCompassButtons(mode)}
     </div>
     <div class="card-sidebar" data-open="false">
@@ -753,6 +760,14 @@ function update(target) {
   compass.querySelectorAll('[data-mode]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode)
   })
+
+  const rootBtn = compass.querySelector('.root')
+  if (rootBtn) {
+    const md = MODE_META[mode] || MODE_META.pan
+    rootBtn.style.background = md.color
+    const icon = rootBtn.querySelector('sl-icon')
+    if (icon) icon.setAttribute('name', md.icon)
+  }
 
   const launchEl = target.querySelector('.card-launch')
   if (launchEl) {
@@ -1495,6 +1510,10 @@ $.style(`
     pointer-events: none;
   }
 
+  & [data-mode="pan"] .card {
+    pointer-events: none;
+  }
+
   & .create-preview {
     position: absolute;
     display: none;
@@ -1635,7 +1654,7 @@ $.style(`
   & .the-compass {
     position: absolute;
     bottom: 0; right: 0;
-    z-index: 10;
+    z-index: 200;
     display: grid;
     grid-template-columns: repeat(6, calc(10rem / 6));
     grid-template-rows: repeat(6, calc(10rem / 6));
