@@ -65,4 +65,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `C0DEB0NE-CAFE-BABE-DEAD-FACE00002026` | 2026-05-24 | arrow clicks: <g> hit lines, Relationship Manager on arrow click, hyper palette hidden, canvas click closes sidebar, sidebarCard safety guard. every arrow is a door now. |
 
+| `DA7ABABE-C0DE-CAFE-DEAD-FACE00002026` | 2026-05-24 | shell="true" refactor: bulletin-board[shell] in modal → $.draw handles all color patches, 50 lines of DOM surgery removed. name collision live update. the modal is a window now. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
