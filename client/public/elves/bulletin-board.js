@@ -454,7 +454,13 @@ function renderEdgeModalInner(linkId, fromCardId, cards, edgeTypes) {
       style="width:100%; overflow:hidden; box-shadow:0 4px 24px rgba(0,0,0,.18), 0 1px 4px rgba(0,0,0,.12); font-family:'Recursive',sans-serif;">
       <div data-edge-header style="background:${edgeColor}; padding:.5rem .75rem; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(0,0,0,.1);">
         <span data-edge-contrast style="font-family:'Recursive',sans-serif; font-size:.8rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:${edgeContrast};">Relationship Manager</span>
-        <span data-edge-contrast data-edge-type-label style="font-family:'Recursive',sans-serif; font-size:.7rem; color:${edgeContrast}; opacity:.7;">${escapeHtml(edgeName)}</span>
+        <div style="display:flex; align-items:center; gap:.5rem;">
+          <span data-edge-contrast data-edge-type-label style="font-family:'Recursive',sans-serif; font-size:.7rem; color:${edgeContrast}; opacity:.7;">${escapeHtml(edgeName)}</span>
+          <button data-delete-link="${linkId}" data-from-card="${fromCardId}"
+            style="background:rgba(0,0,0,.25); border:none; border-radius:3px; color:${edgeContrast}; cursor:pointer; font-size:.7rem; padding:.15rem .4rem; font-family:'Recursive',sans-serif; opacity:.7; transition:opacity .1s;"
+            onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.7"
+            title="delete this relationship">✕ delete</button>
+        </div>
       </div>
       <div data-edge-body style="background:${bodyBg}; padding:1.25rem;">
         <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:.75rem; align-items:center; margin-bottom:1rem;">
@@ -906,9 +912,10 @@ let lastResizeX, lastResizeY
 let resizeCardW = 0, resizeCardH = 0
 
 document.addEventListener('pointerdown', e => {
-  // ── resize handle ──
+  // ── resize handle (manage mode only) ──
   const resizeEl = e.target.closest('.card-resize-se')
   if (resizeEl) {
+    if ($.learn().mode !== 'manage') return
     e.preventDefault()
     e.stopPropagation()
     const id = resizeEl.dataset.resize
@@ -923,7 +930,7 @@ document.addEventListener('pointerdown', e => {
     return
   }
 
-  // ── card drag ──
+  // ── card drag (manage mode only) ──
   // Skip dedicated button handlers — they manage their own events
   if (e.target.closest('.card-close') || e.target.closest('.card-pencil')) return
 
@@ -934,6 +941,8 @@ document.addEventListener('pointerdown', e => {
 
   // Let focused textarea handle its own text editing
   if (e.target.closest('.card-body') && $.learn().focusedCard === id) return
+
+  if ($.learn().mode !== 'manage') return
 
   e.preventDefault()
   const { trayZ, cards } = $.learn()
@@ -1049,6 +1058,33 @@ $.when('click', '[data-open-edge]', e => {
 
 // Modal renders outside bulletin-board — use document listeners for modal interactions
 document.addEventListener('click', e => {
+  const delBtn = e.target.closest('[data-delete-link]')
+  if (delBtn) {
+    const linkId = delBtn.dataset.deleteLink
+    const fromCardId = delBtn.dataset.fromCard
+    const { cards } = $.learn()
+    const fromCard = cards[fromCardId]
+    const link = fromCard?.links?.[linkId]
+    if (link) {
+      const toId = link.to
+      const fromLinks = { ...fromCard.links }
+      delete fromLinks[linkId]
+      const toCard = cards[toId]
+      const toBacklinks = { ...(toCard?.backlinks || {}) }
+      delete toBacklinks[linkId]
+      $.teach({
+        cards: {
+          ...cards,
+          [fromCardId]: { ...fromCard, links: fromLinks },
+          ...(toCard ? { [toId]: { ...toCard, backlinks: toBacklinks } } : {}),
+        }
+      })
+      save(document.querySelector(tag))
+    }
+    hideModal()
+    return
+  }
+
   const btn = e.target.closest('[data-goto-card]')
   if (btn) {
     hideModal()
