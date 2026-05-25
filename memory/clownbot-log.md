@@ -67,4 +67,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `DA7ABABE-C0DE-CAFE-DEAD-FACE00002026` | 2026-05-24 | shell="true" refactor: bulletin-board[shell] in modal → $.draw handles all color patches, 50 lines of DOM surgery removed. name collision live update. the modal is a window now. |
 
+| `B0BAFEDD-CAFE-C0DE-BABE-DEAD00002026` | 2026-05-25 | hex compass (6 sl-icon petals, design colors), card href + play button (sticky-menu iframe pattern), viewport-clamped pedal, camera overlay, action buttons (qr, lore-baby, camera). the cards got doors now. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
