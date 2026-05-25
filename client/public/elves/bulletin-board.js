@@ -88,6 +88,16 @@ const _urlParams = new URLSearchParams(location.search)
 const _permalinkCard = _urlParams.get('card') || null
 const _permalinkSidebar = _urlParams.get('sidebar') === 'open' && !!_permalinkCard
 
+// Persistent board identity — generate once, stamp into URL so the QR
+// is always a stable entry point for this specific board.
+let _boardId = _urlParams.get('id')
+if (!_boardId) {
+  _boardId = crypto.randomUUID()
+  const _u = new URL(location.href)
+  _u.searchParams.set('id', _boardId)
+  history.replaceState(history.state || null, '', _u.toString())
+}
+
 const $ = Self(tag, {
   cards: {},
   trayZ: 3,
@@ -137,7 +147,7 @@ function subscribe(target) {
   if (!history.state?.type) {
     history.replaceState({ type: 'bulletin-board-launch', href: null }, '', location.href)
   }
-  const id = target.id || 'default'
+  const id = _boardId
   braid.fetch(boardUrl(id), {
     subscribe: true,
     headers: { 'accept': 'application/json' },
@@ -169,9 +179,8 @@ function subscribe(target) {
 }
 
 function save(target) {
-  const id = (target && target.id) || 'default'
   const { cards, edgeTypes } = $.learn()
-  fetch(boardUrl(id), {
+  fetch(boardUrl(_boardId), {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ cards, edgeTypes }),
@@ -1399,7 +1408,9 @@ $.when('click', '[data-action]', e => {
   $.teach({ menuOpen: false })
 
   if (action === 'qr') {
-    const url = location.href
+    const { focusedCard } = $.learn()
+    const base = `${location.origin}/app/bulletin-board?id=${_boardId}`
+    const url = focusedCard ? `${base}&card=${focusedCard}&sidebar=open` : base
     showModal(`<div data-modal-close style="display:flex;align-items:center;justify-content:center;min-height:100%;padding:2rem;box-sizing:border-box;"><div style="width:240px;background:white;padding:1rem;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.2);"><qr-code src="${escapeHtml(url)}" no-link="true"></qr-code><p style="text-align:center;font-family:'Recursive',sans-serif;font-size:.65rem;word-break:break-all;margin:.5rem 0 0;color:#555;">${escapeHtml(url)}</p></div></div>`)
   }
 })
