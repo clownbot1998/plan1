@@ -668,6 +668,8 @@ const MODE_META = {
   pan:    { icon: 'arrows-move',   color: 'mediumseagreen' },
   link:   { icon: 'link-45deg',    color: 'dodgerblue'     },
   manage: { icon: 'pencil-square', color: 'firebrick'      },
+  browse: { icon: 'folder2-open',  color: 'darkorange'     },
+  camera: { icon: 'camera-fill',   color: 'mediumpurple'   },
 }
 
 function renderCompassButtons(mode) {
@@ -675,7 +677,7 @@ function renderCompassButtons(mode) {
     <button class="c-manage${mode === 'manage' ? ' active' : ''}" data-mode="manage" title="manage cards">
       <sl-icon name="pencil-square"></sl-icon>
     </button>
-    <button class="c-browse" data-action="browse" title="browse files">
+    <button class="c-browse${mode === 'browse' ? ' active' : ''}" data-mode="browse" title="browse files">
       <sl-icon name="folder2-open"></sl-icon>
     </button>
     <button class="c-qr" data-action="qr" title="share via QR">
@@ -687,7 +689,7 @@ function renderCompassButtons(mode) {
     <button class="c-link${mode === 'link' ? ' active' : ''}" data-mode="link" title="link cards">
       <sl-icon name="link-45deg"></sl-icon>
     </button>
-    <button class="c-camera" data-action="camera" title="camera">
+    <button class="c-camera${mode === 'camera' ? ' active' : ''}" data-mode="camera" title="camera">
       <sl-icon name="camera-fill"></sl-icon>
     </button>
   `
@@ -1348,7 +1350,22 @@ $.when('click', '[data-toggle-menu]', () => {
 $.when('click', '[data-mode]', e => {
   const btn = e.target.closest('[data-mode]')
   if (!btn) return
-  $.teach({ mode: btn.dataset.mode, menuOpen: false, linkSource: null })
+  const { mode: prev } = $.learn()
+  const next = btn.dataset.mode
+
+  // tear down previous overlay
+  if (prev === 'camera') closeCamera(false)
+  if (prev === 'browse') $.teach({ launchHref: null })
+
+  // open new overlay
+  if (next === 'camera') openCamera()
+  else if (next === 'browse') {
+    const href = '/app/lore-baby'
+    $.teach({ launchHref: href })
+    history.pushState({ type: 'bulletin-board-launch', href }, '', href)
+  }
+
+  $.teach({ mode: next, menuOpen: false, linkSource: null })
 })
 
 // ── sidebar href field ────────────────────────────────────────────────────────
@@ -1384,19 +1401,6 @@ $.when('click', '[data-action]', e => {
   if (action === 'qr') {
     const url = location.href
     showModal(`<div data-modal-close style="display:flex;align-items:center;justify-content:center;min-height:100%;padding:2rem;box-sizing:border-box;"><div style="width:240px;background:white;padding:1rem;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.2);"><qr-code src="${escapeHtml(url)}" no-link="true"></qr-code><p style="text-align:center;font-family:'Recursive',sans-serif;font-size:.65rem;word-break:break-all;margin:.5rem 0 0;color:#555;">${escapeHtml(url)}</p></div></div>`)
-    return
-  }
-
-  if (action === 'browse') {
-    const href = '/app/lore-baby'
-    $.teach({ launchHref: href })
-    history.pushState({ type: 'bulletin-board-launch', href }, '', href)
-    return
-  }
-
-  if (action === 'camera') {
-    openCamera()
-    return
   }
 })
 
@@ -1448,13 +1452,14 @@ async function openCamera() {
   }
 }
 
-function closeCamera() {
+function closeCamera(resetMode = true) {
   if (_cameraStream) {
     _cameraStream.getTracks().forEach(t => t.stop())
     _cameraStream = null
   }
   const overlay = document.querySelector(`${tag} .camera-overlay`)
   if (overlay) { overlay.innerHTML = ''; overlay.dataset.open = 'false' }
+  if (resetMode && $.learn().mode === 'camera') $.teach({ mode: 'pan' })
 }
 
 // ── launch iframe: popstate closes it ────────────────────────────────────────
@@ -1463,6 +1468,7 @@ window.addEventListener('popstate', e => {
   const { type, href } = e.state || {}
   if (type === 'bulletin-board-launch') {
     $.teach({ launchHref: href || null })
+    if (!href && $.learn().mode === 'browse') $.teach({ mode: 'pan' })
   }
 })
 
