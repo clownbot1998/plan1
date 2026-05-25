@@ -1018,6 +1018,19 @@ document.addEventListener('change', e => {
       [fromCardId]: { ...fromCard, links: { ...fromCard.links, [linkId]: updatedLink } }
     }
   })
+  // Repaint modal to reflect resolved type's color (name collision hits existing color)
+  const resolvedColor = $.learn().edgeTypes[typeId]?.color || 'dodgerblue'
+  const resolvedContrast = contrastColor(resolvedColor)
+  const panel = document.querySelector(`[data-link-id="${linkId}"]`)
+  if (panel) {
+    const dot = panel.querySelector('[data-edge-dot]')
+    if (dot) dot.style.background = resolvedColor
+    const header = panel.querySelector('[data-edge-header]')
+    if (header) header.style.background = resolvedColor
+    const edgeBody = panel.querySelector('[data-edge-body]')
+    if (edgeBody) edgeBody.style.background = `color-mix(in srgb, ${resolvedColor} 10%, white)`
+    panel.querySelectorAll('[data-edge-contrast]').forEach(el => el.style.color = resolvedContrast)
+  }
   const paletteWrap = document.querySelector(`[data-palette-edge="${linkId}"]`)
   if (paletteWrap) paletteWrap.style.visibility = name === 'hyper' ? 'hidden' : 'visible'
   save(document.querySelector(tag))
