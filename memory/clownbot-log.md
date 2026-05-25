@@ -59,4 +59,8 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `FEEDFACE-C0DE-CAFE-DEAD-BEEFBABE1998` | 2026-05-23 | couch-coop port: three doors (blank screen, no connection, sandbox eval). discovered plan98.js sandbox rule — reducers can't close over outer scope. fixed mergeSlot and mergePlayer in couch-coop, player-piano, song-wave. inputs move across the wire. the circus is multiplayer. |
 
+| `BEEFC0DE-CAFE-BABE-DEAD-FACE00002026` | 2026-05-24 | bulletin-board: sticky canvas, sidebar inspector, drop-to-link. discovered $.when uses matches() not closest() — container drag requires direct document listeners. direct DOM during drag, commit on pointerup. the board is a real place now. |
+
+| `EDGEC0DE-CAFE-BABE-DEAD-FACE00002026` | 2026-05-24 | edge modal shadowbox: pointer-events fix on card-mini-text, inline styles for out-of-scope modal, document listeners for goto/type-input/palette, transparent showModal. the modal is a doorway now. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
