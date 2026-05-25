@@ -446,14 +446,14 @@ function renderEdgeModal(linkId, fromCardId, cards, edgeTypes) {
   const labelStyle = `font-family:'Recursive',sans-serif; font-size:.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:rgba(0,0,0,.4); margin-bottom:.35rem;`
 
   return `
-    <div style="min-height:100%; display:flex; align-items:center; justify-content:center; padding:2rem; box-sizing:border-box;">
+    <div data-modal-close style="min-height:100%; display:flex; align-items:center; justify-content:center; padding:2rem; box-sizing:border-box;">
       <div data-link-id="${linkId}" data-from-card="${fromCardId}"
         style="width:100%; max-width:560px; overflow:hidden; box-shadow:0 4px 24px rgba(0,0,0,.18), 0 1px 4px rgba(0,0,0,.12); font-family:'Recursive',sans-serif;">
-        <div style="background:${edgeColor}; padding:.5rem .75rem; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(0,0,0,.1);">
-          <span style="font-family:'Recursive',sans-serif; font-size:.8rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:${edgeContrast};">Relationship Manager</span>
-          <span style="font-family:'Recursive',sans-serif; font-size:.7rem; color:${edgeContrast}; opacity:.7;">${escapeHtml(edgeName)}</span>
+        <div data-edge-header style="background:${edgeColor}; padding:.5rem .75rem; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(0,0,0,.1);">
+          <span data-edge-contrast style="font-family:'Recursive',sans-serif; font-size:.8rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:${edgeContrast};">Relationship Manager</span>
+          <span data-edge-contrast style="font-family:'Recursive',sans-serif; font-size:.7rem; color:${edgeContrast}; opacity:.7;">${escapeHtml(edgeName)}</span>
         </div>
-        <div style="background:${bodyBg}; padding:1.25rem;">
+        <div data-edge-body style="background:${bodyBg}; padding:1.25rem;">
           <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:.75rem; align-items:center; margin-bottom:1rem;">
             ${renderCardMini(fromCardId, fromCard)}
             <div style="display:flex; flex-direction:column; align-items:center; gap:.4rem;">
@@ -1014,8 +1014,17 @@ document.addEventListener('input', e => {
   if (!link) return
   const typeId = link.typeId || HYPER_ID
   $.teach({ edgeTypes: { ...edgeTypes, [typeId]: { ...edgeTypes[typeId], color } } })
-  const dot = edgeWrap.closest('[data-link-id]')?.querySelector('[data-edge-dot]')
-  if (dot) dot.style.background = color
+  const panel = edgeWrap.closest('[data-link-id]')
+  if (panel) {
+    const contrast = contrastColor(color)
+    const dot = panel.querySelector('[data-edge-dot]')
+    if (dot) dot.style.background = color
+    const header = panel.querySelector('[data-edge-header]')
+    if (header) header.style.background = color
+    const edgeBody = panel.querySelector('[data-edge-body]')
+    if (edgeBody) edgeBody.style.background = `color-mix(in srgb, ${color} 10%, white)`
+    panel.querySelectorAll('[data-edge-contrast]').forEach(el => el.style.color = contrast)
+  }
   save(document.querySelector(tag))
 })
 
