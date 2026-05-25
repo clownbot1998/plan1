@@ -464,7 +464,7 @@ function renderEdgeModal(linkId, fromCardId, cards, edgeTypes) {
                 style="width:90px; border:1px solid rgba(0,0,0,.15); padding:.2rem .35rem; font-family:'Recursive',sans-serif; font-size:.7rem; text-align:center; background:white; color:#3a3020; outline:none;">
               <datalist id="bb-edge-types-${linkId}">${typeOptions}</datalist>
               <div data-palette-edge="${linkId}" data-from-card="${fromCardId}"
-                style="width:90px; height:56px; overflow:hidden; border:1px solid rgba(0,0,0,.1);">
+                style="width:90px; height:56px; overflow:hidden; border:1px solid rgba(0,0,0,.1); visibility:${edgeName === 'hyper' ? 'hidden' : 'visible'};">
                 <plan98-palette style="height:100%; width:100%;"></plan98-palette>
               </div>
             </div>
@@ -509,8 +509,12 @@ function renderLinksInner(cards, edgeTypes = {}) {
 
   const lines = linkData.map(({ linkId, x1, y1, x2, y2, typeId }) => {
     const color = allTypes[typeId]?.color || 'dodgerblue'
-    return `<line data-link-id="${linkId}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-      stroke="${color}" stroke-width="2" marker-end="url(#bb-arrow-${typeId})"/>`
+    return `<g data-link-id="${linkId}">
+      <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+        stroke="${color}" stroke-width="2" marker-end="url(#bb-arrow-${typeId})" pointer-events="none"/>
+      <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+        stroke="transparent" stroke-width="16" pointer-events="all" style="cursor:pointer"/>
+    </g>`
   })
 
   return `<defs>${markers}</defs>${lines.join('')}`
@@ -529,13 +533,15 @@ function patchGrabArrows(grabbingId) {
   Object.entries(card.links || {}).forEach(([linkId, link]) => {
     const toCard = cards[link.to]
     if (!toCard) return
-    const el = linksLayer.querySelector(`[data-link-id="${linkId}"]`)
-    if (!el) return
+    const g = linksLayer.querySelector(`g[data-link-id="${linkId}"]`)
+    if (!g) return
     const [fromDir, toDir] = bestCompassPair(smoothCard, toCard)
     const [x1, y1] = exitPoint(smoothCard, fromDir)
     const [x2, y2] = exitPoint(toCard, toDir)
-    el.setAttribute('x1', x1); el.setAttribute('y1', y1)
-    el.setAttribute('x2', x2); el.setAttribute('y2', y2)
+    g.querySelectorAll('line').forEach(l => {
+      l.setAttribute('x1', x1); l.setAttribute('y1', y1)
+      l.setAttribute('x2', x2); l.setAttribute('y2', y2)
+    })
   })
   Object.entries(card.backlinks || {}).forEach(([linkId, fromCardId]) => {
     const fromCard = cards[fromCardId]
@@ -544,13 +550,15 @@ function patchGrabArrows(grabbingId) {
     if (!link) return
     const toCard = cards[link.to]
     if (!toCard) return
-    const el = linksLayer.querySelector(`[data-link-id="${linkId}"]`)
-    if (!el) return
+    const g = linksLayer.querySelector(`g[data-link-id="${linkId}"]`)
+    if (!g) return
     const [fromDir, toDir] = bestCompassPair(fromCard, smoothCard)
     const [x1, y1] = exitPoint(fromCard, fromDir)
     const [x2, y2] = exitPoint(smoothCard, toDir)
-    el.setAttribute('x1', x1); el.setAttribute('y1', y1)
-    el.setAttribute('x2', x2); el.setAttribute('y2', y2)
+    g.querySelectorAll('line').forEach(l => {
+      l.setAttribute('x1', x1); l.setAttribute('y1', y1)
+      l.setAttribute('x2', x2); l.setAttribute('y2', y2)
+    })
   })
 }
 
@@ -702,6 +710,11 @@ function update(target) {
     preview.style.cssText = 'display:none;'
   }
 
+  if (sidebarOpen && sidebarCard && !cards[sidebarCard]) {
+    $.teach({ sidebarOpen: false, sidebarCard: null })
+    return
+  }
+
   if (sidebarOpen && focusedCard && focusedCard !== sidebarCard) {
     $.teach({ sidebarCard: focusedCard })
     return
@@ -747,7 +760,7 @@ function update(target) {
 
 $.when('pointerdown', '.bulletin-canvas', e => {
   e.preventDefault()
-  $.teach({ focusedCard: null })
+  $.teach({ focusedCard: null, sidebarOpen: false, sidebarCard: null })
   const { mode, panX, panY } = $.learn()
   const host = e.target.closest(tag)
 
@@ -968,10 +981,23 @@ $.when('click', '[data-open-edge]', e => {
 // Modal renders outside bulletin-board — use document listeners for modal interactions
 document.addEventListener('click', e => {
   const btn = e.target.closest('[data-goto-card]')
-  if (!btn) return
-  const id = btn.dataset.gotoCard
-  hideModal()
-  panToCard(id)
+  if (btn) {
+    hideModal()
+    panToCard(btn.dataset.gotoCard)
+    return
+  }
+  const g = e.target.closest('g[data-link-id]')
+  if (!g) return
+  const linkId = g.dataset.linkId
+  const { cards, edgeTypes } = $.learn()
+  let fromCardId = null
+  outer: for (const [cid, card] of Object.entries(cards)) {
+    for (const lid of Object.keys(card.links || {})) {
+      if (lid === linkId) { fromCardId = cid; break outer }
+    }
+  }
+  if (!fromCardId) return
+  showModal(renderEdgeModal(linkId, fromCardId, cards, edgeTypes))
 })
 
 document.addEventListener('change', e => {
@@ -992,6 +1018,8 @@ document.addEventListener('change', e => {
       [fromCardId]: { ...fromCard, links: { ...fromCard.links, [linkId]: updatedLink } }
     }
   })
+  const paletteWrap = document.querySelector(`[data-palette-edge="${linkId}"]`)
+  if (paletteWrap) paletteWrap.style.visibility = name === 'hyper' ? 'hidden' : 'visible'
   save(document.querySelector(tag))
 })
 
@@ -1244,7 +1272,7 @@ $.style(`
     position: absolute;
     top: 0; left: 0;
     width: 5000px; height: 5000px;
-    pointer-events: none;
+    pointer-events: auto;
     color: rgba(0,0,0,.35);
     overflow: visible;
   }
