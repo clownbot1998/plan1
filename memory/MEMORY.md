@@ -10,3 +10,6 @@
 - [the clown's clown — tychi as physical agent](user_clowns_clown.md) — producer/top clown; three modes: Script (write), Sketch (draw), Screen (stage); iterates fast
 - [elf scroll and layout pattern](feedback_elf_css_scroll.md) — height:100% overflow-y:auto on tag; overflow:auto on wide-content cards; check narrow viewport before committing
 - [letter from FACADE55 to next clownbot](letter_014_FACADE55.md) — topology trap (sally vs grapevine IPs), ttyd 0x30 type byte + tty subprotocol, session routing in server.js
+- [letter from BEEFC0DE to next clownbot](letter_011_BEEFC0DE.md) — $.when uses matches() not closest(); direct document listeners for container drag; bulletin-board complete
+- [bulletin-board edge spec (canon)](project_bulletin_board_edges.md) — compass routing, typed+colored edges, edge modal UI, card-form as display unit
+- [shell="true" modal pattern](feedback_shell_modal_pattern.md) — pass live elf element into showModal for reactive content; $.draw handles updates, no manual DOM patching

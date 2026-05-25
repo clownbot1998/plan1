@@ -222,24 +222,24 @@ $.style(`
 `)
 
 $.when('pointerdown', '[data-resize-panel]', event => {
+  // Capture root here — during pointermove, event.target may not be inside
+  // plan98-panel, so closest() would return null.
+  const root = event.target.closest($.link)
+  if (!root) return
   $.teach({ grabbing: true })
-  document.addEventListener("pointermove", resizePanel, false);
-  document.addEventListener("pointerup", () => {
-    $.teach({ grabbing: false })
-    document.removeEventListener("pointermove", resizePanel, false);
-  }, false);
-})
 
-function resizePanel(event) {
-  let width
-  if (event.touches && event.touches[0] && typeof event.touches[0]["force"] !== "undefined") {
-    width = window.innerWidth - event.touches[0].clientX
-  } else {
-    width = window.innerWidth - event.clientX
+  function resizePanel(e) {
+    const width = Math.max(240, window.innerWidth - e.clientX)
+    root.style.setProperty('--panel-width', width + 'px')
   }
 
-  const size = `${width}px`;
-  const root = event.target.closest($.link)
-  root.style.setProperty("--panel-width", size);
-}
+  function stopResize() {
+    $.teach({ grabbing: false })
+    document.removeEventListener('pointermove', resizePanel)
+    document.removeEventListener('pointerup', stopResize)
+  }
+
+  document.addEventListener('pointermove', resizePanel)
+  document.addEventListener('pointerup', stopResize)
+})
 

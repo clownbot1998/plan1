@@ -174,7 +174,7 @@ case "$CMD" in
     ;;
   bootstrap)
     MEMORY_SRC="$SCRIPT_DIR/memory"
-    MEMORY_DST="$HOME/.claude/projects/-home-clownbot/memory"
+    MEMORY_DST="$HOME/.claude/projects/-home-clownbot-plan1/memory"
     AGENT="$SCRIPT_DIR/AGENT.md"
 
     # wire claude code memory to git-tracked memory dir

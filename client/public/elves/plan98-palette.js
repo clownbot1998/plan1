@@ -279,7 +279,8 @@ $.when('pointerup', '[data-midi]', (event) => {
 
     update(data)
     root.dispatchEvent(new CustomEvent('input', {
-      detail: data
+      detail: data,
+      bubbles: true
     }))
   }
 })
