@@ -932,7 +932,7 @@ document.addEventListener('pointerdown', e => {
 
   // ── card drag (manage mode only) ──
   // Skip dedicated button handlers — they manage their own events
-  if (e.target.closest('.card-close') || e.target.closest('.card-pencil')) return
+  if (e.target.closest('.card-close') || e.target.closest('.card-pencil') || e.target.closest('.card-play')) return
 
   const cardEl = e.target.closest('.card')
   if (!cardEl) return
@@ -1928,6 +1928,7 @@ $.style(`
     transition: opacity .1s;
     border-radius: 2px;
   }
+  & .card-play * { pointer-events: none; }
   & .card-play:hover { opacity: 1; }
 
   /* ── card launch overlay ── */
