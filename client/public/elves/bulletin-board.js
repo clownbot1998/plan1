@@ -56,7 +56,7 @@ const tag = 'bulletin-board'
 const HYPER_ID = 'hyper'
 const DIRS = ['N','S','E','W','NE','NW','SE','SW']
 
-let _lastCardsJson = null
+let _lastRenderSig = null
 let _arrowInterval = null
 let _smoothArrowX = 0
 let _smoothArrowY = 0
@@ -407,7 +407,7 @@ function renderCardMini(id, card) {
   if (!card) return ''
   const contrast = contrastColor(card.color || 'lemonchiffon')
   return `<div data-goto-card="${id}"
-    style="background:${card.color || 'lemonchiffon'}; border-radius:4px; padding:.5rem .65rem; min-height:3rem; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.1); transition:box-shadow .15s;">
+    style="background:${card.color || 'lemonchiffon'}; padding:.5rem .65rem; min-height:3rem; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.1); transition:box-shadow .15s;">
     <div style="font-size:.75rem; line-height:1.4; color:${contrast}; white-space:pre-wrap; word-break:break-word; pointer-events:none;">${escapeHtml(card.text?.slice(0, 120) || '')}</div>
   </div>`
 }
@@ -441,39 +441,47 @@ function renderEdgeModal(linkId, fromCardId, cards, edgeTypes) {
 
   const typeOptions = Object.values(allTypes).map(t => `<option value="${escapeHtml(t.name)}">`).join('')
 
-  const borderAlpha = edgeContrast === '#ffffff' ? 'rgba(255,255,255,.4)' : 'rgba(0,0,0,.2)'
-  const btnStyle = `flex:1; padding:.4rem .6rem; border:1px solid ${borderAlpha}; border-radius:4px; background:rgba(255,255,255,.15); font-family:'Recursive',sans-serif; font-size:.75rem; color:${edgeContrast}; cursor:pointer; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;`
+  const bodyBg = `color-mix(in srgb, ${edgeColor} 10%, white)`
+  const btnStyle = `flex:1; padding:.4rem .6rem; border:1px solid rgba(0,0,0,.12); background:white; font-family:'Recursive',sans-serif; font-size:.75rem; color:#3a3020; cursor:pointer; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;`
+  const labelStyle = `font-family:'Recursive',sans-serif; font-size:.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:rgba(0,0,0,.4); margin-bottom:.35rem;`
 
   return `
-    <div style="min-height:100vh; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; padding:2rem; box-sizing:border-box;">
+    <div style="min-height:100%; display:flex; align-items:center; justify-content:center; padding:2rem; box-sizing:border-box;">
       <div data-link-id="${linkId}" data-from-card="${fromCardId}"
-        style="background:${edgeColor}; border-radius:12px; padding:1.5rem; width:100%; max-width:560px; box-shadow:0 8px 32px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.3); font-family:'Recursive',sans-serif;">
-        <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:.75rem; align-items:center; margin-bottom:1rem;">
-          ${renderCardMini(fromCardId, fromCard)}
-          <div style="display:flex; flex-direction:column; align-items:center; gap:.4rem;">
-            <div data-edge-dot style="width:14px; height:14px; border-radius:50%; background:${edgeColor}; border:2px solid ${borderAlpha}; flex-shrink:0;"></div>
-            <input class="edge-type-input" list="bb-edge-types-${linkId}"
-              value="${escapeHtml(edgeName)}" placeholder="type name"
-              data-link-id="${linkId}" data-from-card="${fromCardId}"
-              style="width:90px; border:1px solid ${borderAlpha}; border-radius:3px; padding:.2rem .35rem; font-family:'Recursive',sans-serif; font-size:.7rem; text-align:center; background:rgba(255,255,255,.18); color:${edgeContrast}; outline:none;">
-            <datalist id="bb-edge-types-${linkId}">${typeOptions}</datalist>
-            <div data-palette-edge="${linkId}" data-from-card="${fromCardId}"
-              style="width:90px; height:60px; border-radius:3px; overflow:hidden; border:1px solid ${borderAlpha};">
-              <plan98-palette style="height:100%; width:100%;"></plan98-palette>
+        style="width:100%; max-width:560px; overflow:hidden; box-shadow:0 4px 24px rgba(0,0,0,.18), 0 1px 4px rgba(0,0,0,.12); font-family:'Recursive',sans-serif;">
+        <div style="background:${edgeColor}; padding:.5rem .75rem; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(0,0,0,.1);">
+          <span style="font-family:'Recursive',sans-serif; font-size:.8rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:${edgeContrast};">Relationship Manager</span>
+          <span style="font-family:'Recursive',sans-serif; font-size:.7rem; color:${edgeContrast}; opacity:.7;">${escapeHtml(edgeName)}</span>
+        </div>
+        <div style="background:${bodyBg}; padding:1.25rem;">
+          <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:.75rem; align-items:center; margin-bottom:1rem;">
+            ${renderCardMini(fromCardId, fromCard)}
+            <div style="display:flex; flex-direction:column; align-items:center; gap:.4rem;">
+              <div data-edge-dot style="width:12px; height:12px; background:${edgeColor}; flex-shrink:0;"></div>
+              <div style="${labelStyle} margin-bottom:0;">type</div>
+              <input class="edge-type-input" list="bb-edge-types-${linkId}"
+                value="${escapeHtml(edgeName)}" placeholder="type name"
+                data-link-id="${linkId}" data-from-card="${fromCardId}"
+                style="width:90px; border:1px solid rgba(0,0,0,.15); padding:.2rem .35rem; font-family:'Recursive',sans-serif; font-size:.7rem; text-align:center; background:white; color:#3a3020; outline:none;">
+              <datalist id="bb-edge-types-${linkId}">${typeOptions}</datalist>
+              <div data-palette-edge="${linkId}" data-from-card="${fromCardId}"
+                style="width:90px; height:56px; overflow:hidden; border:1px solid rgba(0,0,0,.1);">
+                <plan98-palette style="height:100%; width:100%;"></plan98-palette>
+              </div>
             </div>
+            ${renderCardMini(link.to, toCard)}
           </div>
-          ${renderCardMini(link.to, toCard)}
-        </div>
-        <div style="display:flex; gap:.5rem; margin-bottom:1rem;">
-          <button data-goto-card="${fromCardId}" style="${btnStyle}">← ${escapeHtml(fromCard.text?.slice(0,20) || fromCardId.slice(0,8))}</button>
-          <button data-goto-card="${link.to}" style="${btnStyle}">→ ${escapeHtml(toCard.text?.slice(0,20) || link.to.slice(0,8))}</button>
-        </div>
-        ${participants.size > 0 ? `
-          <div style="font-size:.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:${edgeContrast}; opacity:.6; margin-bottom:.5rem;">Also in "${escapeHtml(edgeName)}"</div>
-          <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:.5rem;">
-            ${[...participants].map(cid => renderCardMini(cid, cards[cid])).join('')}
+          <div style="display:flex; gap:.5rem; margin-bottom:${participants.size > 0 ? '1rem' : '0'};">
+            <button data-goto-card="${fromCardId}" style="${btnStyle}">← ${escapeHtml(fromCard.text?.slice(0,20) || fromCardId.slice(0,8))}</button>
+            <button data-goto-card="${link.to}" style="${btnStyle}">→ ${escapeHtml(toCard.text?.slice(0,20) || link.to.slice(0,8))}</button>
           </div>
-        ` : ''}
+          ${participants.size > 0 ? `
+            <div style="${labelStyle}">Also in "${escapeHtml(edgeName)}"</div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:.5rem;">
+              ${[...participants].map(cid => renderCardMini(cid, cards[cid])).join('')}
+            </div>
+          ` : ''}
+        </div>
       </div>
     </div>
   `
@@ -679,10 +687,12 @@ function update(target) {
   patchCardsLayer(cardsLayer, cards, focusedCard, linkSource, grabbing)
 
   const cardsJson = JSON.stringify(cards)
+  const etColorSig = Object.entries(edgeTypes).map(([k, v]) => `${k}:${v.color}`).join(',')
+  const renderSig = cardsJson + '|' + etColorSig
   const linksLayer = target.querySelector('.links-layer')
-  if (cardsJson !== _lastCardsJson) {
+  if (renderSig !== _lastRenderSig) {
     linksLayer.innerHTML = renderLinksInner(cards, edgeTypes)
-    _lastCardsJson = cardsJson
+    _lastRenderSig = renderSig
   }
 
   // rubber-band preview
@@ -712,11 +722,16 @@ function update(target) {
 
     const sidebarBody = sidebar.querySelector('.sidebar-body')
     const etSig = Object.entries(edgeTypes).map(([k, v]) => `${k}:${v.color}`).join(',')
-    const cardSwitched = sidebarBody.dataset.card !== sidebarCard || sidebarBody.dataset.etSig !== etSig
+    const linkTypeSig = Object.entries(card?.links || {}).map(([k, v]) => `${k}:${v.typeId}`).join(',')
+      + '|' + Object.keys(card?.backlinks || {}).join(',')
+    const cardSwitched = sidebarBody.dataset.card !== sidebarCard
+      || sidebarBody.dataset.etSig !== etSig
+      || sidebarBody.dataset.linkTypeSig !== linkTypeSig
     if (cardSwitched) {
       sidebarBody.innerHTML = renderSidebarBody(sidebarCard, cards, edgeTypes)
       sidebarBody.dataset.card = sidebarCard
       sidebarBody.dataset.etSig = etSig
+      sidebarBody.dataset.linkTypeSig = linkTypeSig
     } else {
       // Patch live stats without destroying plan98-palette or editor focus
       if (card) {
@@ -952,7 +967,7 @@ $.when('click', '[data-open-edge]', e => {
   const linkId = e.target.dataset.openEdge
   const fromCardId = e.target.dataset.fromCard
   const { cards, edgeTypes } = $.learn()
-  showModal(renderEdgeModal(linkId, fromCardId, cards, edgeTypes), { transparent: true })
+  showModal(renderEdgeModal(linkId, fromCardId, cards, edgeTypes))
 })
 
 // Modal renders outside bulletin-board — use document listeners for modal interactions
@@ -1108,7 +1123,7 @@ document.addEventListener('pointermove', e => {
 
 function stopArrowInterval() {
   if (_arrowInterval) { clearInterval(_arrowInterval); _arrowInterval = null }
-  _lastCardsJson = null // force SVG rebuild on next draw
+  _lastRenderSig = null // force SVG rebuild on next draw
 }
 
 function cancelGesture() {
