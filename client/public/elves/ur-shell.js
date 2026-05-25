@@ -106,7 +106,8 @@ export function sh(message) {
 }
 
 export function update(message) {
-  hideModal()
+  const { popped } = $.learn()
+  if (popped) hideModal()
 }
 
 $.teach({ body: `<code>art</code> <code>music</code> <code>coding</code>`, author: 'assistant' }, mergeMessage)
@@ -363,6 +364,7 @@ const commands = {
 
 **apps**
 \`art\` — flip-book animation
+\`color\` — color and sound palette
 \`music\` — paper-pocket sequencer
 \`coding\` — lore-baby storytelling
 \`clownbot\` — open terminal session
@@ -429,6 +431,10 @@ Type \`<elf-name>\` to load a custom element.
     const { agent } = await import('./clownbot-agent.js')
     const reply = await agent(null)
     return reply
+  },
+  'color': () => {
+    loadModule('<plan98-palette')
+    return 'launching palette...'
   },
   'art': () => {
     loadPath('/app/flip-book')

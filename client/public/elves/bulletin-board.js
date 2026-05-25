@@ -232,7 +232,13 @@ function deleteCard(id) {
     })
   }
   delete next[id]
-  $.teach({ cards: next, focusedCard: null })
+  const { sidebarCard } = $.learn()
+  $.teach({
+    cards: next,
+    focusedCard: null,
+    sidebarOpen: sidebarCard === id ? false : $.learn().sidebarOpen,
+    sidebarCard: sidebarCard === id ? null : sidebarCard,
+  })
 }
 
 function linkCards(fromId, toId, fromDir, toDir, typeId = HYPER_ID) {
@@ -445,7 +451,7 @@ function renderEdgeModal(linkId, fromCardId, cards, edgeTypes) {
         <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:.75rem; align-items:center; margin-bottom:1rem;">
           ${renderCardMini(fromCardId, fromCard)}
           <div style="display:flex; flex-direction:column; align-items:center; gap:.4rem;">
-            <div style="width:14px; height:14px; border-radius:50%; background:${edgeColor}; border:2px solid ${borderAlpha}; flex-shrink:0;"></div>
+            <div data-edge-dot style="width:14px; height:14px; border-radius:50%; background:${edgeColor}; border:2px solid ${borderAlpha}; flex-shrink:0;"></div>
             <input class="edge-type-input" list="bb-edge-types-${linkId}"
               value="${escapeHtml(edgeName)}" placeholder="type name"
               data-link-id="${linkId}" data-from-card="${fromCardId}"
@@ -705,10 +711,12 @@ function update(target) {
     sidebar.style.setProperty('--sidebar-card-contrast', contrastColor(cardColor))
 
     const sidebarBody = sidebar.querySelector('.sidebar-body')
-    const cardSwitched = sidebarBody.dataset.card !== sidebarCard
+    const etSig = Object.entries(edgeTypes).map(([k, v]) => `${k}:${v.color}`).join(',')
+    const cardSwitched = sidebarBody.dataset.card !== sidebarCard || sidebarBody.dataset.etSig !== etSig
     if (cardSwitched) {
       sidebarBody.innerHTML = renderSidebarBody(sidebarCard, cards, edgeTypes)
       sidebarBody.dataset.card = sidebarCard
+      sidebarBody.dataset.etSig = etSig
     } else {
       // Patch live stats without destroying plan98-palette or editor focus
       if (card) {
@@ -991,6 +999,8 @@ document.addEventListener('input', e => {
   if (!link) return
   const typeId = link.typeId || HYPER_ID
   $.teach({ edgeTypes: { ...edgeTypes, [typeId]: { ...edgeTypes[typeId], color } } })
+  const dot = edgeWrap.closest('[data-link-id]')?.querySelector('[data-edge-dot]')
+  if (dot) dot.style.background = color
   save(document.querySelector(tag))
 })
 
