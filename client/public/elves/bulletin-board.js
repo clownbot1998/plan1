@@ -412,7 +412,7 @@ function renderCardMini(id, card) {
   </div>`
 }
 
-function renderEdgeModal(linkId, fromCardId, cards, edgeTypes) {
+function renderEdgeModalInner(linkId, fromCardId, cards, edgeTypes) {
   const fromCard = cards[fromCardId]
   if (!fromCard) return '<p>Link not found.</p>'
   const link = fromCard.links?.[linkId]
@@ -426,7 +426,6 @@ function renderEdgeModal(linkId, fromCardId, cards, edgeTypes) {
   const edgeName = edgeType?.name || 'hyper'
   const edgeContrast = contrastColor(edgeColor)
 
-  // Nodes participating in at least one edge of this type (excluding these two)
   const participants = new Set()
   Object.entries(cards).forEach(([cid, card]) => {
     Object.values(card.links || {}).forEach(l => {
@@ -440,46 +439,80 @@ function renderEdgeModal(linkId, fromCardId, cards, edgeTypes) {
   participants.delete(link.to)
 
   const typeOptions = Object.values(allTypes).map(t => `<option value="${escapeHtml(t.name)}">`).join('')
-
   const bodyBg = `color-mix(in srgb, ${edgeColor} 10%, white)`
   const labelStyle = `font-family:'Recursive',sans-serif; font-size:.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:rgba(0,0,0,.4); margin-bottom:.35rem;`
 
   return `
-    <div data-modal-close style="min-height:100%; display:flex; align-items:center; justify-content:center; padding:2rem; box-sizing:border-box;">
-      <div data-link-id="${linkId}" data-from-card="${fromCardId}"
-        style="width:100%; max-width:560px; overflow:hidden; box-shadow:0 4px 24px rgba(0,0,0,.18), 0 1px 4px rgba(0,0,0,.12); font-family:'Recursive',sans-serif;">
-        <div data-edge-header style="background:${edgeColor}; padding:.5rem .75rem; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(0,0,0,.1);">
-          <span data-edge-contrast style="font-family:'Recursive',sans-serif; font-size:.8rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:${edgeContrast};">Relationship Manager</span>
-          <span data-edge-contrast style="font-family:'Recursive',sans-serif; font-size:.7rem; color:${edgeContrast}; opacity:.7;">${escapeHtml(edgeName)}</span>
-        </div>
-        <div data-edge-body style="background:${bodyBg}; padding:1.25rem;">
-          <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:.75rem; align-items:center; margin-bottom:1rem;">
-            ${renderCardMini(fromCardId, fromCard)}
-            <div style="display:flex; flex-direction:column; align-items:center; gap:.4rem;">
-              <div data-edge-dot style="width:12px; height:12px; background:${edgeColor}; flex-shrink:0;"></div>
-              <div style="${labelStyle} margin-bottom:0;">type</div>
-              <input class="edge-type-input" list="bb-edge-types-${linkId}"
-                value="${escapeHtml(edgeName)}" placeholder="type name"
-                data-link-id="${linkId}" data-from-card="${fromCardId}"
-                style="width:90px; border:1px solid rgba(0,0,0,.15); padding:.2rem .35rem; font-family:'Recursive',sans-serif; font-size:.7rem; text-align:center; background:white; color:#3a3020; outline:none;">
-              <datalist id="bb-edge-types-${linkId}">${typeOptions}</datalist>
-              <div data-palette-edge="${linkId}" data-from-card="${fromCardId}"
-                style="width:90px; height:56px; overflow:hidden; border:1px solid rgba(0,0,0,.1); visibility:${edgeName === 'hyper' ? 'hidden' : 'visible'};">
-                <plan98-palette style="height:100%; width:100%;"></plan98-palette>
-              </div>
+    <div data-link-id="${linkId}" data-from-card="${fromCardId}"
+      style="width:100%; overflow:hidden; box-shadow:0 4px 24px rgba(0,0,0,.18), 0 1px 4px rgba(0,0,0,.12); font-family:'Recursive',sans-serif;">
+      <div data-edge-header style="background:${edgeColor}; padding:.5rem .75rem; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(0,0,0,.1);">
+        <span data-edge-contrast style="font-family:'Recursive',sans-serif; font-size:.8rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:${edgeContrast};">Relationship Manager</span>
+        <span data-edge-contrast data-edge-type-label style="font-family:'Recursive',sans-serif; font-size:.7rem; color:${edgeContrast}; opacity:.7;">${escapeHtml(edgeName)}</span>
+      </div>
+      <div data-edge-body style="background:${bodyBg}; padding:1.25rem;">
+        <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:.75rem; align-items:center; margin-bottom:1rem;">
+          ${renderCardMini(fromCardId, fromCard)}
+          <div style="display:flex; flex-direction:column; align-items:center; gap:.4rem;">
+            <div data-edge-dot style="width:12px; height:12px; background:${edgeColor}; flex-shrink:0;"></div>
+            <div style="${labelStyle} margin-bottom:0;">type</div>
+            <input class="edge-type-input" list="bb-edge-types-${linkId}"
+              value="${escapeHtml(edgeName)}" placeholder="type name"
+              data-link-id="${linkId}" data-from-card="${fromCardId}"
+              style="width:90px; border:1px solid rgba(0,0,0,.15); padding:.2rem .35rem; font-family:'Recursive',sans-serif; font-size:.7rem; text-align:center; background:white; color:#3a3020; outline:none;">
+            <datalist id="bb-edge-types-${linkId}">${typeOptions}</datalist>
+            <div data-palette-edge="${linkId}" data-from-card="${fromCardId}"
+              style="width:90px; height:56px; overflow:hidden; border:1px solid rgba(0,0,0,.1); visibility:${edgeName === 'hyper' ? 'hidden' : 'visible'};">
+              <plan98-palette style="height:100%; width:100%;"></plan98-palette>
             </div>
-            ${renderCardMini(link.to, toCard)}
           </div>
-          ${participants.size > 0 ? `
-            <div style="${labelStyle}">Also in "${escapeHtml(edgeName)}"</div>
-            <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:.5rem;">
-              ${[...participants].map(cid => renderCardMini(cid, cards[cid])).join('')}
-            </div>
-          ` : ''}
+          ${renderCardMini(link.to, toCard)}
         </div>
+        ${participants.size > 0 ? `
+          <div style="${labelStyle}">Also in "${escapeHtml(edgeName)}"</div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:.5rem;">
+            ${[...participants].map(cid => renderCardMini(cid, cards[cid])).join('')}
+          </div>
+        ` : ''}
       </div>
     </div>
   `
+}
+
+function openEdgeModal(linkId, fromCardId) {
+  showModal(`<div data-modal-close style="min-height:100%;display:flex;align-items:center;justify-content:center;padding:2rem;box-sizing:border-box;"><${tag} shell="true" data-link-id="${linkId}" data-from-card="${fromCardId}" style="display:block;width:100%;max-width:560px;"></${tag}></div>`)
+}
+
+function updateShell(target) {
+  const linkId = target.dataset.linkId
+  const fromCardId = target.dataset.fromCard
+  const { cards, edgeTypes } = $.learn()
+
+  if (!target.querySelector('[data-edge-header]')) {
+    target.innerHTML = renderEdgeModalInner(linkId, fromCardId, cards, edgeTypes)
+    return null
+  }
+
+  const allTypes = { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' }, ...edgeTypes }
+  const link = cards[fromCardId]?.links?.[linkId]
+  if (!link) return null
+  const typeId = link.typeId || HYPER_ID
+  const color = allTypes[typeId]?.color || 'dodgerblue'
+  const name = allTypes[typeId]?.name || 'hyper'
+  const contrast = contrastColor(color)
+
+  const header = target.querySelector('[data-edge-header]')
+  if (header) header.style.background = color
+  const dot = target.querySelector('[data-edge-dot]')
+  if (dot) dot.style.background = color
+  const body = target.querySelector('[data-edge-body]')
+  if (body) body.style.background = `color-mix(in srgb, ${color} 10%, white)`
+  target.querySelectorAll('[data-edge-contrast]').forEach(el => el.style.color = contrast)
+  const paletteWrap = target.querySelector('[data-palette-edge]')
+  if (paletteWrap) paletteWrap.style.visibility = name === 'hyper' ? 'hidden' : 'visible'
+  const typeLabel = target.querySelector('[data-edge-type-label]')
+  if (typeLabel) typeLabel.textContent = name
+
+  return null
 }
 
 function renderLinksInner(cards, edgeTypes = {}) {
@@ -622,6 +655,7 @@ function renderCompassButtons(mode) {
 // ── draw ──────────────────────────────────────────────────────────────────────
 
 $.draw(target => {
+  if (target.getAttribute('shell')) return updateShell(target)
   if (target.innerHTML) return update(target)
   mount(target)
 }, { beforeUpdate, afterUpdate })
@@ -972,10 +1006,7 @@ $.when('click', '[data-close-sidebar]', () => {
 // ── edge modal ────────────────────────────────────────────────────────────────
 
 $.when('click', '[data-open-edge]', e => {
-  const linkId = e.target.dataset.openEdge
-  const fromCardId = e.target.dataset.fromCard
-  const { cards, edgeTypes } = $.learn()
-  showModal(renderEdgeModal(linkId, fromCardId, cards, edgeTypes))
+  openEdgeModal(e.target.dataset.openEdge, e.target.dataset.fromCard)
 })
 
 // Modal renders outside bulletin-board — use document listeners for modal interactions
@@ -989,7 +1020,7 @@ document.addEventListener('click', e => {
   const g = e.target.closest('g[data-link-id]')
   if (!g) return
   const linkId = g.dataset.linkId
-  const { cards, edgeTypes } = $.learn()
+  const { cards } = $.learn()
   let fromCardId = null
   outer: for (const [cid, card] of Object.entries(cards)) {
     for (const lid of Object.keys(card.links || {})) {
@@ -997,14 +1028,12 @@ document.addEventListener('click', e => {
     }
   }
   if (!fromCardId) return
-  showModal(renderEdgeModal(linkId, fromCardId, cards, edgeTypes))
+  openEdgeModal(linkId, fromCardId)
 })
 
-document.addEventListener('change', e => {
-  const input = e.target.closest('.edge-type-input')
-  if (!input) return
-  const { linkId, fromCard: fromCardId } = input.dataset
-  const name = input.value.trim()
+$.when('change', '.edge-type-input', e => {
+  const { linkId, fromCard: fromCardId } = e.target.dataset
+  const name = e.target.value.trim()
   if (!linkId || !fromCardId || !name) return
   const { cards, edgeTypes } = $.learn()
   const fromCard = cards[fromCardId]
@@ -1013,32 +1042,23 @@ document.addEventListener('change', e => {
   const typeId = createEdgeType(name, edgeTypes[link.typeId]?.color || 'dodgerblue')
   const updatedLink = { ...link, typeId }
   $.teach({
-    cards: {
-      ...cards,
-      [fromCardId]: { ...fromCard, links: { ...fromCard.links, [linkId]: updatedLink } }
-    }
+    cards: { ...cards, [fromCardId]: { ...fromCard, links: { ...fromCard.links, [linkId]: updatedLink } } }
   })
-  // Repaint modal to reflect resolved type's color (name collision hits existing color)
-  const resolvedColor = $.learn().edgeTypes[typeId]?.color || 'dodgerblue'
-  const resolvedContrast = contrastColor(resolvedColor)
-  const panel = document.querySelector(`[data-link-id="${linkId}"]`)
-  if (panel) {
-    const dot = panel.querySelector('[data-edge-dot]')
-    if (dot) dot.style.background = resolvedColor
-    const header = panel.querySelector('[data-edge-header]')
-    if (header) header.style.background = resolvedColor
-    const edgeBody = panel.querySelector('[data-edge-body]')
-    if (edgeBody) edgeBody.style.background = `color-mix(in srgb, ${resolvedColor} 10%, white)`
-    panel.querySelectorAll('[data-edge-contrast]').forEach(el => el.style.color = resolvedContrast)
-  }
-  const paletteWrap = document.querySelector(`[data-palette-edge="${linkId}"]`)
-  if (paletteWrap) paletteWrap.style.visibility = name === 'hyper' ? 'hidden' : 'visible'
   save(document.querySelector(tag))
 })
 
-// palette input from modal (outside bulletin-board element) — document level
-document.addEventListener('input', e => {
-  if (!e.target.matches('plan98-palette')) return
+$.when('input', 'plan98-palette', e => {
+  const cardWrap = e.target.closest('[data-palette-card]')
+  if (cardWrap) {
+    const id = cardWrap.dataset.paletteCard
+    const color = e.detail?.color
+    if (!id || !color) return
+    updateCard(id, { color })
+    const cardEl = document.querySelector(`.card[data-id="${id}"]`)
+    if (cardEl) cardEl.style.background = color
+    save(e.target.closest(tag))
+    return
+  }
   const edgeWrap = e.target.closest('[data-palette-edge]')
   if (!edgeWrap) return
   const linkId = edgeWrap.dataset.paletteEdge
@@ -1051,31 +1071,7 @@ document.addEventListener('input', e => {
   if (!link) return
   const typeId = link.typeId || HYPER_ID
   $.teach({ edgeTypes: { ...edgeTypes, [typeId]: { ...edgeTypes[typeId], color } } })
-  const panel = edgeWrap.closest('[data-link-id]')
-  if (panel) {
-    const contrast = contrastColor(color)
-    const dot = panel.querySelector('[data-edge-dot]')
-    if (dot) dot.style.background = color
-    const header = panel.querySelector('[data-edge-header]')
-    if (header) header.style.background = color
-    const edgeBody = panel.querySelector('[data-edge-body]')
-    if (edgeBody) edgeBody.style.background = `color-mix(in srgb, ${color} 10%, white)`
-    panel.querySelectorAll('[data-edge-contrast]').forEach(el => el.style.color = contrast)
-  }
   save(document.querySelector(tag))
-})
-
-$.when('input', 'plan98-palette', e => {
-  // Card palette (inside sidebar — within bulletin-board element)
-  const cardWrap = e.target.closest('[data-palette-card]')
-  if (!cardWrap) return
-  const id = cardWrap.dataset.paletteCard
-  const color = e.detail?.color
-  if (!id || !color) return
-  updateCard(id, { color })
-  const cardEl = document.querySelector(`.card[data-id="${id}"]`)
-  if (cardEl) cardEl.style.background = color
-  save(e.target.closest(tag))
 })
 
 // ── link mode: click card body to select ─────────────────────────────────────
