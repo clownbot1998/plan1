@@ -136,6 +136,8 @@ const $ = Self(tag, {
   // sidebar
   sidebarOpen: _permalinkSidebar,
   sidebarCard: _permalinkCard,
+  inspectorOpen: true,
+  attachmentsOpen: true,
   edgeTypes: { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
   players: {},
 })
@@ -488,7 +490,7 @@ function renderCard(id, card, focused, linkSource) {
   `
 }
 
-function renderSidebarBody(id, cards, edgeTypes = {}) {
+function renderInspectorBody(id, cards, edgeTypes = {}) {
   const card = cards[id]
   if (!card) return '<p class="sidebar-empty">Card not found.</p>'
   const allTypes = { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' }, ...edgeTypes }
@@ -527,6 +529,94 @@ function renderSidebarBody(id, cards, edgeTypes = {}) {
       </div>
     </div>
   `
+}
+
+function renderAttachments(cardId, card) {
+  const attachments = Object.entries(card.attachments || {})
+  return `
+    <div class="attach-gallery">
+      ${attachments.map(([aid, att]) => `
+        <button class="attach-thumb" data-open-attachment="${aid}" data-card-id="${cardId}" title="open ${att.type}">
+          <canvas class="fb-thumb-canvas" width="80" height="60" data-fb-path="${escapeHtml(att.fbId)}"></canvas>
+          <span class="attach-label"><sl-icon name="film"></sl-icon></span>
+        </button>
+      `).join('')}
+      <button class="attach-add" data-add-fb="${cardId}">
+        <sl-icon name="plus-circle"></sl-icon>
+        <span>flip-book</span>
+      </button>
+    </div>
+  `
+}
+
+function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen) {
+  const card = cards[id]
+  if (!card) return '<p class="sidebar-empty">Card not found.</p>'
+  return `
+    <div class="sidebar-section">
+      <button class="section-toggle" data-toggle-section="inspector">
+        <sl-icon name="${inspectorOpen ? 'chevron-down' : 'chevron-right'}" class="section-chevron"></sl-icon>
+        <span>Inspector</span>
+      </button>
+      <div class="section-body${inspectorOpen ? '' : ' section-collapsed'}">
+        ${renderInspectorBody(id, cards, edgeTypes)}
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <button class="section-toggle" data-toggle-section="attachments">
+        <sl-icon name="${attachmentsOpen ? 'chevron-down' : 'chevron-right'}" class="section-chevron"></sl-icon>
+        <span>Attachments</span>
+      </button>
+      <div class="section-body${attachmentsOpen ? '' : ' section-collapsed'}">
+        ${renderAttachments(id, card)}
+      </div>
+    </div>
+  `
+}
+
+async function loadFbThumb(canvas, wasPath) {
+  try {
+    const blob = await wasGet(wasPath + '.flip-book.json')
+    if (!blob) return
+    const state = JSON.parse(await blob.text())
+    const { frames, frameStrokes, canvasW = 320, canvasH = 240 } = state
+    if (!frames?.length) return
+    const strokes = frameStrokes?.[frames[0]] || []
+    if (!strokes.length) return
+    const ctx = canvas.getContext('2d')
+    const scaleX = canvas.width / canvasW
+    const scaleY = canvas.height / canvasH
+    const scale = Math.min(scaleX, scaleY)
+    ctx.save()
+    ctx.scale(scale, scale)
+    strokes.forEach(stroke => {
+      if (stroke?.length === 1 && stroke[0].fill) return
+      if (!stroke || stroke.length < 2) return
+      let curX = stroke[0].x, curY = stroke[0].y
+      for (let i = 1; i < stroke.length; i++) {
+        const pt = stroke[i]
+        const endX = i < stroke.length - 1 ? (stroke[i].x + stroke[i+1].x) / 2 : stroke[i].x
+        const endY = i < stroke.length - 1 ? (stroke[i].y + stroke[i+1].y) / 2 : stroke[i].y
+        ctx.beginPath()
+        ctx.moveTo(curX, curY)
+        ctx.strokeStyle = pt.erase ? 'rgba(0,0,0,1)' : (pt.color || '#ebdbb2')
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+        ctx.globalAlpha = pt.opacity ?? 1
+        ctx.lineWidth = pt.lineWidth || 8
+        if (i < stroke.length - 1) ctx.quadraticCurveTo(pt.x, pt.y, endX, endY)
+        else ctx.lineTo(endX, endY)
+        ctx.stroke()
+        curX = endX; curY = endY
+      }
+    })
+    ctx.restore()
+  } catch {}
+}
+
+function queueThumbLoad(sidebarEl) {
+  sidebarEl.querySelectorAll('[data-fb-path]').forEach(canvas => {
+    loadFbThumb(canvas, canvas.dataset.fbPath)
+  })
 }
 
 function renderCardMini(id, card) {
@@ -914,7 +1004,8 @@ function mount(target) {
 function update(target) {
   const { panX, panY, zoom, cards, mode, menuOpen, beltOffsetX, beltOffsetY,
           focusedCard, linkSource, isDrawing, createStartX, createStartY, createX, createY,
-          sidebarOpen, sidebarCard, grabbing, edgeTypes, launchHref, players } = $.learn()
+          sidebarOpen, sidebarCard, grabbing, edgeTypes, launchHref, players,
+          inspectorOpen, attachmentsOpen } = $.learn()
 
   const workspace = target.querySelector('.workspace')
   workspace.style.setProperty('--pan-x', panX + 'px')
@@ -995,14 +1086,21 @@ function update(target) {
     const etSig = Object.entries(edgeTypes).map(([k, v]) => `${k}:${v.color}`).join(',')
     const linkTypeSig = Object.entries(card?.links || {}).map(([k, v]) => `${k}:${v.typeId}`).join(',')
       + '|' + Object.keys(card?.backlinks || {}).join(',')
+    const attachSig = Object.keys(card?.attachments || {}).join(',')
+    const sectionSig = `${inspectorOpen}|${attachmentsOpen}`
     const cardSwitched = sidebarBody.dataset.card !== sidebarCard
       || sidebarBody.dataset.etSig !== etSig
       || sidebarBody.dataset.linkTypeSig !== linkTypeSig
+      || sidebarBody.dataset.attachSig !== attachSig
+      || sidebarBody.dataset.sectionSig !== sectionSig
     if (cardSwitched) {
-      sidebarBody.innerHTML = renderSidebarBody(sidebarCard, cards, edgeTypes)
+      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen)
       sidebarBody.dataset.card = sidebarCard
       sidebarBody.dataset.etSig = etSig
       sidebarBody.dataset.linkTypeSig = linkTypeSig
+      sidebarBody.dataset.attachSig = attachSig
+      sidebarBody.dataset.sectionSig = sectionSig
+      queueThumbLoad(sidebarBody)
     } else {
       // Patch live stats without destroying plan98-palette or editor focus
       if (card) {
@@ -1233,6 +1331,35 @@ $.when('click', '.card-pencil', e => {
 
 $.when('click', '[data-close-sidebar]', () => {
   $.teach({ sidebarOpen: false, sidebarCard: null })
+})
+
+$.when('click', '[data-toggle-section]', e => {
+  const section = e.target.closest('[data-toggle-section]')?.dataset.toggleSection
+  if (section === 'inspector') $.teach({ inspectorOpen: !$.learn().inspectorOpen })
+  else if (section === 'attachments') $.teach({ attachmentsOpen: !$.learn().attachmentsOpen })
+})
+
+$.when('click', '[data-add-fb]', e => {
+  const cardId = e.target.closest('[data-add-fb]')?.dataset.addFb
+  if (!cardId) return
+  const { cards } = $.learn()
+  const card = cards[cardId]
+  if (!card) return
+  const attachId = crypto.randomUUID()
+  const fbId = `/bb/${_boardId}/${attachId}`
+  const attachments = { ...(card.attachments || {}), [attachId]: { type: 'flip-book', fbId, createdAt: new Date().toISOString() } }
+  updateCard(cardId, { attachments })
+  save(document.querySelector(tag))
+  $.teach({ launchHref: `/app/flip-book?id=${encodeURIComponent(fbId)}` })
+})
+
+$.when('click', '[data-open-attachment]', e => {
+  const btn = e.target.closest('[data-open-attachment]')
+  if (!btn) return
+  const { cards } = $.learn()
+  const att = cards[btn.dataset.cardId]?.attachments?.[btn.dataset.openAttachment]
+  if (!att) return
+  $.teach({ launchHref: `/app/flip-book?id=${encodeURIComponent(att.fbId)}` })
 })
 
 // ── edge modal ────────────────────────────────────────────────────────────────
@@ -1968,7 +2095,7 @@ $.style(`
   & .sidebar-body {
     flex: 1;
     overflow-y: auto;
-    padding: .75rem;
+    padding: 0;
   }
 
   & .sidebar-title {
@@ -2104,6 +2231,95 @@ $.style(`
     border-color: dodgerblue;
     box-shadow: 0 0 0 2px rgba(30,144,255,.15);
   }
+
+  & .sidebar-section {
+    border-bottom: 1px solid rgba(0,0,0,.07);
+  }
+
+  & .section-toggle {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    width: 100%;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: .45rem .75rem;
+    font-family: 'Recursive', sans-serif;
+    font-size: .65rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: rgba(0,0,0,.45);
+    text-align: left;
+    transition: color .1s, background .1s;
+  }
+  & .section-toggle:hover { background: rgba(0,0,0,.04); color: rgba(0,0,0,.7); }
+
+  & .section-chevron { font-size: .75rem; flex-shrink: 0; }
+
+  & .section-body {
+    padding: .5rem .75rem .75rem;
+    overflow: hidden;
+  }
+  & .section-body.section-collapsed { display: none; }
+
+  & .attach-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: .5rem;
+  }
+
+  & .attach-thumb {
+    background: rgba(0,0,0,.05);
+    border: 1.5px solid rgba(0,0,0,.1);
+    border-radius: 4px;
+    padding: 0;
+    cursor: pointer;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    transition: border-color .15s, box-shadow .15s;
+    aspect-ratio: 4/3;
+  }
+  & .attach-thumb:hover { border-color: dodgerblue; box-shadow: 0 0 0 2px rgba(30,144,255,.2); }
+
+  & .fb-thumb-canvas {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    background: #1d2021;
+  }
+
+  & .attach-label {
+    position: absolute;
+    bottom: 2px; right: 4px;
+    font-size: .6rem;
+    color: rgba(255,255,255,.6);
+  }
+
+  & .attach-add {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: .25rem;
+    background: none;
+    border: 1.5px dashed rgba(0,0,0,.2);
+    border-radius: 4px;
+    padding: .5rem .25rem;
+    cursor: pointer;
+    font-family: 'Recursive', sans-serif;
+    font-size: .6rem;
+    color: rgba(0,0,0,.4);
+    aspect-ratio: 4/3;
+    transition: border-color .15s, color .15s;
+  }
+  & .attach-add:hover { border-color: dodgerblue; color: dodgerblue; }
+  & .attach-add sl-icon { font-size: 1.1rem; }
 
   /* ── play button ── */
 
