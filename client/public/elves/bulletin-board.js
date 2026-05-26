@@ -138,6 +138,7 @@ const $ = Self(tag, {
   sidebarCard: _permalinkCard,
   inspectorOpen: true,
   attachmentsOpen: true,
+  logsOpen: true,
   edgeTypes: { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
   players: {},
 })
@@ -549,7 +550,7 @@ function renderAttachments(cardId, card) {
   `
 }
 
-function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen) {
+function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen) {
   const card = cards[id]
   if (!card) return '<p class="sidebar-empty">Card not found.</p>'
   return `
@@ -569,6 +570,15 @@ function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsO
       </button>
       <div class="section-body${attachmentsOpen ? '' : ' section-collapsed'}">
         ${renderAttachments(id, card)}
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <button class="section-toggle" data-toggle-section="logs">
+        <sl-icon name="${logsOpen ? 'chevron-down' : 'chevron-right'}" class="section-chevron"></sl-icon>
+        <span>Logs</span>
+      </button>
+      <div class="section-body logs-section-body${logsOpen ? '' : ' section-collapsed'}">
+        <iframe class="logs-shell" src="/app/ur-shell" title="shell: ${id}"></iframe>
       </div>
     </div>
   `
@@ -981,7 +991,7 @@ function mount(target) {
       <div class="sidebar-resizer" data-sidebar-resizer></div>
       <div class="sidebar-inner">
         <div class="sidebar-header">
-          <span class="sidebar-heading">Inspector</span>
+          <span class="sidebar-heading"></span>
           <button class="sidebar-close" data-close-sidebar>✕</button>
         </div>
         <div class="sidebar-body"></div>
@@ -1005,7 +1015,7 @@ function update(target) {
   const { panX, panY, zoom, cards, mode, menuOpen, beltOffsetX, beltOffsetY,
           focusedCard, linkSource, isDrawing, createStartX, createStartY, createX, createY,
           sidebarOpen, sidebarCard, grabbing, edgeTypes, launchHref, players,
-          inspectorOpen, attachmentsOpen } = $.learn()
+          inspectorOpen, attachmentsOpen, logsOpen } = $.learn()
 
   const workspace = target.querySelector('.workspace')
   workspace.style.setProperty('--pan-x', panX + 'px')
@@ -1082,19 +1092,22 @@ function update(target) {
     sidebar.style.setProperty('--sidebar-card-color', cardColor)
     sidebar.style.setProperty('--sidebar-card-contrast', contrastColor(cardColor))
 
+    const heading = sidebar.querySelector('.sidebar-heading')
+    if (heading) heading.textContent = sidebarCard.slice(0, 8)
+
     const sidebarBody = sidebar.querySelector('.sidebar-body')
     const etSig = Object.entries(edgeTypes).map(([k, v]) => `${k}:${v.color}`).join(',')
     const linkTypeSig = Object.entries(card?.links || {}).map(([k, v]) => `${k}:${v.typeId}`).join(',')
       + '|' + Object.keys(card?.backlinks || {}).join(',')
     const attachSig = Object.keys(card?.attachments || {}).join(',')
-    const sectionSig = `${inspectorOpen}|${attachmentsOpen}`
+    const sectionSig = `${inspectorOpen}|${attachmentsOpen}|${logsOpen}`
     const cardSwitched = sidebarBody.dataset.card !== sidebarCard
       || sidebarBody.dataset.etSig !== etSig
       || sidebarBody.dataset.linkTypeSig !== linkTypeSig
       || sidebarBody.dataset.attachSig !== attachSig
       || sidebarBody.dataset.sectionSig !== sectionSig
     if (cardSwitched) {
-      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen)
+      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen)
       sidebarBody.dataset.card = sidebarCard
       sidebarBody.dataset.etSig = etSig
       sidebarBody.dataset.linkTypeSig = linkTypeSig
@@ -1337,6 +1350,7 @@ $.when('click', '[data-toggle-section]', e => {
   const section = e.target.closest('[data-toggle-section]')?.dataset.toggleSection
   if (section === 'inspector') $.teach({ inspectorOpen: !$.learn().inspectorOpen })
   else if (section === 'attachments') $.teach({ attachmentsOpen: !$.learn().attachmentsOpen })
+  else if (section === 'logs') $.teach({ logsOpen: !$.learn().logsOpen })
 })
 
 $.when('click', '[data-add-fb]', e => {
@@ -2320,6 +2334,18 @@ $.style(`
   }
   & .attach-add:hover { border-color: dodgerblue; color: dodgerblue; }
   & .attach-add sl-icon { font-size: 1.1rem; }
+
+  & .logs-section-body {
+    padding: 0;
+  }
+
+  & .logs-shell {
+    display: block;
+    width: 100%;
+    height: 300px;
+    border: none;
+    border-radius: 0 0 3px 3px;
+  }
 
   /* ── play button ── */
 
