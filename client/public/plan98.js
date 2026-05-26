@@ -2,8 +2,6 @@ import diffHTML from 'diffhtml'
 import { getQuickJS } from "quickjs-emscripten"
 import geckos from '@geckos.io/client'
 
-const PLAN98_NODE_ID = crypto.randomUUID()
-
 const _geckosConfig = plan98?.env?.PLAN98_REALTIME
   ? { url: plan98.env.PLAN98_REALTIME, port: 443 }
   : { port: 9208 }
