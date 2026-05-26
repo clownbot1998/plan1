@@ -49,7 +49,7 @@
 import { Self } from '@plan98/types'
 import * as braid from 'braid-http'
 import { showModal, hideModal } from '@plan98/modal'
-import { get as wasGet, put as wasPut, del as wasDel } from './plan98-wallet.js'
+import { get as wasGet, put as wasPut, del as wasDel, getKeycard } from './plan98-wallet.js'
 
 self.braid_fetch = braid.fetch
 
@@ -225,10 +225,11 @@ function subscribe(target) {
 
 function save(target) {
   const { cards, edgeTypes } = $.learn()
+  const author = getKeycard()?.controller || null
   fetch(boardUrl(_boardId), {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ cards, edgeTypes }),
+    body: JSON.stringify({ cards, edgeTypes, author }),
   }).catch(() => {})
   wasSave()
 }
@@ -238,6 +239,7 @@ function save(target) {
 function createCard(x, y, w, h) {
   const id = crypto.randomUUID()
   const { cards, trayZ } = $.learn()
+  const author = getKeycard()?.controller || null
   $.teach({
     cards: {
       ...cards,
@@ -255,6 +257,7 @@ function createCard(x, y, w, h) {
         endDate: '',
         links: {},
         backlinks: {},
+        author,
       }
     },
     trayZ: trayZ + 1,
@@ -420,6 +423,7 @@ function renderCard(id, card, focused, linkSource) {
       <textarea class="card-body" data-card-id="${id}" ${isFocused ? '' : 'tabindex="-1"'}
         placeholder="...">${escapeHtml(card.text || '')}</textarea>
       <button class="card-resize-se" data-resize="${id}" data-direction="se"></button>
+      ${card.author ? `<span class="card-author" title="${escapeHtml(card.author)}">${card.author.slice(-8)}</span>` : ''}
       ${card.href ? `<button class="card-play" data-play-card="${id}" title="open"><sl-icon name="play-fill"></sl-icon></button>` : ''}
     </div>
   `
@@ -453,6 +457,7 @@ function renderSidebarBody(id, cards, edgeTypes = {}) {
         const label = fromCard?.text?.slice(0,12) || fromId.slice(0,8)
         return `<button class="sidebar-ref" data-open-edge="${lid}" data-from-card="${fromId}" style="--edge-color:${typeColor}">${escapeHtml(label)}</button>`
       }).join('') : 'none'}</dd>
+      <dt>Author</dt><dd><span class="sidebar-author" title="${escapeHtml(card.author || 'unknown')}">${card.author ? card.author.slice(-8) : '—'}</span></dd>
       <dt>Permalink</dt><dd><a class="sidebar-permalink" href="${permalink}" target="_blank">${id.slice(0,8)}…</a></dd>
     </dl>
     <textarea class="sidebar-editor" data-edit-card="${id}" placeholder="type here...">${escapeHtml(card.text || '')}</textarea>
@@ -2012,6 +2017,17 @@ $.style(`
   }
   & .card-play * { pointer-events: none; }
   & .card-play:hover { opacity: 1; }
+
+  & .card-author {
+    position: absolute;
+    bottom: 3px; right: 6px;
+    font-size: .55rem;
+    font-family: monospace;
+    color: var(--card-contrast, #1a1a1a);
+    opacity: 0.3;
+    pointer-events: none;
+    letter-spacing: .02em;
+  }
 
   /* ── card launch overlay ── */
 
