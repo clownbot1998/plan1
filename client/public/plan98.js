@@ -2,12 +2,7 @@ import diffHTML from 'diffhtml'
 import { getQuickJS } from "quickjs-emscripten"
 import geckos from '@geckos.io/client'
 
-const _geckosConfig = plan98?.env?.PLAN98_REALTIME
-  ? { url: plan98.env.PLAN98_REALTIME, port: 443 }
-  : { port: 9208 }
-
-export const channel = geckos(_geckosConfig)
-
+export let channel = null
 let _peerReady = false
 const _pendingSubs = []
 
@@ -16,26 +11,36 @@ function _connect(fn) {
   _pendingSubs.push(fn)
 }
 
-channel.onConnect(error => {
-  if (error) { console.error('geckos:', error.message); return }
-  _peerReady = true
-  _pendingSubs.forEach(fn => fn())
-  _pendingSubs.length = 0
+try {
+  const _geckosConfig = plan98?.env?.PLAN98_REALTIME
+    ? { url: plan98.env.PLAN98_REALTIME, port: 443 }
+    : { port: 9208 }
 
-  channel.on('stateCache', ({ elf, data }) => {
-    if (data) store.set(elf, data, (state, payload) => ({ ...state, ...payload }))
-  })
+  channel = geckos(_geckosConfig)
 
-  channel.on('stateDownload', (data) => {
-    if (!data?.elf) return
-    const { __plan98_sender_id, elf, knowledge, serializedNuance } = data
-    if (__plan98_sender_id === PLAN98_NODE_ID) return
-    const merge = typeof serializedNuance === 'object'
-      ? _sandbox(serializedNuance)
-      : serializedNuance
-    if (merge) store.set(elf, knowledge, merge, { bypassSecurity: serializedNuance?.bypassSecurity })
+  channel.onConnect(error => {
+    if (error) { console.warn('geckos:', error.message); return }
+    _peerReady = true
+    _pendingSubs.forEach(fn => fn())
+    _pendingSubs.length = 0
+
+    channel.on('stateCache', ({ elf, data }) => {
+      if (data) store.set(elf, data, (state, payload) => ({ ...state, ...payload }))
+    })
+
+    channel.on('stateDownload', (data) => {
+      if (!data?.elf) return
+      const { __plan98_sender_id, elf, knowledge, serializedNuance } = data
+      if (__plan98_sender_id === PLAN98_NODE_ID) return
+      const merge = typeof serializedNuance === 'object'
+        ? _sandbox(serializedNuance)
+        : serializedNuance
+      if (merge) store.set(elf, knowledge, merge, { bypassSecurity: serializedNuance?.bypassSecurity })
+    })
   })
-})
+} catch(e) {
+  console.warn('geckos unavailable, running without multiplayer:', e.message)
+}
 
 function _sandbox({ mergeHandler, parameters, bypassSecurity = false }) {
   const mergeHandlerStr = mergeHandler.toString()
@@ -49,7 +54,7 @@ function _sandbox({ mergeHandler, parameters, bypassSecurity = false }) {
 }
 
 function _udpUpload(elf) {
-  if (!_peerReady) return
+  if (!_peerReady || !channel) return
   const elfStore = store.get(elf)
   // broadcast is called after store.set so we reach into the nuance via the elf instance
   // plan98 pattern: emit stateUpload with serialized reducer — here we send full state merge
@@ -394,6 +399,7 @@ function createStore(initialState = {}, broadcast = () => null) {
 }
 
 export function linkState(elf, id) {
+  if (!channel) return
   _connect(() => {
     channel.emit('linkState', { elf, id, data: store.get(elf) })
   })
