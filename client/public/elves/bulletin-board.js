@@ -59,6 +59,7 @@ const DIRS = ['N','S','E','W','NE','NW','SE','SW']
 
 let _lastRenderSig = null
 let _arrowInterval = null
+let _peerArrowInterval = null
 let _smoothArrowX = 0
 let _smoothArrowY = 0
 
@@ -165,7 +166,7 @@ function broadcastPresence(cardId, x, y) {
   const now = Date.now()
   if (now - _presenceThrottle < 50) return
   _presenceThrottle = now
-  broadcastElf(tag, { players: { [PLAN98_NODE_ID]: { cardId, x, y } } }, PLAYERS_MERGE)
+  broadcastElf(tag, { players: { [PLAN98_NODE_ID]: { cardId, x, y, ts: now } } }, PLAYERS_MERGE)
 }
 
 function clearPresence() {
@@ -182,6 +183,7 @@ function applyPeerPositions(cardsLayer, players) {
   // Apply live peer positions directly to the real card elements
   Object.entries(players || {}).forEach(([id, p]) => {
     if (!p || id === PLAN98_NODE_ID) return
+    if (Date.now() - (p.ts || 0) > 5000) return
     const el = cardsLayer.querySelector(`.card[data-id="${p.cardId}"]`)
     if (!el) return
     const hue = idToHue(id)
@@ -724,6 +726,48 @@ function patchGrabArrows(grabbingId) {
   })
 }
 
+function patchPeerArrows() {
+  const linksLayer = document.querySelector(`${tag} .links-layer`)
+  if (!linksLayer) return
+  const { cards, players } = $.learn()
+  const now = Date.now()
+  Object.entries(players || {}).forEach(([id, p]) => {
+    if (!p || id === PLAN98_NODE_ID) return
+    if (now - (p.ts || 0) > 5000) return
+    const card = cards[p.cardId]
+    if (!card) return
+    const peerCard = { ...card, x: p.x, y: p.y }
+    Object.entries(card.links || {}).forEach(([linkId, link]) => {
+      const toCard = cards[link.to]
+      if (!toCard) return
+      const g = linksLayer.querySelector(`g[data-link-id="${linkId}"]`)
+      if (!g) return
+      const [fromDir, toDir] = bestCompassPair(peerCard, toCard)
+      const [x1, y1] = exitPoint(peerCard, fromDir)
+      const [x2, y2] = exitPoint(toCard, toDir)
+      g.querySelectorAll('line').forEach(l => {
+        l.setAttribute('x1', x1); l.setAttribute('y1', y1)
+        l.setAttribute('x2', x2); l.setAttribute('y2', y2)
+      })
+    })
+    Object.entries(card.backlinks || {}).forEach(([linkId, fromCardId]) => {
+      const fromCard = cards[fromCardId]
+      if (!fromCard) return
+      const link = fromCard.links?.[linkId]
+      if (!link) return
+      const g = linksLayer.querySelector(`g[data-link-id="${linkId}"]`)
+      if (!g) return
+      const [fromDir, toDir] = bestCompassPair(fromCard, peerCard)
+      const [x1, y1] = exitPoint(fromCard, fromDir)
+      const [x2, y2] = exitPoint(peerCard, toDir)
+      g.querySelectorAll('line').forEach(l => {
+        l.setAttribute('x1', x1); l.setAttribute('y1', y1)
+        l.setAttribute('x2', x2); l.setAttribute('y2', y2)
+      })
+    })
+  })
+}
+
 // Patch cards layer without destroying live DOM — preserves focused textareas and
 // active pointer capture during drag/resize.
 function patchCardsLayer(cardsLayer, cards, focused, linkSource, grabbing) {
@@ -860,6 +904,9 @@ function mount(target) {
   wasLoad().then(() => {
     subscribe(target)
     linkState(tag, _boardId)
+    if (!_peerArrowInterval) {
+      _peerArrowInterval = setInterval(patchPeerArrows, 83)
+    }
   })
 }
 
@@ -1103,7 +1150,7 @@ document.addEventListener('pointerdown', e => {
   _smoothArrowX = dragCardX
   _smoothArrowY = dragCardY
   if (_arrowInterval) clearInterval(_arrowInterval)
-  _arrowInterval = setInterval(() => patchGrabArrows(id), 83)
+  _arrowInterval = setInterval(() => { patchGrabArrows(id); patchPeerArrows() }, 83)
 }, { capture: true })
 
 // ── textarea: save text on input ──────────────────────────────────────────────

@@ -414,6 +414,8 @@ async function handleRequest(request) {
           const s = parseInt(digits[0]), e = parseInt(digits[1]);
           state.text = state.text.slice(0, s) + patchText + state.text.slice(e);
         }
+      } else {
+        state.text = patchText;
       }
       state.version = versionHdr;
 
