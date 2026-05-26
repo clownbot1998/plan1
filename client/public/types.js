@@ -4,7 +4,8 @@
 
 ////
 
-import elf from './plan98.js'
+import elf, { linkState } from './plan98.js'
+export { linkState }
 import saga from './saga.js'
 import './as2.js'
 

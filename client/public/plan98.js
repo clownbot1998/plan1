@@ -1,8 +1,73 @@
 import diffHTML from 'diffhtml'
 import { getQuickJS } from "quickjs-emscripten"
+import geckos from '@geckos.io/client'
+
+const PLAN98_NODE_ID = crypto.randomUUID()
+
+const _geckosConfig = plan98?.env?.PLAN98_REALTIME
+  ? { url: plan98.env.PLAN98_REALTIME, port: 443 }
+  : { port: 9208 }
+
+export const channel = geckos(_geckosConfig)
+
+let _peerReady = false
+const _pendingSubs = []
+
+function _connect(fn) {
+  if (_peerReady) { fn(); return }
+  _pendingSubs.push(fn)
+}
+
+channel.onConnect(error => {
+  if (error) { console.error('geckos:', error.message); return }
+  _peerReady = true
+  _pendingSubs.forEach(fn => fn())
+  _pendingSubs.length = 0
+
+  channel.on('stateCache', ({ elf, data }) => {
+    if (data) store.set(elf, data, (state, payload) => ({ ...state, ...payload }))
+  })
+
+  channel.on('stateDownload', (data) => {
+    if (!data?.elf) return
+    const { __plan98_sender_id, elf, knowledge, serializedNuance } = data
+    if (__plan98_sender_id === PLAN98_NODE_ID) return
+    const merge = typeof serializedNuance === 'object'
+      ? _sandbox(serializedNuance)
+      : serializedNuance
+    if (merge) store.set(elf, knowledge, merge, { bypassSecurity: serializedNuance?.bypassSecurity })
+  })
+})
+
+function _sandbox({ mergeHandler, parameters, bypassSecurity = false }) {
+  const mergeHandlerStr = mergeHandler.toString()
+  const paramsStr = JSON.stringify(parameters)
+  const result = secureEval(`
+    '(' + ${JSON.stringify(mergeHandlerStr)} + ')' +
+      '.apply(null, ' + paramStr + ')';
+  `, { paramStr: paramsStr }, { bypassSecurity })
+  if (result.error) { console.error('sandbox:', result.error); return false }
+  return result.data
+}
+
+function _udpUpload(elf) {
+  if (!_peerReady) return
+  const elfStore = store.get(elf)
+  // broadcast is called after store.set so we reach into the nuance via the elf instance
+  // plan98 pattern: emit stateUpload with serialized reducer — here we send full state merge
+  channel.emit('stateUpload', {
+    id: globalThis.__plan98_instance_id || PLAN98_NODE_ID,
+    data: {
+      __plan98_sender_id: PLAN98_NODE_ID,
+      elf,
+      knowledge: elfStore,
+      serializedNuance: (state, payload) => ({ ...state, ...payload })
+    }
+  })
+}
 
 const logs = {}
-const store = createStore({}, notify)
+const store = createStore({}, _udpUpload)
 
 let QuickJS = null;
 const queue = [];
@@ -328,6 +393,12 @@ function createStore(initialState = {}, broadcast = () => null) {
       return state[elf];
     }
   }
+}
+
+export function linkState(elf, id) {
+  _connect(() => {
+    channel.emit('linkState', { elf, id, data: store.get(elf) })
+  })
 }
 
 function uuidv4() {
