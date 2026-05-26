@@ -49,6 +49,7 @@
 import { Self } from '@plan98/types'
 import * as braid from 'braid-http'
 import { showModal, hideModal } from '@plan98/modal'
+import { get as wasGet, put as wasPut, del as wasDel } from './plan98-wallet.js'
 
 self.braid_fetch = braid.fetch
 
@@ -137,10 +138,42 @@ const $ = Self(tag, {
   edgeTypes: { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
 })
 
-// ── braid sync ──────────────────────────────────────────────────────────────
+// ── braid + WAS sync ─────────────────────────────────────────────────────────
 
 function boardUrl(id) {
   return `/braid/bulletin-board/${id || 'default'}`
+}
+
+function wasPath(id) {
+  return `/bulletin-board/${id || 'default'}.json`
+}
+
+async function wasLoad() {
+  try {
+    const blob = await wasGet(wasPath(_boardId))
+    if (!blob) return
+    const data = JSON.parse(await blob.text())
+    if (data?.cards) {
+      $.teach({
+        cards: data.cards,
+        edgeTypes: data.edgeTypes || { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
+      })
+    }
+  } catch {}
+}
+
+let _wasSaveTimer = null
+function wasSave() {
+  clearTimeout(_wasSaveTimer)
+  _wasSaveTimer = setTimeout(async () => {
+    const { cards, edgeTypes } = $.learn()
+    const path = wasPath(_boardId)
+    const json = JSON.stringify({ cards, edgeTypes })
+    try {
+      await wasDel(path).catch(() => null)
+      await wasPut(path, json, { type: 'application/json' })
+    } catch {}
+  }, 1500)
 }
 
 function subscribe(target) {
@@ -148,6 +181,7 @@ function subscribe(target) {
     history.replaceState({ type: 'bulletin-board-launch', href: null }, '', location.href)
   }
   const id = _boardId
+  let _braidInitDone = false
   braid.fetch(boardUrl(id), {
     subscribe: true,
     headers: { 'accept': 'application/json' },
@@ -157,6 +191,17 @@ function subscribe(target) {
       try {
         const data = JSON.parse(body)
         if (data.cards) {
+          if (!_braidInitDone) {
+            _braidInitDone = true
+            const { cards: localCards } = $.learn()
+            const localCount = Object.keys(localCards || {}).length
+            const braidCount = Object.keys(data.cards).length
+            if (braidCount <= localCount) {
+              // WAS had more — push our state into braid so other tabs sync
+              save(target)
+              continue
+            }
+          }
           $.teach({
             cards: data.cards,
             edgeTypes: data.edgeTypes || { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
@@ -185,6 +230,7 @@ function save(target) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ cards, edgeTypes }),
   }).catch(() => {})
+  wasSave()
 }
 
 // ── card operations ──────────────────────────────────────────────────────────
@@ -750,7 +796,7 @@ function mount(target) {
   `
 
   target.querySelector('.bulletin-canvas').style.backgroundImage = stars
-  subscribe(target)
+  wasLoad().then(() => subscribe(target))
 }
 
 function update(target) {
