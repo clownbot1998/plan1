@@ -3,6 +3,7 @@ import { getQuickJS } from "quickjs-emscripten"
 export let channel = null
 let _peerReady = false
 const _pendingSubs = []
+const _elfRooms = {}
 
 function _connect(fn) {
   if (_peerReady) { fn(); return }
@@ -22,7 +23,7 @@ import('@geckos.io/client').then(({ default: geckos }) => {
     _pendingSubs.forEach(fn => fn())
     _pendingSubs.length = 0
     channel.on('stateCache', ({ elf, data }) => {
-      if (data) store.set(elf, data, (state, payload) => ({ ...state, ...payload }))
+      if (data) store.set(elf, data, '(state, payload) => ({ ...state, ...payload })')
     })
     channel.on('stateDownload', (data) => {
       if (!data?.elf) return
@@ -49,24 +50,26 @@ function _sandbox({ mergeHandler, parameters, bypassSecurity = false }) {
   return result.data
 }
 
-function _udpUpload(elf) {
+function _udpUpload(elf, knowledge) {
   if (!_peerReady || !channel) return
-  const elfStore = store.get(elf)
-  // broadcast is called after store.set so we reach into the nuance via the elf instance
-  // plan98 pattern: emit stateUpload with serialized reducer — here we send full state merge
+  const id = _elfRooms[elf]
+  if (!id) return
   channel.emit('stateUpload', {
-    id: globalThis.__plan98_instance_id || PLAN98_NODE_ID,
+    id,
     data: {
       __plan98_sender_id: PLAN98_NODE_ID,
       elf,
-      knowledge: elfStore,
-      serializedNuance: (state, payload) => ({ ...state, ...payload })
+      knowledge: knowledge ?? store.get(elf),
+      serializedNuance: '(state, payload) => ({ ...state, ...payload })',
     }
   })
 }
 
 const logs = {}
-const store = createStore({}, _udpUpload)
+const store = createStore({}, notify)
+
+// Pass an explicit knowledge slice to avoid syncing local-only UI state (whisper pattern).
+export function broadcastElf(elf, knowledge) { _udpUpload(elf, knowledge) }
 
 let QuickJS = null;
 const queue = [];
@@ -395,6 +398,7 @@ function createStore(initialState = {}, broadcast = () => null) {
 }
 
 export function linkState(elf, id) {
+  _elfRooms[elf] = id
   if (!channel) return
   _connect(() => {
     channel.emit('linkState', { elf, id, data: store.get(elf) })

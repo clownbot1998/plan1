@@ -46,7 +46,7 @@
 //
 // FUTURE LAYERS: Syrup serialization, CapTP method dispatch, OCapN refs.
 
-import { Self, linkState } from '@plan98/types'
+import { Self, linkState, broadcastElf } from '@plan98/types'
 import * as braid from 'braid-http'
 import { showModal, hideModal } from '@plan98/modal'
 import { get as wasGet, put as wasPut, del as wasDel, getKeycard } from './plan98-wallet.js'
@@ -232,6 +232,7 @@ function save(target) {
     body: JSON.stringify({ cards, edgeTypes, author }),
   }).catch(() => {})
   wasSave()
+  broadcastElf(tag, { cards, edgeTypes })
 }
 
 // ── card operations ──────────────────────────────────────────────────────────
