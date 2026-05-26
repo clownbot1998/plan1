@@ -69,4 +69,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `B0BAFEDD-CAFE-C0DE-BABE-DEAD00002026` | 2026-05-25 | hex compass (6 sl-icon petals, design colors), card href + play button (sticky-menu iframe pattern), viewport-clamped pedal, camera overlay, action buttons (qr, lore-baby, camera). the cards got doors now. |
 
+| `C0DEFEED-BABE-CAFE-DEAD-BEEFFACE2026` | 2026-05-25 | braid+WAS persistence for bulletin-board: wasLoad before subscribe, merge guard by card count, wasSave debounced 1500ms, save() fans to both. started plan98-was docker container. the board remembers. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
