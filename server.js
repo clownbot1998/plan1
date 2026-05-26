@@ -284,6 +284,15 @@ function addIsolation(res) {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
 }
 
+// Allow embedding in a COEP credentialless parent without adding COEP itself.
+// Needed for pages excluded from COEP (vosk blob-worker pages) that we want
+// to iframe from pages that do have COEP.
+function addEmbeddable(res) {
+  const h = new Headers(res.headers);
+  h.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
+
 // Pages that use blob workers with fetch (vosk-browser) can't run under COEP —
 // Safari treats blob workers as null-origin, blocking same-origin fetches.
 // ffmpeg pages still need COEP for SharedArrayBuffer.
@@ -321,7 +330,7 @@ async function spawnTtydSession(sessionName) {
 Deno.serve({ port: PORT }, async (request) => {
   const res = await handleRequest(request);
   const { pathname } = new URL(request.url);
-  if (NO_COEP_PATHS.some(p => pathname.startsWith(p))) return res;
+  if (NO_COEP_PATHS.some(p => pathname.startsWith(p))) return addEmbeddable(res);
   return addIsolation(res);
 });
 
