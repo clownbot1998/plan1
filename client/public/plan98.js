@@ -1,7 +1,5 @@
 import diffHTML from 'diffhtml'
 import { getQuickJS } from "quickjs-emscripten"
-import geckos from '@geckos.io/client'
-
 export let channel = null
 let _peerReady = false
 const _pendingSubs = []
@@ -11,23 +9,21 @@ function _connect(fn) {
   _pendingSubs.push(fn)
 }
 
-try {
+// Dynamic import keeps geckos off the critical module-load path —
+// a failed import or init cannot break plan98.js firmware.
+import('@geckos.io/client').then(({ default: geckos }) => {
   const _geckosConfig = plan98?.env?.PLAN98_REALTIME
     ? { url: plan98.env.PLAN98_REALTIME, port: 443 }
     : { port: 9208 }
-
   channel = geckos(_geckosConfig)
-
   channel.onConnect(error => {
     if (error) { console.warn('geckos:', error.message); return }
     _peerReady = true
     _pendingSubs.forEach(fn => fn())
     _pendingSubs.length = 0
-
     channel.on('stateCache', ({ elf, data }) => {
       if (data) store.set(elf, data, (state, payload) => ({ ...state, ...payload }))
     })
-
     channel.on('stateDownload', (data) => {
       if (!data?.elf) return
       const { __plan98_sender_id, elf, knowledge, serializedNuance } = data
@@ -38,9 +34,9 @@ try {
       if (merge) store.set(elf, knowledge, merge, { bypassSecurity: serializedNuance?.bypassSecurity })
     })
   })
-} catch(e) {
+}).catch(e => {
   console.warn('geckos unavailable, running without multiplayer:', e.message)
-}
+})
 
 function _sandbox({ mergeHandler, parameters, bypassSecurity = false }) {
   const mergeHandlerStr = mergeHandler.toString()
