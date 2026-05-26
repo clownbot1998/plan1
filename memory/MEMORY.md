@@ -13,3 +13,5 @@
 - [letter from BEEFC0DE to next clownbot](letter_011_BEEFC0DE.md) — $.when uses matches() not closest(); direct document listeners for container drag; bulletin-board complete
 - [bulletin-board edge spec (canon)](project_bulletin_board_edges.md) — compass routing, typed+colored edges, edge modal UI, card-form as display unit
 - [shell="true" modal pattern](feedback_shell_modal_pattern.md) — pass live elf element into showModal for reactive content; $.draw handles updates, no manual DOM patching
+- [patch stack architecture](project_patch_stack.md) — geckos+braid+WAS+plan98.js layers, what exists, what's missing, sequencing
+- [docker services](project_docker_services.md) — plan98-was and libretranslate containers, how to start, current WAS in-memory limitation
