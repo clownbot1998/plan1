@@ -236,3 +236,61 @@ manage peers from the browser without touching the server CLI.
 - [ ] render backend injected at boot: SpriteBatch (plant) or DOM (plan98)
 - [ ] same elf code runs on browser, Jint/MonoGame, QuickJS on microcontroller
 - [ ] draw commands are the wire format; transport is swappable (in-process, WebSocket, 9P)
+
+---
+
+## the patch stack: geckos + braid + WAS + plan98.js
+
+**the four layers:**
+
+```
+geckos.io   — multiplayer transport (WebRTC data channels, P2P after signaling)
+braid       — message format (Version/Parents headers, patch lineage, replay path)
+WAS         — disk storage (content-addressed, append-only patch log)
+plan98.js   — UI bridge / game engine (reducer sandbox, broadcast callback, MVCES)
+```
+
+**what already exists:**
+- plan98.js `createStore` has a `broadcast` callback that fires on every `teach` (line 640 of plan98.js)
+- geckos channel is wired to that broadcast — operations already flow peer-to-peer
+- WAS is running, content-addresses blobs, has Ed25519 signing
+- braid wire format is implemented in server.js (Version/Parents headers, 209 streams)
+- bulletin-board already uses braid for live sync + WAS for persistence
+
+**what's missing:**
+- braid wrapping on geckos messages — operations go out as raw JSON, no Version/Parents lineage
+- reducer registry — a `reducers.json` stamped at build time mapping operation names to CIDs
+- patch authentication — each operation needs author DID + Ed25519 signature
+- WAS as append-only log — current wasSave() does del+put (mutable); patch log needs one CID per patch, never deleted
+- checkpoint protocol — peers agree on a snapshot CID as new genesis; late-joiners start from checkpoint, not patch 0
+
+**the unit of collaboration:**
+```
+{
+  reducer: "<CID of the pure reducer function>",
+  patch:   { op: "createCard", id: "...", x: 100, y: 200 },
+  parent:  "<CID of previous patch>",
+  author:  "did:key:z6Mk...",
+  sig:     "<Ed25519 signature of above>",
+  cid:     "<content address of this whole bundle>"
+}
+```
+
+replay any sequence of these through QuickJS → same state, always. transparency replaces trust.
+
+**known plot holes to resolve before starting:**
+
+- [ ] reducer purity enforcement: sandbox must only inject (state-slice, patch, pure stdlib). no fetch, no Date.now(), no globals
+- [ ] ordering under concurrency: map all bulletin-board operations for commutativity. createCard (UUID-keyed) and moveCard (last-write-wins) are safe; deleteLink concurrent with editCard needs explicit handling
+- [ ] reducer versioning: reducer CID is pinned with each patch — same CID = same behavior forever. reducers are immutable published artifacts
+- [ ] geckos signaling: plan1 server is the signaling coordinator. WebRTC is P2P for data, not for discovery. name this clearly
+- [ ] merge guard weakness: current card-count heuristic breaks on deletion. replace with patch sequence number or WAS CID chain
+- [ ] WAS in-memory: plan98-was container is running without a SQLite file. data survives browser reload, dies on container restart. needs volume mount — infra sprint
+
+**implementation order:**
+- [ ] define patch shape and reducer registry format (reducers.json)
+- [ ] wrap geckos broadcast in braid framing (Version/Parents) before sending
+- [ ] switch WAS save from mutable (del+put same path) to append-only (new CID per patch)
+- [ ] add Ed25519 signatures to outbound patches using existing WAS signer key
+- [ ] checkpoint protocol: snapshot at N patches, store checkpoint CID in well-known WAS path
+- [ ] port geckos multiplayer from plan98.js into plan1 server as the signaling endpoint
