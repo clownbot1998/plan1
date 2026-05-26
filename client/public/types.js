@@ -4,8 +4,8 @@
 
 ////
 
-import elf, { linkState, broadcastElf } from './plan98.js'
-export { linkState, broadcastElf }
+import elf, { linkState, broadcastElf, PLAN98_NODE_ID } from './plan98.js'
+export { linkState, broadcastElf, PLAN98_NODE_ID }
 import saga from './saga.js'
 import './as2.js'
 

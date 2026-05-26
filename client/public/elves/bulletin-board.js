@@ -46,7 +46,7 @@
 //
 // FUTURE LAYERS: Syrup serialization, CapTP method dispatch, OCapN refs.
 
-import { Self, linkState, broadcastElf } from '@plan98/types'
+import { Self, linkState, broadcastElf, PLAN98_NODE_ID } from '@plan98/types'
 import * as braid from 'braid-http'
 import { showModal, hideModal } from '@plan98/modal'
 import { get as wasGet, put as wasPut, del as wasDel, getKeycard } from './plan98-wallet.js'
@@ -136,7 +136,62 @@ const $ = Self(tag, {
   sidebarOpen: _permalinkSidebar,
   sidebarCard: _permalinkCard,
   edgeTypes: { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
+  players: {},
 })
+
+// ── presence ─────────────────────────────────────────────────────────────────
+
+// Merge that targets only the players slot — preserves all other state and each
+// peer's own slot. Sending null for a player ID removes them.
+const PLAYERS_MERGE = `(state, payload) => {
+  var inc = payload.players || {}
+  var base = Object.assign({}, state.players || {})
+  Object.keys(inc).forEach(function(k) {
+    if (inc[k] === null) delete base[k]
+    else base[k] = Object.assign({}, base[k] || {}, inc[k])
+  })
+  return Object.assign({}, state, { players: base })
+}`
+
+function idToHue(id) {
+  var h = 0
+  for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0xffff
+  return h % 360
+}
+
+let _presenceThrottle = 0
+
+function broadcastPresence(cardId, x, y) {
+  const now = Date.now()
+  if (now - _presenceThrottle < 50) return
+  _presenceThrottle = now
+  broadcastElf(tag, { players: { [PLAN98_NODE_ID]: { cardId, x, y } } }, PLAYERS_MERGE)
+}
+
+function clearPresence() {
+  broadcastElf(tag, { players: { [PLAN98_NODE_ID]: null } }, PLAYERS_MERGE)
+}
+
+function applyPeerPositions(cardsLayer, players) {
+  // Clear previous peer-drag state
+  cardsLayer.querySelectorAll('.card[data-peer-drag]').forEach(el => {
+    el.style.outline = ''
+    el.style.outlineOffset = ''
+    delete el.dataset.peerDrag
+  })
+  // Apply live peer positions directly to the real card elements
+  Object.entries(players || {}).forEach(([id, p]) => {
+    if (!p || id === PLAN98_NODE_ID) return
+    const el = cardsLayer.querySelector(`.card[data-id="${p.cardId}"]`)
+    if (!el) return
+    const hue = idToHue(id)
+    el.style.left = p.x + 'px'
+    el.style.top = p.y + 'px'
+    el.style.outline = `2px solid hsl(${hue}, 75%, 55%)`
+    el.style.outlineOffset = '3px'
+    el.dataset.peerDrag = id
+  })
+}
 
 // ── braid + WAS sync ─────────────────────────────────────────────────────────
 
@@ -811,7 +866,7 @@ function mount(target) {
 function update(target) {
   const { panX, panY, zoom, cards, mode, menuOpen, beltOffsetX, beltOffsetY,
           focusedCard, linkSource, isDrawing, createStartX, createStartY, createX, createY,
-          sidebarOpen, sidebarCard, grabbing, edgeTypes, launchHref } = $.learn()
+          sidebarOpen, sidebarCard, grabbing, edgeTypes, launchHref, players } = $.learn()
 
   const workspace = target.querySelector('.workspace')
   workspace.style.setProperty('--pan-x', panX + 'px')
@@ -847,6 +902,7 @@ function update(target) {
 
   const cardsLayer = target.querySelector('.cards-layer')
   patchCardsLayer(cardsLayer, cards, focusedCard, linkSource, grabbing)
+  applyPeerPositions(cardsLayer, players)
 
   const cardsJson = JSON.stringify(cards)
   const etColorSig = Object.entries(edgeTypes).map(([k, v]) => `${k}:${v.color}`).join(',')
@@ -1283,6 +1339,7 @@ document.addEventListener('pointermove', e => {
       // Update DOM directly — no state change, no re-render
       const cardEl = document.querySelector(`.card[data-id="${grabbing}"]`)
       if (cardEl) { cardEl.style.left = dragCardX + 'px'; cardEl.style.top = dragCardY + 'px' }
+      broadcastPresence(grabbing, dragCardX, dragCardY)
     }
     lastDragX = e.clientX
     lastDragY = e.clientY
@@ -1343,6 +1400,7 @@ function cancelGesture() {
     const { pickupX, pickupY } = $.learn()
     const cardEl = document.querySelector(`.card[data-id="${grabbing}"]`)
     if (cardEl) { cardEl.style.left = pickupX + 'px'; cardEl.style.top = pickupY + 'px' }
+    clearPresence()
   }
   $.teach({ grabbing: null, resizing: null })
   lastDragX = lastDragY = lastResizeX = lastResizeY = undefined
@@ -1355,6 +1413,7 @@ document.addEventListener('pointerup', () => {
 
   if (grabbing) {
     stopArrowInterval()
+    clearPresence()
     if (hasDragged) {
       const { cards, pickupX, pickupY } = $.learn()
       const dropped = { ...(cards[grabbing] || {}), x: dragCardX, y: dragCardY }
@@ -2106,4 +2165,13 @@ $.style(`
   }
 
   /* edge modal renders outside this element — all styles are inlined in renderEdgeModal */
+
+  /* ── peer drag — outline on the real card while a remote peer holds it ── */
+
+  & .card[data-peer-drag] {
+    box-shadow:
+      0 8px 16px rgba(0,0,0,.10),
+      0 20px 48px rgba(0,0,0,.12),
+      0 40px 80px rgba(0,0,0,.08);
+  }
 `)

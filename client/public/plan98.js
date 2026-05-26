@@ -50,7 +50,9 @@ function _sandbox({ mergeHandler, parameters, bypassSecurity = false }) {
   return result.data
 }
 
-function _udpUpload(elf, knowledge) {
+const _MERGE_SPREAD = '(state, payload) => ({ ...state, ...payload })'
+
+function _udpUpload(elf, knowledge, mergeStr = _MERGE_SPREAD) {
   if (!_peerReady || !channel) return
   const id = _elfRooms[elf]
   if (!id) return
@@ -60,7 +62,7 @@ function _udpUpload(elf, knowledge) {
       __plan98_sender_id: PLAN98_NODE_ID,
       elf,
       knowledge: knowledge ?? store.get(elf),
-      serializedNuance: '(state, payload) => ({ ...state, ...payload })',
+      serializedNuance: mergeStr,
     }
   })
 }
@@ -68,8 +70,8 @@ function _udpUpload(elf, knowledge) {
 const logs = {}
 const store = createStore({}, notify)
 
-// Pass an explicit knowledge slice to avoid syncing local-only UI state (whisper pattern).
-export function broadcastElf(elf, knowledge) { _udpUpload(elf, knowledge) }
+// Pass an explicit knowledge slice and optional merge string (whisper pattern).
+export function broadcastElf(elf, knowledge, mergeStr) { _udpUpload(elf, knowledge, mergeStr) }
 
 let QuickJS = null;
 const queue = [];
@@ -127,7 +129,7 @@ function secureEval(query, variables, options = {}) {
   return res
 }
 
-let PLAN98_NODE_ID
+export let PLAN98_NODE_ID
 try {
   PLAN98_NODE_ID = self.crypto.randomUUID()
 } catch(e) {
