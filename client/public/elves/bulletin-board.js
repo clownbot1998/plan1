@@ -49,7 +49,7 @@
 import { Self, linkState, broadcastElf, PLAN98_NODE_ID } from '@plan98/types'
 import * as braid from 'braid-http'
 import { showModal, hideModal } from '@plan98/modal'
-import { get as wasGet, put as wasPut, del as wasDel, getKeycard } from './plan98-wallet.js'
+import { get as wasGet, put as wasPut, del as wasDel, getKeycard, ensureSpace } from './plan98-wallet.js'
 
 self.braid_fetch = braid.fetch
 
@@ -206,6 +206,7 @@ function wasPath(id) {
 }
 
 async function wasLoad() {
+  await ensureSpace().catch(() => null)
   try {
     const blob = await wasGet(wasPath(_boardId))
     if (!blob) return

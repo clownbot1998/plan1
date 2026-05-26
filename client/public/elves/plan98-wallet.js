@@ -367,6 +367,19 @@ export async function getSigner(keycard=getKeycard()) {
   return await Ed25519Signer.fromJSON(JSON.stringify(keycard.asJSON))
 }
 
+export async function ensureSpace(keycard=getKeycard()) {
+  if (!keycard) return
+  const host = keycard.host || walletDefaultHost
+  const check = await fetch(`${host}/space/${keycard.id}`).catch(() => null)
+  if (check?.ok) return
+  const signer = await getSigner(keycard)
+  const storage = getStorage(keycard)
+  const space = storage.space({ signer, id: `urn:uuid:${keycard.id}` })
+  const linkset = space.resource('linkset')
+  const spaceBlob = new Blob([JSON.stringify({ controller: signer.controller, link: linkset.path })], { type: 'application/json' })
+  await space.put(spaceBlob).catch(console.error)
+}
+
 export function getStorage(keycard=getKeycard()) {
   if(!keycard) return null
 
