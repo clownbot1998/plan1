@@ -225,7 +225,7 @@ function subscribe(target) {
 
 function save(target) {
   const { cards, edgeTypes } = $.learn()
-  const author = getKeycard()?.controller || null
+  const author = getKeycard()?.asJSON?.controller || null
   fetch(boardUrl(_boardId), {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
@@ -239,7 +239,7 @@ function save(target) {
 function createCard(x, y, w, h) {
   const id = crypto.randomUUID()
   const { cards, trayZ } = $.learn()
-  const author = getKeycard()?.controller || null
+  const author = getKeycard()?.asJSON?.controller || null
   $.teach({
     cards: {
       ...cards,
