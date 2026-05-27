@@ -2,6 +2,7 @@ import { Self } from '@plan98/types'
 import { marked } from 'marked'
 import { showModal, hideModal } from '@plan98/modal'
 import $paperPocket, { sideEffects, systemMenu, getTheme, afterUpdateTheme } from './paper-pocket.js'
+import { get as wasGet, put as wasPut, del as wasDel, ensureSpace } from './plan98-wallet.js'
 import Vosk from 'vosk-browser'
 import { agent } from './clownbot-agent.js'
 
@@ -60,6 +61,38 @@ const paperPocketHelp = () => {
 
 let fileSystem = null
 
+// ── WAS persistence ───────────────────────────────────────────────────────────
+
+const _shellSessionId = new URLSearchParams(location.search).get('id') || 'default'
+const _wasPath = `/ur-shell/${_shellSessionId}.json`
+
+let _wasSaveTimer = null
+function wasSave() {
+  clearTimeout(_wasSaveTimer)
+  _wasSaveTimer = setTimeout(async () => {
+    const { messages, history } = $.learn()
+    const json = JSON.stringify({ messages, history })
+    try {
+      await wasDel(_wasPath).catch(() => null)
+      await wasPut(_wasPath, json, { type: 'application/json' })
+    } catch {}
+  }, 1500)
+}
+
+async function wasLoad() {
+  await ensureSpace().catch(() => null)
+  try {
+    const blob = await wasGet(_wasPath)
+    if (!blob) return false
+    const data = JSON.parse(await blob.text())
+    if (data?.messages?.length) {
+      $.teach({ messages: data.messages, history: data.history || [] })
+      return true
+    }
+  } catch {}
+  return false
+}
+
 // tty websocket
 let ttySocket = null
 let ttyBuffer = ''
@@ -110,8 +143,6 @@ export function update(message) {
   if (popped) hideModal()
 }
 
-$.teach({ body: `<code>art</code> <code>music</code> <code>coding</code>`, author: 'assistant' }, mergeMessage)
-
 fileSystem = {}
 $.teach({ cwd: '/' })
 
@@ -125,7 +156,6 @@ function history(state, payload) {
   }
 }
 
-
 function mergeMessage(state, payload) {
   return {
     ...state,
@@ -134,6 +164,16 @@ function mergeMessage(state, payload) {
       payload
     ]
   }
+}
+
+function addMessage(payload) {
+  $.teach(payload, mergeMessage)
+  wasSave()
+}
+
+function pushHistory(message) {
+  $.teach(message, history)
+  wasSave()
 }
 
 function stripAnsi(str) {
@@ -172,7 +212,7 @@ function flushTtyBuffer() {
   const output = ttyBuffer
   ttyBuffer = ''
   $.teach({ ttyLive: '' })
-  $.teach({ body: output, author: 'assistant', tty: true }, mergeMessage)
+  addMessage({ body: output, author: 'assistant', tty: true })
 }
 
 async function startVosk() {
@@ -266,7 +306,7 @@ function partial(response) {
 
 function done(response) {
   $.teach({ thinkingFace: null, thinking: false })
-  $.teach({ body: response, author: 'assistant' }, mergeMessage)
+  addMessage({ body: response, author: 'assistant' })
 }
 
 async function auth(passphrase, { normalMode }) {
@@ -484,13 +524,13 @@ Type \`<elf-name>\` to load a custom element.
       clearTimeout(ttyFlushTimer)
       if (ttyBuffer.trim()) flushTtyBuffer()
       $.teach({ ttyConnected: false, modality: null })
-      $.teach({ body: 'shell disconnected', author: 'assistant' }, mergeMessage)
+      addMessage({ body: 'shell disconnected', author: 'assistant' })
     }
     ws.onerror = () => {
       ttySocket = null
       window.removeEventListener('resize', onResize)
       $.teach({ ttyConnected: false, modality: null })
-      $.teach({ body: 'shell unavailable — ttyd not running on this host', author: 'assistant' }, mergeMessage)
+      addMessage({ body: 'shell unavailable — ttyd not running on this host', author: 'assistant' })
     }
     return 'opening shell...'
   },
@@ -508,20 +548,20 @@ Type \`<elf-name>\` to load a custom element.
 function mount(target) {
   if(target.mounted) return
   target.mounted = true
-  const command = target.getAttribute('command')
-    || (new URLSearchParams(location.search).get('id') ? `tty ${new URLSearchParams(location.search).get('id')}` : null)
+  const idParam = new URLSearchParams(location.search).get('id')
+  const command = target.getAttribute('command') || (idParam ? `tty ${idParam}` : null)
   const message = target.getAttribute('message')
   const src = target.getAttribute('src')
   const rom = target.getAttribute('rom')
-  if(command) {
-    execute(command)
-  } else if(src) {
-    execute(src, { suppressBack: true })
-  } else if(rom) {
-    execute('<'+rom, { suppressBack: true })
-  } else if(message) {
-    sh(message)
-  }
+  wasLoad().then(hadHistory => {
+    if (!hadHistory) {
+      addMessage({ body: `<code>art</code> <code>music</code> <code>coding</code>`, author: 'assistant' })
+    }
+    if(command) execute(command)
+    else if(src) execute(src, { suppressBack: true })
+    else if(rom) execute('<'+rom, { suppressBack: true })
+    else if(message) sh(message)
+  })
 }
 
 $.draw((target) => {
@@ -709,21 +749,21 @@ async function execute(message, options={}) {
   const { secureEntry } = $.learn()
 
   if(!secureEntry) {
-    $.teach(message, history)
-    $.teach({ body: message, author: 'human' }, mergeMessage)
+    pushHistory(message)
+    addMessage({ body: message, author: 'human' })
   }
 
   _voskCommitted = ''
   $.teach({ historyCursor: null, messageHeight: null, messageText: '', messageDraft: '' })
 
   if(message.startsWith('<')) {
-    $.teach({ body: 'load module', author: 'assistant' }, mergeMessage)
+    addMessage({ body: 'load module', author: 'assistant' })
     loadModule(message, options)
     return
   }
 
   if(message.startsWith('/')) {
-    $.teach({ body: 'load path', author: 'assistant' }, mergeMessage)
+    addMessage({ body: 'load path', author: 'assistant' })
     loadPath(message, options)
     return
   }
@@ -744,7 +784,7 @@ async function execute(message, options={}) {
   if(modalities[modality]) {
     const result = await modalities[modality](message)
     if(result) {
-      $.teach({ body: result, author: 'assistant' }, mergeMessage)
+      addMessage({ body: result, author: 'assistant' })
     }
     return
   }
@@ -755,16 +795,16 @@ async function execute(message, options={}) {
     try {
       const result = await program.apply($, args)
       if(result) {
-        $.teach({ body: result || 'Success!', author: 'assistant' }, mergeMessage)
+        addMessage({ body: result || 'Success!', author: 'assistant' })
       }
     } catch(e) {
-      $.teach({ body: `Error. Inspect Logs.<br><a href="${window.location.origin + window.location.pathname}?q=${message}&debug=true">Reload in debug mode</a>`, author: 'assistant' }, mergeMessage)
+      addMessage({ body: `Error. Inspect Logs.<br><a href="${window.location.origin + window.location.pathname}?q=${message}&debug=true">Reload in debug mode</a>`, author: 'assistant' })
       console.error(e)
     }
     return
   } else {
     const body = 'Command not recognized. Ask for `help` if needed.'
-    $.teach({ body, author: 'assistant' }, mergeMessage)
+    addMessage({ body, author: 'assistant' })
   }
 }
 
@@ -802,7 +842,7 @@ export async function loadModule(message, options = {}) {
   const url = `/public/elves/${elf}.js`
   const exists = (await fetch(url, { method: 'HEAD' })).ok
   if(!exists && !elements.includes(elf)) {
-    $.teach({ body: 'ELF not found, ask "help" for assistance', author: 'assistant' }, mergeMessage)
+    addMessage({ body: 'ELF not found, ask "help" for assistance', author: 'assistant' })
     return
   }
 
@@ -872,7 +912,7 @@ export async function loadModule(message, options = {}) {
     $.teach({ popped: true })
   } catch(e) {
     console.error(e)
-    $.teach({ body: 'ELF load failed, ask "help" for assistance', author: 'assistant' }, mergeMessage)
+    addMessage({ body: 'ELF load failed, ask "help" for assistance', author: 'assistant' })
   }
 }
 
@@ -1166,7 +1206,7 @@ function isLastLine(textarea) {
 function interrupt() {
   normalMode()
   $.teach({ secureEntry: false, messageHeight: null, messageText: '', messageDraft: '' })
-  $.teach({ body: 'Girl, interrupted.', author: 'assistant' }, mergeMessage)
+  addMessage({ body: 'Girl, interrupted.', author: 'assistant' })
 }
 
 const hotkeys = {}
