@@ -139,6 +139,8 @@ const $ = Self(tag, {
   inspectorOpen: true,
   attachmentsOpen: true,
   logsOpen: true,
+  ops: [],
+  _rejectedOps: [],
   edgeTypes: { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
   players: {},
 })
@@ -237,6 +239,163 @@ function wasSave() {
   }, 1500)
 }
 
+// ── op log ────────────────────────────────────────────────────────────────────
+
+function wasOpsPath(id) {
+  return `/bulletin-board/${id || 'default'}.ops.json`
+}
+
+async function wasLoadOps() {
+  try {
+    const blob = await wasGet(wasOpsPath(_boardId))
+    if (!blob) return
+    const data = JSON.parse(await blob.text())
+    if (Array.isArray(data?.ops)) $.teach({ ops: data.ops })
+  } catch {}
+}
+
+let _wasSaveOpsTimer = null
+function wasSaveOps() {
+  clearTimeout(_wasSaveOpsTimer)
+  _wasSaveOpsTimer = setTimeout(async () => {
+    const { ops } = $.learn()
+    const path = wasOpsPath(_boardId)
+    const json = JSON.stringify({ ops })
+    try {
+      await wasDel(path).catch(() => null)
+      await wasPut(path, json, { type: 'application/json' })
+    } catch {}
+  }, 1500)
+}
+
+function rejectedKey() { return `bb-rejected:${_boardId}` }
+function getRejected() {
+  try { return new Set(JSON.parse(localStorage.getItem(rejectedKey()) || '[]')) }
+  catch { return new Set() }
+}
+function setRejected(set) {
+  localStorage.setItem(rejectedKey(), JSON.stringify([...set]))
+  $.teach({ _rejectedOps: [...set] })
+}
+
+const _opDebounce = new Map()
+const OP_DEBOUNCE_MS = 2000
+
+function appendOp(cardId, op, payload) {
+  const author = getKeycard()?.asJSON?.controller || null
+  const id = crypto.randomUUID()
+  const ts = Date.now()
+  const rec = { id, cardId, op, payload, ts, author }
+
+  if (op === 'update' && payload.updates) {
+    const fields = Object.keys(payload.updates)
+    if (fields.length === 1) {
+      const dKey = `${cardId}:${fields[0]}`
+      const lastId = _opDebounce.get(dKey)
+      if (lastId) {
+        const { ops } = $.learn()
+        const idx = ops.findIndex(o => o.id === lastId)
+        if (idx >= 0 && ts - ops[idx].ts < OP_DEBOUNCE_MS) {
+          const next = [...ops]
+          next[idx] = { ...ops[idx], payload: { ...payload, old: ops[idx].payload.old }, ts }
+          $.teach({ ops: next })
+          wasSaveOps()
+          return
+        }
+      }
+      _opDebounce.set(dKey, id)
+    }
+  }
+
+  const { ops } = $.learn()
+  $.teach({ ops: [...ops, rec] })
+  wasSaveOps()
+}
+
+function deriveCardFromOps(cardId) {
+  const { ops } = $.learn()
+  const rejected = getRejected()
+  let card = null
+  for (const op of [...ops].filter(o => o.cardId === cardId).sort((a, b) => a.ts - b.ts)) {
+    if (rejected.has(op.id)) continue
+    if (op.op === 'create') card = { ...op.payload.card }
+    else if (op.op === 'update' && card) card = { ...card, ...op.payload.updates }
+    else if (op.op === 'delete') card = null
+  }
+  return card
+}
+
+function opSummary(op) {
+  if (op.op === 'create') return 'card created'
+  if (op.op === 'delete') return 'card deleted'
+  if (op.op === 'link') {
+    const { cards } = $.learn()
+    const toCard = cards[op.payload.to]
+    const label = (toCard?.text || op.payload.to || '').slice(0, 20)
+    return `linked → ${label}`
+  }
+  if (op.op === 'update') {
+    const keys = Object.keys(op.payload.updates || {})
+    if (keys.includes('x') || keys.includes('y')) return 'moved'
+    if (keys.includes('w') || keys.includes('h')) return 'resized'
+    if (keys.length === 1) {
+      const k = keys[0]
+      const val = op.payload.updates[k]
+      const old = op.payload.old?.[k]
+      if (k === 'text') return `text: "${String(val || '').slice(0, 25)}"`
+      if (k === 'color') return `color ${old || '?'} → ${val}`
+      if (k === 'href') return `href: ${String(val).slice(0, 25)}`
+      if (k === 'startDate') return `start: ${val}`
+      if (k === 'endDate') return `end: ${val}`
+      return `${k}: ${String(val).slice(0, 20)}`
+    }
+    return `updated: ${keys.join(', ')}`
+  }
+  return op.op
+}
+
+function relTime(ts) {
+  const d = Date.now() - ts
+  if (d < 60000) return 'just now'
+  if (d < 3600000) return `${Math.round(d / 60000)}m ago`
+  if (d < 86400000) return `${Math.round(d / 3600000)}h ago`
+  return `${Math.round(d / 86400000)}d ago`
+}
+
+function htmlesc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function renderLogsBody(cardId, ops) {
+  const cardOps = ops.filter(o => o.cardId === cardId).sort((a, b) => b.ts - a.ts)
+  if (!cardOps.length) return '<p class="op-empty">No changes logged yet.</p>'
+  const rejected = getRejected()
+  const { cards } = $.learn()
+  const live = cards[cardId]
+  const derived = deriveCardFromOps(cardId)
+  let derivedSection = ''
+  if (rejected.size > 0 && derived && live) {
+    const diffs = []
+    if (derived.text !== live.text) diffs.push(`text: "${htmlesc((derived.text || '').slice(0, 30))}"`)
+    if (derived.color !== live.color) diffs.push(`color: ${derived.color}`)
+    if (diffs.length) {
+      derivedSection = `<div class="op-derived">
+        <span class="op-derived-label">Your canonical:</span>
+        ${diffs.map(d => `<span class="op-derived-field">${d}</span>`).join('')}
+      </div>`
+    }
+  }
+  return derivedSection + cardOps.map(op => {
+    const accepted = !rejected.has(op.id)
+    return `<label class="op-row${accepted ? '' : ' op-rejected'}" data-op-id="${op.id}">
+      <input type="checkbox" class="op-check" data-op-id="${op.id}"${accepted ? ' checked' : ''}>
+      <span class="op-badge op-type-${op.op}">${op.op}</span>
+      <span class="op-summary">${htmlesc(opSummary(op))}</span>
+      <time class="op-ts" title="${new Date(op.ts).toISOString()}">${relTime(op.ts)}</time>
+    </label>`
+  }).join('')
+}
+
 function subscribe(target) {
   if (!history.state?.type) {
     history.replaceState({ type: 'bulletin-board-launch', href: null }, '', location.href)
@@ -302,42 +461,45 @@ function createCard(x, y, w, h) {
   const id = crypto.randomUUID()
   const { cards, trayZ } = $.learn()
   const author = getKeycard()?.asJSON?.controller || null
+  const card = {
+    x, y,
+    w: Math.max(120, w),
+    h: Math.max(80, h),
+    z: trayZ + 1,
+    text: '',
+    color: '#fffde7',
+    saga: '',
+    href: '',
+    createdAt: Date.now(),
+    startDate: '',
+    endDate: '',
+    links: {},
+    backlinks: {},
+    author,
+  }
   $.teach({
-    cards: {
-      ...cards,
-      [id]: {
-        x, y,
-        w: Math.max(120, w),
-        h: Math.max(80, h),
-        z: trayZ + 1,
-        text: '',
-        color: '#fffde7',
-        saga: '',
-        href: '',
-        createdAt: Date.now(),
-        startDate: '',
-        endDate: '',
-        links: {},
-        backlinks: {},
-        author,
-      }
-    },
+    cards: { ...cards, [id]: card },
     trayZ: trayZ + 1,
     focusedCard: id,
   })
+  appendOp(id, 'create', { card })
   return id
 }
 
 function updateCard(id, updates) {
   const { cards } = $.learn()
   if (!cards[id]) return
+  const old = {}
+  Object.keys(updates).forEach(k => { old[k] = cards[id][k] })
   $.teach({ cards: { ...cards, [id]: { ...cards[id], ...updates } } })
+  appendOp(id, 'update', { updates, old })
 }
 
 function deleteCard(id) {
   const { cards } = $.learn()
   const next = { ...cards }
   const card = next[id]
+  appendOp(id, 'delete', { snapshot: card })
   if (card) {
     Object.entries(card.links || {}).forEach(([linkId, link]) => {
       const tgt = next[link.to]
@@ -381,6 +543,7 @@ function linkCards(fromId, toId, fromDir, toDir, typeId = HYPER_ID) {
       [toId]:   { ...cards[toId],   backlinks: { ...cards[toId].backlinks,   [linkId]: fromId } },
     }
   })
+  appendOp(fromId, 'link', { linkId, from: fromId, to: toId, fromDir, toDir, typeId })
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -550,7 +713,7 @@ function renderAttachments(cardId, card) {
   `
 }
 
-function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen) {
+function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops = []) {
   const card = cards[id]
   if (!card) return '<p class="sidebar-empty">Card not found.</p>'
   return `
@@ -578,7 +741,7 @@ function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsO
         <span>Logs</span>
       </button>
       <div class="section-body logs-section-body${logsOpen ? '' : ' section-collapsed'}">
-        <iframe class="logs-shell" src="/app/ur-shell" title="shell: ${id}"></iframe>
+        <div class="op-log">${renderLogsBody(id, ops)}</div>
       </div>
     </div>
   `
@@ -1003,6 +1166,7 @@ function mount(target) {
 
   target.querySelector('.bulletin-canvas').style.backgroundImage = stars
   wasLoad().then(() => {
+    wasLoadOps()
     subscribe(target)
     linkState(tag, _boardId)
     if (!_peerArrowInterval) {
@@ -1015,7 +1179,7 @@ function update(target) {
   const { panX, panY, zoom, cards, mode, menuOpen, beltOffsetX, beltOffsetY,
           focusedCard, linkSource, isDrawing, createStartX, createStartY, createX, createY,
           sidebarOpen, sidebarCard, grabbing, edgeTypes, launchHref, players,
-          inspectorOpen, attachmentsOpen, logsOpen } = $.learn()
+          inspectorOpen, attachmentsOpen, logsOpen, ops, _rejectedOps } = $.learn()
 
   const workspace = target.querySelector('.workspace')
   workspace.style.setProperty('--pan-x', panX + 'px')
@@ -1100,14 +1264,15 @@ function update(target) {
     const linkTypeSig = Object.entries(card?.links || {}).map(([k, v]) => `${k}:${v.typeId}`).join(',')
       + '|' + Object.keys(card?.backlinks || {}).join(',')
     const attachSig = Object.keys(card?.attachments || {}).join(',')
-    const sectionSig = `${inspectorOpen}|${attachmentsOpen}|${logsOpen}`
+    const cardOpCount = ops.filter(o => o.cardId === sidebarCard).length
+    const sectionSig = `${inspectorOpen}|${attachmentsOpen}|${logsOpen}|${cardOpCount}|${_rejectedOps.length}`
     const cardSwitched = sidebarBody.dataset.card !== sidebarCard
       || sidebarBody.dataset.etSig !== etSig
       || sidebarBody.dataset.linkTypeSig !== linkTypeSig
       || sidebarBody.dataset.attachSig !== attachSig
       || sidebarBody.dataset.sectionSig !== sectionSig
     if (cardSwitched) {
-      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen)
+      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops)
       sidebarBody.dataset.card = sidebarCard
       sidebarBody.dataset.etSig = etSig
       sidebarBody.dataset.linkTypeSig = linkTypeSig
@@ -1351,6 +1516,15 @@ $.when('click', '[data-toggle-section]', e => {
   if (section === 'inspector') $.teach({ inspectorOpen: !$.learn().inspectorOpen })
   else if (section === 'attachments') $.teach({ attachmentsOpen: !$.learn().attachmentsOpen })
   else if (section === 'logs') $.teach({ logsOpen: !$.learn().logsOpen })
+})
+
+$.when('change', '.op-check', e => {
+  const opId = e.target.dataset.opId
+  if (!opId) return
+  const rejected = getRejected()
+  if (e.target.checked) rejected.delete(opId)
+  else rejected.add(opId)
+  setRejected(rejected)
 })
 
 $.when('click', '[data-add-fb]', e => {
@@ -2339,12 +2513,75 @@ $.style(`
     padding: 0;
   }
 
-  & .logs-shell {
-    display: block;
-    width: 100%;
-    height: 300px;
-    border: none;
-    border-radius: 0 0 3px 3px;
+  & .op-log {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    font-size: .72rem;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+
+  & .op-empty {
+    padding: 8px 10px;
+    color: rgba(0,0,0,.4);
+    font-style: italic;
+    margin: 0;
+  }
+
+  & .op-derived {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    padding: 6px 10px;
+    background: #fffde7;
+    border-bottom: 1px solid rgba(0,0,0,.08);
+    font-size: .68rem;
+  }
+  & .op-derived-label { font-weight: 600; color: #b45309; }
+  & .op-derived-field { background: #fef3c7; padding: 1px 4px; border-radius: 3px; }
+
+  & .op-row {
+    display: grid;
+    grid-template-columns: 18px auto 1fr auto;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 8px;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    cursor: pointer;
+    user-select: none;
+  }
+  & .op-row:hover { background: rgba(0,0,0,.03); }
+  & .op-row.op-rejected { opacity: .45; text-decoration: line-through; }
+
+  & .op-check { cursor: pointer; margin: 0; }
+
+  & .op-badge {
+    font-size: .6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 1px 4px;
+    border-radius: 3px;
+    white-space: nowrap;
+    color: #fff;
+  }
+  & .op-type-create  { background: #16a34a; }
+  & .op-type-update  { background: #2563eb; }
+  & .op-type-delete  { background: #dc2626; }
+  & .op-type-link    { background: #9333ea; }
+
+  & .op-summary {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(0,0,0,.75);
+  }
+
+  & .op-ts {
+    color: rgba(0,0,0,.38);
+    white-space: nowrap;
+    font-size: .63rem;
   }
 
   /* ── play button ── */
