@@ -139,6 +139,7 @@ const $ = Self(tag, {
   inspectorOpen: true,
   attachmentsOpen: true,
   logsOpen: true,
+  shellOpen: true,
   ops: [],
   _rejectedOps: [],
   edgeTypes: { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
@@ -713,7 +714,7 @@ function renderAttachments(cardId, card) {
   `
 }
 
-function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops = []) {
+function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops = [], shellOpen = true) {
   const card = cards[id]
   if (!card) return '<p class="sidebar-empty">Card not found.</p>'
   return `
@@ -733,6 +734,15 @@ function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsO
       </button>
       <div class="section-body${attachmentsOpen ? '' : ' section-collapsed'}">
         ${renderAttachments(id, card)}
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <button class="section-toggle" data-toggle-section="shell">
+        <sl-icon name="${shellOpen ? 'chevron-down' : 'chevron-right'}" class="section-chevron"></sl-icon>
+        <span>Shell</span>
+      </button>
+      <div class="section-body shell-section-body${shellOpen ? '' : ' section-collapsed'}">
+        <iframe class="card-shell" src="/app/ur-shell?id=${encodeURIComponent(id)}" title="shell: ${id}"></iframe>
       </div>
     </div>
     <div class="sidebar-section">
@@ -1179,7 +1189,7 @@ function update(target) {
   const { panX, panY, zoom, cards, mode, menuOpen, beltOffsetX, beltOffsetY,
           focusedCard, linkSource, isDrawing, createStartX, createStartY, createX, createY,
           sidebarOpen, sidebarCard, grabbing, edgeTypes, launchHref, players,
-          inspectorOpen, attachmentsOpen, logsOpen, ops, _rejectedOps } = $.learn()
+          inspectorOpen, attachmentsOpen, logsOpen, shellOpen, ops, _rejectedOps } = $.learn()
 
   const workspace = target.querySelector('.workspace')
   workspace.style.setProperty('--pan-x', panX + 'px')
@@ -1265,14 +1275,14 @@ function update(target) {
       + '|' + Object.keys(card?.backlinks || {}).join(',')
     const attachSig = Object.keys(card?.attachments || {}).join(',')
     const cardOpCount = ops.filter(o => o.cardId === sidebarCard).length
-    const sectionSig = `${inspectorOpen}|${attachmentsOpen}|${logsOpen}|${cardOpCount}|${_rejectedOps.length}`
+    const sectionSig = `${inspectorOpen}|${attachmentsOpen}|${shellOpen}|${logsOpen}|${cardOpCount}|${_rejectedOps.length}`
     const cardSwitched = sidebarBody.dataset.card !== sidebarCard
       || sidebarBody.dataset.etSig !== etSig
       || sidebarBody.dataset.linkTypeSig !== linkTypeSig
       || sidebarBody.dataset.attachSig !== attachSig
       || sidebarBody.dataset.sectionSig !== sectionSig
     if (cardSwitched) {
-      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops)
+      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops, shellOpen)
       sidebarBody.dataset.card = sidebarCard
       sidebarBody.dataset.etSig = etSig
       sidebarBody.dataset.linkTypeSig = linkTypeSig
@@ -1515,6 +1525,7 @@ $.when('click', '[data-toggle-section]', e => {
   const section = e.target.closest('[data-toggle-section]')?.dataset.toggleSection
   if (section === 'inspector') $.teach({ inspectorOpen: !$.learn().inspectorOpen })
   else if (section === 'attachments') $.teach({ attachmentsOpen: !$.learn().attachmentsOpen })
+  else if (section === 'shell') $.teach({ shellOpen: !$.learn().shellOpen })
   else if (section === 'logs') $.teach({ logsOpen: !$.learn().logsOpen })
 })
 
@@ -2508,6 +2519,18 @@ $.style(`
   }
   & .attach-add:hover { border-color: dodgerblue; color: dodgerblue; }
   & .attach-add sl-icon { font-size: 1.1rem; }
+
+  & .shell-section-body {
+    padding: 0;
+  }
+
+  & .card-shell {
+    display: block;
+    width: 100%;
+    height: 300px;
+    border: none;
+    border-radius: 0 0 3px 3px;
+  }
 
   & .logs-section-body {
     padding: 0;

@@ -509,6 +509,7 @@ function mount(target) {
   if(target.mounted) return
   target.mounted = true
   const command = target.getAttribute('command')
+    || (new URLSearchParams(location.search).get('id') ? `tty ${new URLSearchParams(location.search).get('id')}` : null)
   const message = target.getAttribute('message')
   const src = target.getAttribute('src')
   const rom = target.getAttribute('rom')
