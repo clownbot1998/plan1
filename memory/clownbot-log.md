@@ -71,4 +71,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `C0DEFEED-BABE-CAFE-DEAD-BEEFFACE2026` | 2026-05-25 | braid+WAS persistence for bulletin-board: wasLoad before subscribe, merge guard by card count, wasSave debounced 1500ms, save() fans to both. started plan98-was docker container. the board remembers. |
 
+| `0PLOG000-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-05-26 | op log for bulletin-board: every card mutation appends an immutable op record (create/update/delete/link) to WAS. sidebar Logs panel shows per-card history with accept/reject checkboxes. rejection set is local-only (localStorage). derived canonical view shown when rejections diverge from live state. the board remembers what happened, not just what is. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
