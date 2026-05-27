@@ -548,8 +548,7 @@ Type \`<elf-name>\` to load a custom element.
 function mount(target) {
   if(target.mounted) return
   target.mounted = true
-  const idParam = new URLSearchParams(location.search).get('id')
-  const command = target.getAttribute('command') || (idParam ? `tty ${idParam}` : null)
+  const command = target.getAttribute('command')
   const message = target.getAttribute('message')
   const src = target.getAttribute('src')
   const rom = target.getAttribute('rom')
