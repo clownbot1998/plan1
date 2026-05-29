@@ -1102,7 +1102,7 @@ const MODE_META = {
   pan:    { icon: 'arrows-move',   color: 'mediumseagreen' },
   link:   { icon: 'link-45deg',    color: 'dodgerblue'     },
   manage: { icon: 'pencil-square', color: 'firebrick'      },
-  browse: { icon: 'folder2-open',  color: 'darkorange'     },
+  browse: { icon: 'people-fill',   color: 'darkorange'     },
   camera: { icon: 'camera-fill',   color: 'mediumpurple'   },
 }
 
@@ -1111,8 +1111,8 @@ function renderCompassButtons(mode) {
     <button class="c-manage${mode === 'manage' ? ' active' : ''}" data-mode="manage" title="manage cards">
       <sl-icon name="pencil-square"></sl-icon>
     </button>
-    <button class="c-browse${mode === 'browse' ? ' active' : ''}" data-mode="browse" title="browse files">
-      <sl-icon name="folder2-open"></sl-icon>
+    <button class="c-browse${mode === 'browse' ? ' active' : ''}" data-mode="browse" title="team chat">
+      <sl-icon name="people-fill"></sl-icon>
     </button>
     <button class="c-qr" data-action="qr" title="share via QR">
       <sl-icon name="qr-code"></sl-icon>
@@ -1857,7 +1857,7 @@ $.when('click', '[data-mode]', e => {
   // open new overlay
   if (next === 'camera') openCamera()
   else if (next === 'browse') {
-    const href = '/app/lore-baby'
+    const href = `/app/dream-team?room=${encodeURIComponent(_boardId)}`
     $.teach({ launchHref: href })
     history.pushState({ type: 'bulletin-board-launch', href }, '', href)
   }
