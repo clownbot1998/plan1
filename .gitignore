@@ -1,5 +1,7 @@
 .serve.pid
+.relay.pid
 .watch.pid
+node_modules/
 .env
 .claude/
 dist/

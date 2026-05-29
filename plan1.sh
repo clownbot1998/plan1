@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLIENT_DIR="$SCRIPT_DIR/client/public"
 DIST_DIR="$SCRIPT_DIR/dist"
 PID_FILE="$SCRIPT_DIR/.serve.pid"
+RELAY_PID_FILE="$SCRIPT_DIR/.relay.pid"
 PORT=${PLAN1_PORT:-1998}
 
 case "$CMD" in
@@ -20,6 +21,9 @@ case "$CMD" in
     deno run --allow-read --allow-net --allow-env --allow-run --allow-write $ENV_FLAG "$SCRIPT_DIR/server.js" &
     echo $! > "$PID_FILE"
     echo "serving dist/ on http://localhost:$PORT (pid $!)"
+    node $ENV_FLAG "$SCRIPT_DIR/multiplayer.js" &
+    echo $! > "$RELAY_PID_FILE"
+    echo "multiplayer relay on :9208 (pid $!)"
     echo "open http://localhost:$PORT/app/private-ai"
     ;;
   stop)
@@ -27,6 +31,10 @@ case "$CMD" in
     if [ -f "$WATCH_PID_FILE" ]; then
       kill "$(cat "$WATCH_PID_FILE")" 2>/dev/null || true
       rm "$WATCH_PID_FILE" 2>/dev/null || true
+    fi
+    if [ -f "$RELAY_PID_FILE" ]; then
+      kill "$(cat "$RELAY_PID_FILE")" 2>/dev/null || true
+      rm "$RELAY_PID_FILE" 2>/dev/null || true
     fi
     if [ -f "$PID_FILE" ]; then
       kill "$(cat "$PID_FILE")" 2>/dev/null && echo "stopped" || true

@@ -156,6 +156,7 @@ function buildEnvScript(isAdmin = false) {
     PLAN98_WAS_SIGNER:   _signerJson,
     PLAN98_REALTIME:     safeEnv('PLAN98_REALTIME'),
     HEAVY_ASSET_CDN_URL: safeEnv('HEAVY_ASSET_CDN_URL'),
+    PLAN98_GECKOS_URL:   safeEnv('PLAN98_GECKOS_URL'),
   };
   if (isAdmin) {
     env.PLAN98_APP_ID        = safeEnv('PLAN98_APP_ID');
