@@ -73,4 +73,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `0PLOG000-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-05-26 | op log for bulletin-board: every card mutation appends an immutable op record (create/update/delete/link) to WAS. sidebar Logs panel shows per-card history with accept/reject checkboxes. rejection set is local-only (localStorage). derived canonical view shown when rejections diverge from live state. the board remembers what happened, not just what is. |
 
+| `BADC0FEE-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-05-28 | dream-team port: admin wall for Bayun keys (server-side env gating), persona bootstrap from existing session, WAS message persistence per room. lore-baby compass button → dream-team joined on board UUID. the team arrives. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
