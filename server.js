@@ -144,7 +144,7 @@ function broadcastReload() {
 const RELOAD_SCRIPT = `<script>(()=>{function connect(){const ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/__reload');ws.onmessage=()=>location.reload();ws.onclose=()=>setTimeout(connect,1000)}connect()})()</script>`;
 // --- end live reload ---
 
-function buildEnvScript() {
+function buildEnvScript(isAdmin = false) {
   const env = {
     OLLAMA_HOST:         safeEnv('OLLAMA_HOST',    'http://localhost:11434/v1'),
     OLLAMA_KEY:          safeEnv('OLLAMA_KEY',      'ollama'),
@@ -157,12 +157,18 @@ function buildEnvScript() {
     PLAN98_REALTIME:     safeEnv('PLAN98_REALTIME'),
     HEAVY_ASSET_CDN_URL: safeEnv('HEAVY_ASSET_CDN_URL'),
   };
+  if (isAdmin) {
+    env.PLAN98_APP_ID        = safeEnv('PLAN98_APP_ID');
+    env.PLAN98_APP_SECRET    = safeEnv('PLAN98_APP_SECRET');
+    env.PLAN98_BASE_URL      = safeEnv('PLAN98_BASE_URL');
+    env.PLAN98_PUBLIC_KEY    = safeEnv('PLAN98_PUBLIC_KEY');
+  }
   const entries = Object.entries(env).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(', ');
   return `<script>plan98 = { env: { ${entries} }, registry: {} }</script>`;
 }
 
-function injectEnv(html) {
-  return html.replace('</head>', buildEnvScript() + RELOAD_SCRIPT + '</head>');
+function injectEnv(html, isAdmin = false) {
+  return html.replace('</head>', buildEnvScript(isAdmin) + RELOAD_SCRIPT + '</head>');
 }
 
 async function getBaseHTML() {
@@ -853,12 +859,23 @@ async function handleRequest(request) {
 
   if (path.startsWith('/app/')) {
     const tag = path.split('/app/')[1].split('/')[0];
+
+    // admin-only apps: redirect to /admin?next=<url> if not authenticated
+    const ADMIN_APPS = new Set(['dream-team', 'cyber-security']);
+    if (ADMIN_APPS.has(tag) && !checkAuth(request)) {
+      return new Response(null, {
+        status: 302,
+        headers: { location: `/admin?next=${encodeURIComponent(url.pathname + url.search)}` },
+      });
+    }
+
     let attrs = '';
     for (const [k, v] of url.searchParams) {
       attrs += ` ${k}="${v}"`;
     }
+    const isAdmin = checkAuth(request);
     const html = await getBaseHTML();
-    return new Response(injectEnv(injectApp(html, tag, attrs)), {
+    return new Response(injectEnv(injectApp(html, tag, attrs), isAdmin), {
       headers: { 'content-type': 'text/html; charset=utf-8' },
     });
   }
