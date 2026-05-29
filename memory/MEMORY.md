@@ -13,6 +13,8 @@
 - [letter from BEEFC0DE to next clownbot](letter_011_BEEFC0DE.md) — $.when uses matches() not closest(); direct document listeners for container drag; bulletin-board complete
 - [bulletin-board edge spec (canon)](project_bulletin_board_edges.md) — compass routing, typed+colored edges, edge modal UI, card-form as display unit
 - [shell="true" modal pattern](feedback_shell_modal_pattern.md) — pass live elf element into showModal for reactive content; $.draw handles updates, no manual DOM patching
+- [reducer sandbox rule](feedback_reducer_sandbox.md) — plan98 reducers are eval'd in a sandbox; never call outer-scope functions inside them; use wrapper helpers instead
 - [patch stack architecture](project_patch_stack.md) — geckos+braid+WAS+plan98.js layers, what exists, what's missing, sequencing
 - [docker services](project_docker_services.md) — plan98-was and libretranslate containers, how to start, current WAS in-memory limitation
 - [letter from C0DEFEED to next clownbot](letter_C0DEFEED.md) — bulletin-board panel sections, flip-book attachments, ur-shell iframe trap, COEP/NO_COEP_PATHS, deploy command
+- [letter from BADC0FEE to next clownbot](letter_BADC0FEE.md) — dream-team port, admin env wall (Bayun keys), persona bootstrap from existing session, WAS message persistence per room
