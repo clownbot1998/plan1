@@ -12,6 +12,7 @@ import {
   BayunCore
 } from './cyber-security.js'
 import { get as wasGet, put as wasPut, ensureSpace } from './plan98-wallet.js'
+import geckosClient from '@geckos.io/client'
 
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
@@ -41,6 +42,62 @@ function flushDecryptQueue() {
 function queueDecrypt(task) {
   decryptQueue.push(task)
   flushDecryptQueue()
+}
+
+// ── geckos live relay ─────────────────────────────────────────────────────────
+let _geckosChannel = null
+let _geckosRoom = null
+
+function geckosConnect() {
+  if (_geckosChannel) return
+  const raw = plan98?.env?.PLAN98_GECKOS_URL
+  if (!raw) return
+  const parsed = new URL(raw)
+  const url = parsed.origin.replace(`:${parsed.port}`, '') || parsed.origin
+  const port = parsed.port ? Number(parsed.port) : undefined
+  _geckosChannel = geckosClient({ url: `${parsed.protocol}//${parsed.hostname}`, port })
+  _geckosChannel.onConnect(err => {
+    if (err) { console.error('geckos connect error:', err); _geckosChannel = null; return }
+    if (_geckosRoom) _geckosChannel.emit('joinRoom', { roomName: _geckosRoom, nickname: getMemberId() })
+  })
+  _geckosChannel.on('chatMessage', msg => {
+    const room = msg.room
+    if (!room) return
+    if (msg.parentId) {
+      $.teach({ reply: msg }, (state, { reply }) => ({
+        ...state,
+        threads: {
+          ...state.threads,
+          [reply.room]: {
+            ...(state.threads[reply.room] || {}),
+            [reply.parentId]: {
+              ...((state.threads[reply.room] || {})[reply.parentId] || {}),
+              [reply.id]: reply
+            }
+          }
+        }
+      }))
+    } else {
+      $.teach({ message: msg }, (state, { message }) => ({
+        ...state,
+        messages: {
+          ...state.messages,
+          [message.room]: { ...(state.messages[message.room] || {}), [message.id]: message }
+        }
+      }))
+    }
+    wasSaveMessages(room)
+  })
+}
+
+function geckosJoin(roomId) {
+  _geckosRoom = roomId
+  if (_geckosChannel) _geckosChannel.emit('joinRoom', { roomName: roomId, nickname: getMemberId() })
+}
+
+function geckosDisconnect() {
+  if (_geckosChannel) { _geckosChannel.close?.(); _geckosChannel = null }
+  _geckosRoom = null
 }
 
 // Track what we've already scheduled decryption for to avoid re-scanning
@@ -269,6 +326,7 @@ function activateGroup(sessionId, id) {
     .then(result => {
       $.teach({ currentRoom: result.groupId, showActionMenu: false, view: 'chat' })
       wasLoadMessages(result.groupId)
+      geckosJoin(result.groupId)
     })
     .catch(error => {
       console.log("Error caught");
@@ -799,6 +857,7 @@ function beforeUpdate(target) {
       if(room) {
         $.teach({ currentRoom: room })
         wasLoadMessages(room)
+        geckosJoin(room)
       }
 
       if(q) {
@@ -1889,6 +1948,7 @@ async function send() {
       })
     })
     wasSaveMessages(currentRoom)
+    if (_geckosChannel) _geckosChannel.emit('chatMessage', message)
   }
   clearTiptapEditor('main')
   $.teach({ showAttachments: false, attachments: [] })
@@ -1953,6 +2013,7 @@ async function sendReply() {
       })
     })
     wasSaveMessages(currentRoom)
+    if (_geckosChannel) _geckosChannel.emit('chatMessage', reply)
   }
   clearTiptapEditor('reply')
   $.teach({ replyAttachments: [] })
@@ -1987,6 +2048,8 @@ $.when('activated', 'cyber-security', (event) => {
     lastSeen: Date.now()
   }, join)
 
+  geckosConnect()
+
   if (!groupsLoaded) {
     groupsLoaded = true
     getMyGroups()
@@ -1995,6 +2058,7 @@ $.when('activated', 'cyber-security', (event) => {
 })
 
 $.when('deactivated', 'cyber-security', (event) => {
+  geckosDisconnect()
   groupsLoaded = false
   Object.keys(table).forEach(room => delete table[room])
   decryptionInProgress.clear()
