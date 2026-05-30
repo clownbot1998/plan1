@@ -8,6 +8,7 @@ import { get, put } from './plan98-wallet.js'
 
 const views = {
   createPost: 'createPost',
+  createMedia: 'createMedia',
   account: 'account',
   profile: 'profile',
   detail: 'detail',
@@ -142,7 +143,25 @@ $.when('click', '.view-profile', (event) => {
 
 $.when('click', '.new-post', (event) => {
   const timelineUR = getTimelineUR(event.target)
-  $.teach({ activeTimeline: timelineUR, currentView: views.createPost })
+  $.teach({ activeTimeline: timelineUR, currentView: views.createMedia })
+})
+
+$.when('click', '[data-cancel-create-media]', () => {
+  $.teach({ currentView: views.profile })
+})
+
+$.when('click', '[data-create-type]', (event) => {
+  const btn = event.target.closest('[data-create-type]')
+  if (!btn) return
+  const mediaType = btn.dataset.createType
+  if (mediaType === 'text') {
+    $.teach({ currentView: views.createPost })
+    return
+  }
+  btn.closest('plan98-gallery')?.dispatchEvent(new CustomEvent('gallery-create-media', {
+    bubbles: true,
+    detail: { mediaType }
+  }))
 })
 
 $.when('click', '[data-cancel-draft]', () => {
@@ -395,6 +414,21 @@ $.draw(target => {
       <button class="view-profile">Profile</button>
       <cyber-security></cyber-security>
     </div>
+    <div data-view="createMedia" hidden>
+      <div class="create-media-wrap">
+        <div class="create-media-header">
+          <button data-cancel-create-media class="standard-button -clear" type="button">Back</button>
+          <span class="create-media-title">Create</span>
+        </div>
+        <div class="create-media-types">
+          <button class="create-type-btn" data-create-type="text"><sl-icon name="file-text" class="create-type-icon"></sl-icon><span>Text</span></button>
+          <button class="create-type-btn" data-create-type="image"><sl-icon name="image" class="create-type-icon"></sl-icon><span>Image</span></button>
+          <button class="create-type-btn" data-create-type="video"><sl-icon name="camera-video" class="create-type-icon"></sl-icon><span>Video</span></button>
+          <button class="create-type-btn" data-create-type="audio"><sl-icon name="mic" class="create-type-icon"></sl-icon><span>Audio</span></button>
+          <button class="create-type-btn" data-create-type="flip-book"><sl-icon name="brush" class="create-type-icon"></sl-icon><span>Flip-book</span></button>
+        </div>
+      </div>
+    </div>
   `
 }, {
   async beforeUpdate(target) {
@@ -427,10 +461,11 @@ $.draw(target => {
     const activeView = !authenticated ? 'auth'
       : (currentView || 'profile')
 
-    // In picker mode, always show profile view and skip view management
+    // In picker mode, show profile or createMedia
     if (isPickerMode(target)) {
+      const pickerView = currentView === views.createMedia ? views.createMedia : 'profile'
       target.querySelectorAll('[data-view]').forEach(el => {
-        el.hidden = el.dataset.view !== 'profile'
+        el.hidden = el.dataset.view !== pickerView
       })
     } else {
       target.querySelectorAll('[data-view]').forEach(el => {
@@ -895,6 +930,69 @@ $.style(`
 
   & [data-view] {
     height: 100%;
+  }
+
+  & .create-media-wrap {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: white;
+    padding: .75rem;
+    box-sizing: border-box;
+  }
+
+  & .create-media-header {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding-bottom: .75rem;
+    border-bottom: 1px solid rgba(0,0,0,.08);
+    margin-bottom: 1rem;
+  }
+
+  & .create-media-title {
+    font-weight: 700;
+    font-size: 1rem;
+    flex: 1;
+  }
+
+  & .create-media-types {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: .75rem;
+  }
+
+  & .create-type-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: .5rem;
+    padding: 1.25rem .5rem;
+    background: rgba(0,0,0,.03);
+    border: 1.5px solid rgba(0,0,0,.1);
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: 'Recursive', sans-serif;
+    font-size: .8rem;
+    color: rgba(0,0,0,.7);
+    transition: border-color .15s, background .15s;
+  }
+
+  & .create-type-btn:hover,
+  & .create-type-btn:focus {
+    border-color: var(--root-theme, mediumseagreen);
+    background: rgba(0,0,0,.05);
+    color: rgba(0,0,0,.9);
+  }
+
+  & .create-type-icon {
+    font-size: 1.5rem;
+    pointer-events: none;
+  }
+
+  & .create-type-btn span {
+    pointer-events: none;
   }
 
   & .gallery-thumb.selected {

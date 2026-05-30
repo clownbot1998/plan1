@@ -696,20 +696,50 @@ function renderInspectorBody(id, cards, edgeTypes = {}) {
   `
 }
 
+function renderAttachThumb(cardId, aid, att) {
+  if (att.type === 'gallery') {
+    const rec = att.record || {}
+    const type = rec.$type || ''
+    let preview = ''
+    if (type === 'computer.sillyz.data.image' && rec.src) {
+      preview = `<was-image src="${escapeHtml(rec.src)}" style="width:100%;height:100%;object-fit:cover;pointer-events:none;display:block;"></was-image>`
+    } else if (type === 'computer.sillyz.data.video' && rec.src) {
+      preview = `<was-video src="${escapeHtml(rec.src)}" nocontrols style="width:100%;height:100%;object-fit:cover;pointer-events:none;display:block;"></was-video>`
+    } else if (type === 'computer.sillyz.data.audio') {
+      preview = `<div class="attach-media-label"><sl-icon name="music-note-beamed"></sl-icon></div>`
+    } else {
+      preview = `<div class="attach-text-preview">${escapeHtml((rec.text || '').slice(0, 80))}</div>`
+    }
+    const iconName = type === 'computer.sillyz.data.video' ? 'camera-video'
+      : type === 'computer.sillyz.data.audio' ? 'music-note-beamed'
+      : type === 'computer.sillyz.data.image' ? 'image'
+      : 'file-text'
+    return `
+      <button class="attach-thumb" data-open-attachment="${aid}" data-card-id="${cardId}" title="${escapeHtml(type)}">
+        ${preview}
+        <span class="attach-label"><sl-icon name="${iconName}"></sl-icon></span>
+      </button>
+    `
+  }
+  return `
+    <button class="attach-thumb" data-open-attachment="${aid}" data-card-id="${cardId}" title="open flip-book">
+      <canvas class="fb-thumb-canvas" width="80" height="60" data-fb-path="${escapeHtml(att.fbId || '')}"></canvas>
+      <span class="attach-label"><sl-icon name="film"></sl-icon></span>
+    </button>
+  `
+}
+
 function renderAttachments(cardId, card) {
   const attachments = Object.entries(card.attachments || {})
   return `
-    <div class="attach-gallery">
-      ${attachments.map(([aid, att]) => `
-        <button class="attach-thumb" data-open-attachment="${aid}" data-card-id="${cardId}" title="open ${att.type}">
-          <canvas class="fb-thumb-canvas" width="80" height="60" data-fb-path="${escapeHtml(att.fbId)}"></canvas>
-          <span class="attach-label"><sl-icon name="film"></sl-icon></span>
-        </button>
-      `).join('')}
-      <button class="attach-add" data-add-fb="${cardId}">
-        <sl-icon name="plus-circle"></sl-icon>
-        <span>flip-book</span>
+    <div class="attach-section">
+      <button class="attach-manage-btn" data-manage-attachments="${escapeHtml(cardId)}">
+        <sl-icon name="images"></sl-icon>
+        Manage Attachments
       </button>
+      <div class="attach-gallery">
+        ${attachments.map(([aid, att]) => renderAttachThumb(cardId, aid, att)).join('')}
+      </div>
     </div>
   `
 }
@@ -790,6 +820,109 @@ async function loadFbThumb(canvas, wasPath) {
 function queueThumbLoad(sidebarEl) {
   sidebarEl.querySelectorAll('[data-fb-path]').forEach(canvas => {
     loadFbThumb(canvas, canvas.dataset.fbPath)
+  })
+}
+
+function deleteAttachment(cardId, aid) {
+  const { cards } = $.learn()
+  const card = cards[cardId]
+  if (!card) return
+  const attachments = { ...(card.attachments || {}) }
+  delete attachments[aid]
+  updateCard(cardId, { attachments })
+  save(document.querySelector(tag))
+}
+
+function showAttachMenu(thumb, cardId, aid) {
+  document.querySelector('.attach-quick-menu')?.remove()
+
+  const menu = document.createElement('div')
+  menu.className = 'attach-quick-menu'
+  menu.style.cssText = `
+    position:fixed; z-index:9999;
+    display:flex; flex-direction:column; gap:3px;
+    background:#1d2021; border:1px solid #504945;
+    border-radius:3px; padding:4px;
+    box-shadow:0 4px 16px rgba(0,0,0,.7);
+    font-family:'Recursive';
+  `
+
+  const mkBtn = (label, danger) => {
+    const b = document.createElement('button')
+    b.textContent = label
+    b.style.cssText = `
+      background:#3c3836; border:1px solid ${danger ? '#fb4934' : '#504945'};
+      color:${danger ? '#fb4934' : '#a89984'};
+      font-family:'Recursive'; font-size:.65rem;
+      padding:.35rem .7rem; cursor:pointer; border-radius:2px;
+      text-align:left; white-space:nowrap; display:block; width:100%;
+    `
+    b.addEventListener('pointerover', () => { b.style.background = danger ? 'rgba(251,73,52,.15)' : 'rgba(215,153,33,.15)'; b.style.borderColor = danger ? '#fb4934' : '#d79921'; b.style.color = danger ? '#fb4934' : '#fabd2f' })
+    b.addEventListener('pointerout',  () => { b.style.background = '#3c3836'; b.style.borderColor = danger ? '#fb4934' : '#504945'; b.style.color = danger ? '#fb4934' : '#a89984' })
+    return b
+  }
+
+  const delBtn = mkBtn('✕  remove', true)
+  menu.appendChild(delBtn)
+  document.body.appendChild(menu)
+
+  const rect = thumb.getBoundingClientRect()
+  const mh = menu.offsetHeight
+  menu.style.left = `${rect.left}px`
+  menu.style.top  = `${Math.max(4, rect.top - mh - 8)}px`
+
+  delBtn.addEventListener('pointerdown', e => {
+    e.stopPropagation()
+    menu.remove()
+    deleteAttachment(cardId, aid)
+  })
+
+  const dismiss = e => {
+    if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('pointerdown', dismiss) }
+  }
+  setTimeout(() => document.addEventListener('pointerdown', dismiss), 0)
+}
+
+function attachThumbHoldListeners(container) {
+  container.querySelectorAll('.attach-thumb').forEach(thumb => {
+    if (thumb._holdBound) return
+    thumb._holdBound = true
+
+    let pressTimer = null
+    const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null } }
+
+    thumb.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return
+      const startX = e.clientX, startY = e.clientY
+      let moved = false
+
+      cancelPress()
+      pressTimer = setTimeout(() => {
+        pressTimer = null
+        if (!moved) {
+          thumb._suppressNextClick = true
+          showAttachMenu(thumb, thumb.dataset.cardId, thumb.dataset.openAttachment)
+        }
+      }, 400)
+
+      const onMove = e => {
+        const dx = e.clientX - startX, dy = e.clientY - startY
+        if (!moved && Math.sqrt(dx * dx + dy * dy) > 6) { moved = true; cancelPress() }
+      }
+
+      const onUp = () => {
+        thumb.removeEventListener('pointermove', onMove)
+        thumb.removeEventListener('pointerup', onUp)
+        thumb.removeEventListener('pointercancel', onUp)
+        cancelPress()
+      }
+
+      thumb.addEventListener('pointermove', onMove)
+      thumb.addEventListener('pointerup', onUp)
+      thumb.addEventListener('pointercancel', onUp)
+    })
+
+    thumb.addEventListener('contextmenu', e => e.preventDefault())
   })
 }
 
@@ -1287,6 +1420,7 @@ function update(target) {
       sidebarBody.dataset.attachSig = attachSig
       sidebarBody.dataset.sectionSig = sectionSig
       queueThumbLoad(sidebarBody)
+      attachThumbHoldListeners(sidebarBody)
     } else {
       // Patch live stats without destroying plan98-palette or editor focus
       if (card) {
@@ -1538,27 +1672,69 @@ $.when('change', '.op-check', e => {
   setRejected(rejected)
 })
 
-$.when('click', '[data-add-fb]', e => {
-  const cardId = e.target.closest('[data-add-fb]')?.dataset.addFb
-  if (!cardId) return
+let _attachmentCardId = null
+
+function openAttachmentGallery(cardId) {
+  _attachmentCardId = cardId
+  showModal(`<div data-modal-close style="min-height:100%;display:flex;align-items:center;justify-content:center;padding:2rem;box-sizing:border-box;"><div style="width:100%;max-width:640px;height:70vh;display:flex;flex-direction:column;background:white;border-radius:8px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.2);"><plan98-gallery mode="picker" style="display:block;flex:1;overflow:auto;"></plan98-gallery></div></div>`)
+}
+
+document.addEventListener('gallery-share', e => {
+  if (!_attachmentCardId) return
+  const cardId = _attachmentCardId
+  _attachmentCardId = null
   const { cards } = $.learn()
   const card = cards[cardId]
   if (!card) return
-  const attachId = crypto.randomUUID()
-  const fbId = `/bb/${_boardId}/${attachId}`
-  const attachments = { ...(card.attachments || {}), [attachId]: { type: 'flip-book', fbId, createdAt: new Date().toISOString() } }
-  updateCard(cardId, { attachments })
+  const newAttachments = {}
+  e.detail.items.forEach(item => {
+    const aid = crypto.randomUUID()
+    newAttachments[aid] = { type: 'gallery', record: item.record, createdAt: new Date().toISOString() }
+  })
+  updateCard(cardId, { attachments: { ...(card.attachments || {}), ...newAttachments } })
   save(document.querySelector(tag))
-  openLaunch(`/app/flip-book?id=${encodeURIComponent(fbId)}`)
+  hideModal()
 })
+
+document.addEventListener('gallery-create-media', e => {
+  const { mediaType } = e.detail || {}
+  if (!mediaType) return
+  _attachmentCardId = null
+  closeGallery()
+  hideModal()
+  if (mediaType === 'image') openLaunch('/app/plan98-camera')
+  else if (mediaType === 'video') openLaunch('/app/v-log')
+  else if (mediaType === 'audio') openLaunch('/app/v-log')
+  else if (mediaType === 'flip-book') openLaunch('/app/flip-book')
+})
+
+$.when('click', '[data-manage-attachments]', e => {
+  const cardId = e.target.closest('[data-manage-attachments]')?.dataset.manageAttachments
+  if (!cardId) return
+  openAttachmentGallery(cardId)
+})
+
+function openAttachment(cardId, aid) {
+  const { cards } = $.learn()
+  const att = cards[cardId]?.attachments?.[aid]
+  if (!att) return
+  if (att.type === 'gallery') {
+    const rec = att.record || {}
+    const src = rec.src || ''
+    const type = rec.$type || ''
+    if (type === 'computer.sillyz.data.video') openLaunch(`/app/was-video?src=${encodeURIComponent(src)}`)
+    else if (type === 'computer.sillyz.data.image') openLaunch(`/app/was-image?src=${encodeURIComponent(src)}`)
+    else if (type === 'computer.sillyz.data.audio') openLaunch(`/app/v-log?src=${encodeURIComponent(src)}`)
+    return
+  }
+  openLaunch(`/app/flip-book?id=${encodeURIComponent(att.fbId)}`)
+}
 
 $.when('click', '[data-open-attachment]', e => {
   const btn = e.target.closest('[data-open-attachment]')
   if (!btn) return
-  const { cards } = $.learn()
-  const att = cards[btn.dataset.cardId]?.attachments?.[btn.dataset.openAttachment]
-  if (!att) return
-  openLaunch(`/app/flip-book?id=${encodeURIComponent(att.fbId)}`)
+  if (btn._suppressNextClick) { btn._suppressNextClick = false; return }
+  openAttachment(btn.dataset.cardId, btn.dataset.openAttachment)
 })
 
 // ── edge modal ────────────────────────────────────────────────────────────────
@@ -2507,6 +2683,30 @@ $.style(`
   }
   & .section-body.section-collapsed { display: none; }
 
+  & .attach-section {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+  }
+
+  & .attach-manage-btn {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    background: none;
+    border: 1.5px solid rgba(0,0,0,.15);
+    border-radius: 4px;
+    padding: .35rem .6rem;
+    cursor: pointer;
+    font-family: 'Recursive', sans-serif;
+    font-size: .72rem;
+    color: rgba(0,0,0,.55);
+    width: 100%;
+    transition: border-color .15s, color .15s;
+  }
+  & .attach-manage-btn:hover { border-color: var(--sidebar-card-color, dodgerblue); color: rgba(0,0,0,.85); }
+  & .attach-manage-btn sl-icon { font-size: 1rem; pointer-events: none; }
+
   & .attach-gallery {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
@@ -2544,25 +2744,34 @@ $.style(`
     color: rgba(255,255,255,.6);
   }
 
-  & .attach-add {
+  & .attach-text-preview {
+    width: 100%;
+    height: 100%;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: .25rem;
-    background: none;
-    border: 1.5px dashed rgba(0,0,0,.2);
-    border-radius: 4px;
-    padding: .5rem .25rem;
-    cursor: pointer;
-    font-family: 'Recursive', sans-serif;
+    padding: .4rem;
     font-size: .6rem;
-    color: rgba(0,0,0,.4);
-    aspect-ratio: 4/3;
-    transition: border-color .15s, color .15s;
+    line-height: 1.3;
+    color: rgba(255,255,255,.8);
+    background: rgba(0,0,0,.8);
+    overflow: hidden;
+    word-break: break-word;
+    text-align: center;
+    box-sizing: border-box;
+    pointer-events: none;
   }
-  & .attach-add:hover { border-color: dodgerblue; color: dodgerblue; }
-  & .attach-add sl-icon { font-size: 1.1rem; }
+
+  & .attach-media-label {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: rgba(0,0,0,.35);
+    pointer-events: none;
+  }
 
 
   & .logs-section-body {
