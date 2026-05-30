@@ -109,6 +109,7 @@ const $ = Self(tag, {
   mode: 'pan',
   menuOpen: false,
   launchHref: null,
+  preLaunchMode: null,
   panX: initialPanX,
   panY: initialPanY,
   panXmod: 0,
@@ -139,7 +140,6 @@ const $ = Self(tag, {
   inspectorOpen: true,
   attachmentsOpen: true,
   logsOpen: true,
-  shellOpen: true,
   ops: [],
   _rejectedOps: [],
   edgeTypes: { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
@@ -714,7 +714,7 @@ function renderAttachments(cardId, card) {
   `
 }
 
-function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops = [], shellOpen = true) {
+function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops = []) {
   const card = cards[id]
   if (!card) return '<p class="sidebar-empty">Card not found.</p>'
   return `
@@ -734,15 +734,6 @@ function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsO
       </button>
       <div class="section-body${attachmentsOpen ? '' : ' section-collapsed'}">
         ${renderAttachments(id, card)}
-      </div>
-    </div>
-    <div class="sidebar-section">
-      <button class="section-toggle" data-toggle-section="shell">
-        <sl-icon name="${shellOpen ? 'chevron-down' : 'chevron-right'}" class="section-chevron"></sl-icon>
-        <span>Shell</span>
-      </button>
-      <div class="section-body shell-section-body${shellOpen ? '' : ' section-collapsed'}">
-        <iframe class="card-shell" src="/app/ur-shell?id=${encodeURIComponent(id)}" title="shell: ${id}"></iframe>
       </div>
     </div>
     <div class="sidebar-section">
@@ -1103,7 +1094,7 @@ const MODE_META = {
   link:   { icon: 'link-45deg',    color: 'dodgerblue'     },
   manage: { icon: 'pencil-square', color: 'firebrick'      },
   browse: { icon: 'people-fill',   color: 'darkorange'     },
-  camera: { icon: 'camera-fill',   color: 'mediumpurple'   },
+  gallery: { icon: 'images',        color: 'mediumpurple'   },
 }
 
 function renderCompassButtons(mode) {
@@ -1123,8 +1114,8 @@ function renderCompassButtons(mode) {
     <button class="c-link${mode === 'link' ? ' active' : ''}" data-mode="link" title="link cards">
       <sl-icon name="link-45deg"></sl-icon>
     </button>
-    <button class="c-camera${mode === 'camera' ? ' active' : ''}" data-mode="camera" title="camera">
-      <sl-icon name="camera-fill"></sl-icon>
+    <button class="c-camera${mode === 'gallery' ? ' active' : ''}" data-mode="gallery" title="drop media">
+      <sl-icon name="images"></sl-icon>
     </button>
   `
 }
@@ -1189,7 +1180,7 @@ function update(target) {
   const { panX, panY, zoom, cards, mode, menuOpen, beltOffsetX, beltOffsetY,
           focusedCard, linkSource, isDrawing, createStartX, createStartY, createX, createY,
           sidebarOpen, sidebarCard, grabbing, edgeTypes, launchHref, players,
-          inspectorOpen, attachmentsOpen, logsOpen, shellOpen, ops, _rejectedOps } = $.learn()
+          inspectorOpen, attachmentsOpen, logsOpen, ops, _rejectedOps } = $.learn()
 
   const workspace = target.querySelector('.workspace')
   workspace.style.setProperty('--pan-x', panX + 'px')
@@ -1207,10 +1198,18 @@ function update(target) {
 
   const rootBtn = compass.querySelector('.root')
   if (rootBtn) {
-    const md = MODE_META[mode] || MODE_META.pan
-    rootBtn.style.background = md.color
-    const icon = rootBtn.querySelector('sl-icon')
-    if (icon) icon.setAttribute('name', md.icon)
+    if (launchHref) {
+      rootBtn.style.background = '#111'
+      rootBtn.dataset.closeLaunch = 'true'
+      const icon = rootBtn.querySelector('sl-icon')
+      if (icon) icon.setAttribute('name', 'x-lg')
+    } else {
+      delete rootBtn.dataset.closeLaunch
+      const md = MODE_META[mode] || MODE_META.pan
+      rootBtn.style.background = md.color
+      const icon = rootBtn.querySelector('sl-icon')
+      if (icon) icon.setAttribute('name', md.icon)
+    }
   }
 
   const launchEl = target.querySelector('.card-launch')
@@ -1274,15 +1273,14 @@ function update(target) {
     const linkTypeSig = Object.entries(card?.links || {}).map(([k, v]) => `${k}:${v.typeId}`).join(',')
       + '|' + Object.keys(card?.backlinks || {}).join(',')
     const attachSig = Object.keys(card?.attachments || {}).join(',')
-    const cardOpCount = ops.filter(o => o.cardId === sidebarCard).length
-    const sectionSig = `${inspectorOpen}|${attachmentsOpen}|${shellOpen}|${logsOpen}|${cardOpCount}|${_rejectedOps.length}`
+    const sectionSig = `${inspectorOpen}|${attachmentsOpen}|${logsOpen}`
     const cardSwitched = sidebarBody.dataset.card !== sidebarCard
       || sidebarBody.dataset.etSig !== etSig
       || sidebarBody.dataset.linkTypeSig !== linkTypeSig
       || sidebarBody.dataset.attachSig !== attachSig
       || sidebarBody.dataset.sectionSig !== sectionSig
     if (cardSwitched) {
-      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops, shellOpen)
+      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops)
       sidebarBody.dataset.card = sidebarCard
       sidebarBody.dataset.etSig = etSig
       sidebarBody.dataset.linkTypeSig = linkTypeSig
@@ -1299,6 +1297,9 @@ function update(target) {
         const ed = sidebarBody.querySelector('.sidebar-editor')
         if (ed && document.activeElement !== ed) ed.value = card.text || ''
       }
+      // Patch op-log without full rebuild
+      const opLog = sidebarBody.querySelector('.op-log')
+      if (opLog && logsOpen) opLog.innerHTML = renderLogsBody(sidebarCard, ops)
     }
   }
 
@@ -1525,7 +1526,6 @@ $.when('click', '[data-toggle-section]', e => {
   const section = e.target.closest('[data-toggle-section]')?.dataset.toggleSection
   if (section === 'inspector') $.teach({ inspectorOpen: !$.learn().inspectorOpen })
   else if (section === 'attachments') $.teach({ attachmentsOpen: !$.learn().attachmentsOpen })
-  else if (section === 'shell') $.teach({ shellOpen: !$.learn().shellOpen })
   else if (section === 'logs') $.teach({ logsOpen: !$.learn().logsOpen })
 })
 
@@ -1549,7 +1549,7 @@ $.when('click', '[data-add-fb]', e => {
   const attachments = { ...(card.attachments || {}), [attachId]: { type: 'flip-book', fbId, createdAt: new Date().toISOString() } }
   updateCard(cardId, { attachments })
   save(document.querySelector(tag))
-  $.teach({ launchHref: `/app/flip-book?id=${encodeURIComponent(fbId)}` })
+  openLaunch(`/app/flip-book?id=${encodeURIComponent(fbId)}`)
 })
 
 $.when('click', '[data-open-attachment]', e => {
@@ -1558,7 +1558,7 @@ $.when('click', '[data-open-attachment]', e => {
   const { cards } = $.learn()
   const att = cards[btn.dataset.cardId]?.attachments?.[btn.dataset.openAttachment]
   if (!att) return
-  $.teach({ launchHref: `/app/flip-book?id=${encodeURIComponent(att.fbId)}` })
+  openLaunch(`/app/flip-book?id=${encodeURIComponent(att.fbId)}`)
 })
 
 // ── edge modal ────────────────────────────────────────────────────────────────
@@ -1782,7 +1782,7 @@ function cancelGesture() {
 }
 document.addEventListener('pointercancel', cancelGesture)
 
-document.addEventListener('pointerup', () => {
+document.addEventListener('pointerup', e => {
   const { grabbing, resizing, beltGrabbed } = $.learn()
 
   if (grabbing) {
@@ -1824,6 +1824,7 @@ document.addEventListener('pointerup', () => {
     $.teach({ beltGrabbed: false })
     lastBeltX = undefined
     lastBeltY = undefined
+    e.target.closest(tag)?.querySelector('.card-launch')?.style.removeProperty('pointer-events')
   }
 })
 
@@ -1837,10 +1838,13 @@ $.when('pointerdown', '.root', e => {
   beltDragMoved = false
   lastBeltX = e.clientX
   lastBeltY = e.clientY
+  e.target.closest(tag)?.querySelector('.card-launch')?.style.setProperty('pointer-events', 'none')
 })
 
-$.when('click', '[data-toggle-menu]', () => {
+$.when('click', '[data-toggle-menu]', e => {
   if (beltDragMoved) { beltDragMoved = false; return }
+  const { launchHref } = $.learn()
+  if (launchHref) return closeLaunch()
   $.teach({ menuOpen: !$.learn().menuOpen })
 })
 
@@ -1851,18 +1855,18 @@ $.when('click', '[data-mode]', e => {
   const next = btn.dataset.mode
 
   // tear down previous overlay
-  if (prev === 'camera') closeCamera(false)
-  if (prev === 'browse') $.teach({ launchHref: null })
+  if (prev === 'gallery') closeGallery(false)
+  if (prev === 'browse') closeLaunch()
 
   // open new overlay
-  if (next === 'camera') openCamera()
+  if (next === 'gallery') openGallery()
   else if (next === 'browse') {
     const href = `/app/dream-team?room=${encodeURIComponent(_boardId)}`
-    $.teach({ launchHref: href })
+    openLaunch(href)
     history.pushState({ type: 'bulletin-board-launch', href }, '', href)
   }
 
-  $.teach({ mode: next, menuOpen: false, linkSource: null })
+  if (next !== 'browse') $.teach({ mode: next, menuOpen: false, linkSource: null })
 })
 
 // ── sidebar href field ────────────────────────────────────────────────────────
@@ -1883,7 +1887,7 @@ $.when('click', '.card-play', e => {
   const { cards } = $.learn()
   const href = cards[btn.dataset.playCard]?.href
   if (!href) return
-  $.teach({ launchHref: href })
+  openLaunch(href)
   history.pushState({ type: 'bulletin-board-launch', href }, '', href)
 })
 
@@ -1903,71 +1907,101 @@ $.when('click', '[data-action]', e => {
   }
 })
 
-// ── camera overlay (imperative — not through $.draw) ─────────────────────────
+// ── gallery overlay — pick media, drop as spiral of cards ────────────────────
 
-let _cameraStream = null
-
-async function openCamera() {
+function openGallery() {
   const host = document.querySelector(tag)
   if (!host) return
   const overlay = host.querySelector('.camera-overlay')
   if (!overlay) return
 
-  try {
-    _cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
-    const video = document.createElement('video')
-    video.muted = true; video.autoplay = true; video.playsInline = true
-    video.style.cssText = 'width:100%;max-width:480px;border-radius:6px;display:block;'
-    video.srcObject = _cameraStream
+  const closeBtn = document.createElement('button')
+  closeBtn.className = 'camera-close-btn'
+  closeBtn.innerHTML = '✕'
+  closeBtn.onclick = () => closeGallery()
 
-    const closeBtn = document.createElement('button')
-    closeBtn.className = 'camera-close-btn'
-    closeBtn.innerHTML = '✕'
-    closeBtn.onclick = closeCamera
+  const gallery = document.createElement('plan98-gallery')
+  gallery.setAttribute('mode', 'picker')
+  gallery.style.cssText = 'display:block;width:100%;max-width:640px;height:70vh;overflow:auto;border-radius:6px;background:white;'
 
-    const captureBtn = document.createElement('button')
-    captureBtn.className = 'camera-capture-btn'
-    captureBtn.innerHTML = '<sl-icon name="camera-fill"></sl-icon> capture'
-    captureBtn.onclick = () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = video.videoWidth || 640
-      canvas.height = video.videoHeight || 480
-      canvas.getContext('2d').drawImage(video, 0, 0)
-      const a = document.createElement('a')
-      a.href = canvas.toDataURL('image/png')
-      a.download = `capture-${Date.now()}.png`
-      a.click()
-    }
+  overlay.innerHTML = ''
+  overlay.appendChild(closeBtn)
+  overlay.appendChild(gallery)
+  overlay.dataset.open = 'true'
 
-    overlay.innerHTML = ''
-    overlay.appendChild(closeBtn)
-    overlay.appendChild(video)
-    overlay.appendChild(captureBtn)
-    overlay.dataset.open = 'true'
-    await video.play().catch(() => {})
-  } catch {
-    overlay.innerHTML = '<p class="camera-err">Camera access denied</p>'
-    overlay.dataset.open = 'true'
-  }
+  overlay.addEventListener('gallery-share', e => {
+    try { dropMediaSpiral(e.detail.items) } finally { closeGallery() }
+  }, { once: true })
 }
 
-function closeCamera(resetMode = true) {
-  if (_cameraStream) {
-    _cameraStream.getTracks().forEach(t => t.stop())
-    _cameraStream = null
-  }
+function closeGallery(resetMode = true) {
   const overlay = document.querySelector(`${tag} .camera-overlay`)
   if (overlay) { overlay.innerHTML = ''; overlay.dataset.open = 'false' }
-  if (resetMode && $.learn().mode === 'camera') $.teach({ mode: 'pan' })
+  if (resetMode && $.learn().mode === 'gallery') $.teach({ mode: 'pan' })
 }
 
-// ── launch iframe: popstate closes it ────────────────────────────────────────
+function dropMediaSpiral(items) {
+  const { panX, panY, zoom } = $.learn()
+  const host = document.querySelector(tag)
+  // use host dimensions for viewport size, not the 5000×5000 canvas element
+  const vw = host?.clientWidth  || window.innerWidth
+  const vh = host?.clientHeight || window.innerHeight
+
+  // viewport center in canvas coords
+  const cx = (vw / 2 - panX) / zoom
+  const cy = (vh / 2 - panY) / zoom
+
+  const W = 180, H = 140
+  const spacing = 220
+  const angleStep = Math.PI * (3 - Math.sqrt(5)) // golden angle
+
+  items.forEach((item, i) => {
+    const r = i === 0 ? 0 : spacing * Math.sqrt(i)
+    const angle = i * angleStep
+    const x = cx + r * Math.cos(angle) - W / 2
+    const y = cy + r * Math.sin(angle) - H / 2
+    const id = createCard(x, y, W, H)
+    const src = item.record?.src || item.record?.url || ''
+    if (src) {
+      const t = item.record?.$type || ''
+      const href = t === 'computer.sillyz.data.video'
+        ? `/app/was-video?src=${encodeURIComponent(src)}`
+        : t === 'computer.sillyz.data.image'
+          ? `/app/was-image?src=${encodeURIComponent(src)}`
+          : src
+      updateCard(id, { href, text: item.record?.name || '' })
+    }
+  })
+  wasSave()
+}
+
+// ── launch iframe: open / close / popstate ───────────────────────────────────
+
+function openLaunch(href) {
+  const { mode } = $.learn()
+  $.teach({ launchHref: href, preLaunchMode: mode, menuOpen: false })
+}
+
+let _closingLaunch = false
+
+function closeLaunch() {
+  const { preLaunchMode } = $.learn()
+  const hadEntry = history.state?.type === 'bulletin-board-launch' && history.state?.href
+  $.teach({ launchHref: null, mode: preLaunchMode || 'pan', menuOpen: true, preLaunchMode: null })
+  if (hadEntry) { _closingLaunch = true; history.back() }
+  else history.replaceState({ type: 'bulletin-board-launch', href: null }, '', location.href)
+}
 
 window.addEventListener('popstate', e => {
+  if (_closingLaunch) { _closingLaunch = false; return }
   const { type, href } = e.state || {}
   if (type === 'bulletin-board-launch') {
-    $.teach({ launchHref: href || null })
-    if (!href && $.learn().mode === 'browse') $.teach({ mode: 'pan' })
+    if (href) {
+      openLaunch(href)
+    } else {
+      const { preLaunchMode } = $.learn()
+      $.teach({ launchHref: null, mode: preLaunchMode || 'pan', menuOpen: true, preLaunchMode: null })
+    }
   }
 })
 
@@ -2015,7 +2049,14 @@ $.style(`
     pointer-events: none;
   }
 
-  & [data-mode="pan"] .card {
+  &[data-mode="pan"] .card,
+  &[data-mode="pan"] .card * {
+    pointer-events: none;
+  }
+  &[data-mode="pan"] .card .card-play {
+    pointer-events: all;
+  }
+  &[data-belt="true"] .card-launch {
     pointer-events: none;
   }
 
@@ -2150,8 +2191,8 @@ $.style(`
     transition: opacity .1s;
   }
 
-  & .card:hover .card-resize-se,
-  & .card[data-focused="true"] .card-resize-se { opacity: 1; }
+  &[data-mode="manage"] .card:hover .card-resize-se,
+  &[data-mode="manage"] .card[data-focused="true"] .card-resize-se { opacity: 1; }
   & .card-resize-se:hover { border-color: dodgerblue; }
 
   /* ── compass ── */
@@ -2440,7 +2481,7 @@ $.style(`
     align-items: center;
     gap: .35rem;
     width: 100%;
-    background: none;
+    background: var(--sidebar-card-color, lemonchiffon);
     border: none;
     cursor: pointer;
     padding: .45rem .75rem;
@@ -2452,8 +2493,11 @@ $.style(`
     color: rgba(0,0,0,.45);
     text-align: left;
     transition: color .1s, background .1s;
+    position: sticky;
+    top: 0;
+    z-index: 1;
   }
-  & .section-toggle:hover { background: rgba(0,0,0,.04); color: rgba(0,0,0,.7); }
+  & .section-toggle:hover { filter: brightness(.94); color: rgba(0,0,0,.7); }
 
   & .section-chevron { font-size: .75rem; flex-shrink: 0; }
 
@@ -2520,17 +2564,6 @@ $.style(`
   & .attach-add:hover { border-color: dodgerblue; color: dodgerblue; }
   & .attach-add sl-icon { font-size: 1.1rem; }
 
-  & .shell-section-body {
-    padding: 0;
-  }
-
-  & .card-shell {
-    display: block;
-    width: 100%;
-    height: 300px;
-    border: none;
-    border-radius: 0 0 3px 3px;
-  }
 
   & .logs-section-body {
     padding: 0;
@@ -2667,7 +2700,7 @@ $.style(`
   & .camera-overlay {
     position: absolute;
     inset: 0;
-    z-index: 60;
+    z-index: 250;
     display: none;
     flex-direction: column;
     align-items: center;
