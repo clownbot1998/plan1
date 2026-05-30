@@ -303,10 +303,7 @@ function addEmbeddable(res) {
 // Pages that use blob workers with fetch (vosk-browser) can't run under COEP —
 // Safari treats blob workers as null-origin, blocking same-origin fetches.
 // ffmpeg pages still need COEP for SharedArrayBuffer.
-// bulletin-board embeds ur-shell in an iframe — for iframes, COEP: credentialless
-// requires the framed document to also carry COEP (CORP alone is not enough for
-// navigations). Since bulletin-board doesn't use SharedArrayBuffer, skip COEP there.
-const NO_COEP_PATHS = ['/app/hail-mary', '/app/ur-shell', '/app/bulletin-board'];
+const NO_COEP_PATHS = ['/app/hail-mary', '/app/ur-shell'];
 
 const TTYD_BIN = '/home/clownbot/bin/ttyd'
 const SESSION_PORTS = new Map() // sessionName → port
