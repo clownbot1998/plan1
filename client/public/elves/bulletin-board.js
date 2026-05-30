@@ -1267,7 +1267,20 @@ function beforeUpdate(target) {
   target.dataset.mode = mode || 'pan'
 }
 
-function afterUpdate() {}
+function afterUpdate(target) {
+  const { mode, cards } = $.learn()
+  const overlay = target.querySelector('.os-overlay')
+  const osBtn = target.querySelector('.os-toggle')
+
+  if (mode === 'os') {
+    if (overlay) overlay.style.display = 'block'
+    if (osBtn) osBtn.classList.add('active')
+    window.dispatchEvent(new CustomEvent('park:cards', { detail: { cards } }))
+  } else {
+    if (overlay) overlay.style.display = 'none'
+    if (osBtn) osBtn.classList.remove('active')
+  }
+}
 
 function mount(target) {
   const { panX, panY, zoom, mode } = $.learn()
@@ -1296,6 +1309,10 @@ function mount(target) {
     </div>
     <div class="card-launch" data-open="false"></div>
     <div class="camera-overlay" data-open="false"></div>
+    <button class="os-toggle" data-mode="os" title="3D world">
+      <sl-icon name="layers-fill"></sl-icon>
+    </button>
+    <generic-park class="os-overlay" style="display:none;"></generic-park>
   `
 
   target.querySelector('.bulletin-canvas').style.backgroundImage = stars
@@ -2905,6 +2922,39 @@ $.style(`
   }
 
   /* ── camera overlay ── */
+
+  & .os-toggle {
+    position: absolute;
+    top: .5rem;
+    right: .5rem;
+    z-index: 201;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.2rem;
+    height: 2.2rem;
+    border: none;
+    border-radius: 50%;
+    background: #6644aa;
+    color: white;
+    cursor: pointer;
+    font-size: 1rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,.35);
+    transition: filter .1s, box-shadow .1s;
+    pointer-events: all;
+  }
+  & .os-toggle:hover { filter: brightness(1.2); }
+  & .os-toggle * { pointer-events: none; }
+  & .os-toggle.active {
+    box-shadow: 0 0 0 3px rgba(255,255,255,.6), 0 2px 8px rgba(0,0,0,.35);
+    filter: brightness(1.1);
+  }
+
+  & .os-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 200;
+  }
 
   & .camera-overlay {
     position: absolute;
