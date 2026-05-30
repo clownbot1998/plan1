@@ -47,6 +47,7 @@
 // FUTURE LAYERS: Syrup serialization, CapTP method dispatch, OCapN refs.
 
 import { Self, linkState, broadcastElf, PLAN98_NODE_ID } from '@plan98/types'
+import { checkButton } from './debug-gamepads.js'
 import * as braid from 'braid-http'
 import { showModal, hideModal } from '@plan98/modal'
 import { get as wasGet, put as wasPut, del as wasDel, getKeycard, ensureSpace } from './plan98-wallet.js'
@@ -1244,8 +1245,8 @@ function renderCompassButtons(mode) {
     <button class="c-move${mode === 'pan' ? ' active' : ''}" data-mode="pan" title="move canvas">
       <sl-icon name="arrows-move"></sl-icon>
     </button>
-    <button class="c-link${mode === 'link' ? ' active' : ''}" data-mode="link" title="link cards">
-      <sl-icon name="link-45deg"></sl-icon>
+    <button class="c-os${mode === 'os' ? ' active' : ''}" data-mode="os" title="3D world">
+      <sl-icon name="layers-fill"></sl-icon>
     </button>
     <button class="c-camera${mode === 'gallery' ? ' active' : ''}" data-mode="gallery" title="drop media">
       <sl-icon name="images"></sl-icon>
@@ -1265,22 +1266,39 @@ function beforeUpdate(target) {
   const { beltGrabbed, mode } = $.learn()
   target.dataset.belt = beltGrabbed ? 'true' : 'false'
   target.dataset.mode = mode || 'pan'
+  target.dataset.os = mode === 'os' ? 'true' : 'false'
+}
+
+let _lastCardsJson = null
+function dispatchParkCards() {
+  const { cards } = $.learn()
+  const json = JSON.stringify(cards)
+  if (json === _lastCardsJson) return
+  _lastCardsJson = json
+  window.dispatchEvent(new CustomEvent('park:cards', { detail: { cards } }))
 }
 
 function afterUpdate(target) {
   const { mode, cards } = $.learn()
-  const overlay = target.querySelector('.os-overlay')
-  const osBtn = target.querySelector('.os-toggle')
+  const osBtn = target.querySelector('.c-os')
+  let park = target.querySelector('.os-overlay')
 
   if (mode === 'os') {
-    if (overlay) overlay.style.display = 'block'
     if (osBtn) osBtn.classList.add('active')
-    window.dispatchEvent(new CustomEvent('park:cards', { detail: { cards } }))
+    if (!park) {
+      park = document.createElement('generic-park')
+      park.className = 'os-overlay'
+      target.appendChild(park)
+      setTimeout(dispatchParkCards, 300)
+    }
+    park.style.display = 'block'
+    dispatchParkCards()
   } else {
-    if (overlay) overlay.style.display = 'none'
     if (osBtn) osBtn.classList.remove('active')
+    if (park) park.style.display = 'none'
   }
 }
+
 
 function mount(target) {
   const { panX, panY, zoom, mode } = $.learn()
@@ -1309,10 +1327,6 @@ function mount(target) {
     </div>
     <div class="card-launch" data-open="false"></div>
     <div class="camera-overlay" data-open="false"></div>
-    <button class="os-toggle" data-mode="os" title="3D world">
-      <sl-icon name="layers-fill"></sl-icon>
-    </button>
-    <generic-park class="os-overlay" style="display:none;"></generic-park>
   `
 
   target.querySelector('.bulletin-canvas').style.backgroundImage = stars
@@ -2047,6 +2061,12 @@ $.when('click', '[data-mode]', e => {
   const { mode: prev } = $.learn()
   const next = btn.dataset.mode
 
+  // os is a true toggle — always returns to pan
+  if (next === 'os') {
+    $.teach({ mode: prev === 'os' ? 'pan' : 'os', menuOpen: false, linkSource: null })
+    return
+  }
+
   // tear down previous overlay
   if (prev === 'gallery') closeGallery(false)
   if (prev === 'browse') closeLaunch()
@@ -2197,6 +2217,25 @@ window.addEventListener('popstate', e => {
     }
   }
 })
+
+// ── gamepad OS button (button 16) ─────────────────────────────────────────────
+
+const _toggleCache = {}
+function toggleSpam(code, value, callback) {
+  if (!_toggleCache[code] && value === 1) callback()
+  _toggleCache[code] = value
+}
+
+function osLoop() {
+  const os = checkButton(0, 16)
+  toggleSpam('os', os, () => {
+    const { mode } = $.learn()
+    $.teach({ mode: mode === 'os' ? 'pan' : 'os', menuOpen: false, linkSource: null })
+  })
+  requestAnimationFrame(osLoop)
+}
+
+requestAnimationFrame(osLoop)
 
 // ── styles ────────────────────────────────────────────────────────────────────
 
@@ -2440,7 +2479,7 @@ $.style(`
   & .the-compass .c-browse { grid-row: 3/5; grid-column: 5/7; background: darkorange; }
   & .the-compass .c-qr     { grid-row: 5/7; grid-column: 4/6; background: gold; color: #333; }
   & .the-compass .c-move   { grid-row: 5/7; grid-column: 2/4; background: mediumseagreen; }
-  & .the-compass .c-link   { grid-row: 3/5; grid-column: 1/3; background: dodgerblue; }
+  & .the-compass .c-os     { grid-row: 3/5; grid-column: 1/3; background: #6644aa; }
   & .the-compass .c-camera { grid-row: 1/3; grid-column: 2/4; background: mediumpurple; }
 
   & .the-compass[data-open="false"] button:not(.root) {
@@ -2923,37 +2962,17 @@ $.style(`
 
   /* ── camera overlay ── */
 
-  & .os-toggle {
-    position: absolute;
-    top: .5rem;
-    right: .5rem;
-    z-index: 201;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 2.2rem;
-    height: 2.2rem;
-    border: none;
-    border-radius: 50%;
-    background: #6644aa;
-    color: white;
-    cursor: pointer;
-    font-size: 1rem;
-    box-shadow: 0 2px 8px rgba(0,0,0,.35);
-    transition: filter .1s, box-shadow .1s;
-    pointer-events: all;
-  }
-  & .os-toggle:hover { filter: brightness(1.2); }
-  & .os-toggle * { pointer-events: none; }
-  & .os-toggle.active {
-    box-shadow: 0 0 0 3px rgba(255,255,255,.6), 0 2px 8px rgba(0,0,0,.35);
-    filter: brightness(1.1);
+  &[data-os="true"] .workspace,
+  &[data-os="true"] .card-sidebar,
+  &[data-os="true"] .card-launch,
+  &[data-os="true"] .camera-overlay {
+    display: none !important;
   }
 
   & .os-overlay {
     position: absolute;
     inset: 0;
-    z-index: 200;
+    z-index: 100;
   }
 
   & .camera-overlay {

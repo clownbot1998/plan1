@@ -42,10 +42,10 @@ $.draw(target => {
   if (target._parkMounted) return
   target._parkMounted = true
   return `
-    <a-scene embedded>
-      <a-entity camera wasd-controls look-controls
-                position="2500 2700 4800"
-                rotation="-10 180 0">
+    <a-scene embedded vr-mode-ui="enabled: false">
+      <a-entity camera wasd-controls="acceleration:2000" look-controls
+                position="2500 2600 2500"
+                rotation="-10 0 0">
         <a-cursor color="white" opacity="0.4" fuse="false"></a-cursor>
       </a-entity>
 
