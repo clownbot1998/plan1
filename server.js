@@ -4,7 +4,7 @@ import { Ed25519Signer } from 'npm:@did.coop/did-key-ed25519@0.0.14';
 import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3';
 import { resolve } from 'node:path';
 
-const DIST    = new URL('./dist/',    import.meta.url).pathname;
+const DIST    = Deno.env.get('PLAN1_DIST') || new URL('./dist/', import.meta.url).pathname;
 const PRIVATE = new URL('./private/', import.meta.url).pathname;
 const PORT = Number(Deno.env.get('PLAN1_PORT') ?? 1998);
 

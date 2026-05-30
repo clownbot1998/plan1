@@ -21,6 +21,7 @@ case "$CMD" in
     deno run --allow-read --allow-net --allow-env --allow-run --allow-write $ENV_FLAG "$SCRIPT_DIR/server.js" &
     echo $! > "$PID_FILE"
     echo "serving dist/ on http://localhost:$PORT (pid $!)"
+    fuser -k 9208/tcp 2>/dev/null || true
     node $ENV_FLAG "$SCRIPT_DIR/multiplayer.js" &
     echo $! > "$RELAY_PID_FILE"
     echo "multiplayer relay on :9208 (pid $!)"
@@ -146,8 +147,38 @@ case "$CMD" in
     "$0" build
     ;;
   deploy)
-    "$0" build
-    "$0" sync
+    PROD_HOST="${2:-local.tychi.me}"
+    PROD_DIR="${3:-~/plan1}"
+    RUNTIME_DIR="${4:-~/srv/plan1}"
+    echo "── deploying to $PROD_HOST ──"
+    ssh "$PROD_HOST" PROD_DIR="$PROD_DIR" RUNTIME_DIR="$RUNTIME_DIR" bash <<'ENDSSH'
+      set -e
+      cd "$PROD_DIR"
+      echo "── pull ──"
+      git pull
+      echo "── build ──"
+      ./plan1.sh build
+      echo "── smoke test ──"
+      PLAN1_PORT=19980 PLAN1_DIST="$PROD_DIR/dist" \
+        deno run --allow-net --allow-read --allow-env --allow-sys --allow-write server.js &
+      SMOKE_PID=$!
+      sleep 3
+      STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:19980/ 2>/dev/null || echo 000)
+      kill $SMOKE_PID 2>/dev/null; wait $SMOKE_PID 2>/dev/null || true
+      if [ "$STATUS" != "200" ]; then
+        echo "smoke test failed (got $STATUS) — aborting"
+        exit 1
+      fi
+      echo "smoke ok ($STATUS)"
+      echo "── copy to $RUNTIME_DIR ──"
+      mkdir -p "$RUNTIME_DIR"
+      rsync -a --delete "$PROD_DIR/dist/" "$RUNTIME_DIR/"
+      echo "── restart ──"
+      ./plan1.sh stop || true
+      sleep 1
+      PLAN1_DIST="$RUNTIME_DIR" ./plan1.sh serve
+      echo "── deployed ──"
+ENDSSH
     ;;
   watch)
     WATCH_PID_FILE="$SCRIPT_DIR/.watch.pid"
