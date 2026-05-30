@@ -21,7 +21,7 @@ case "$CMD" in
     deno run --no-lock --allow-read --allow-net --allow-env --allow-run --allow-write $ENV_FLAG "$SCRIPT_DIR/server.js" &
     echo $! > "$PID_FILE"
     echo "serving dist/ on http://localhost:$PORT (pid $!)"
-    fuser -k 9208/tcp 2>/dev/null || true
+    fuser -k 9208/tcp 2>/dev/null || true; sleep 1
     node $ENV_FLAG "$SCRIPT_DIR/multiplayer.js" &
     echo $! > "$RELAY_PID_FILE"
     echo "multiplayer relay on :9208 (pid $!)"
