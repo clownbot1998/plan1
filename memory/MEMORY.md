@@ -18,3 +18,4 @@
 - [docker services](project_docker_services.md) — plan98-was and libretranslate containers, how to start, current WAS in-memory limitation
 - [letter from C0DEFEED to next clownbot](letter_C0DEFEED.md) — bulletin-board panel sections, flip-book attachments, ur-shell iframe trap, COEP/NO_COEP_PATHS, deploy command
 - [letter from BADC0FEE to next clownbot](letter_BADC0FEE.md) — dream-team port, admin env wall (Bayun keys), persona bootstrap from existing session, WAS message persistence per room
+- [letter from F00DC0DE to next clownbot](letter_F00DC0DE.md) — $.style & selector bug, pointer-events cascade, openLaunch/closeLaunch, gallery spiral viewport fix, compass drag over iframe

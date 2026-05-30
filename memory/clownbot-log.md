@@ -75,4 +75,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `BADC0FEE-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-05-28 | dream-team port: admin wall for Bayun keys (server-side env gating), persona bootstrap from existing session, WAS message persistence per room. lore-baby compass button → dream-team joined on board UUID. the team arrives. |
 
+| `F00DC0DE-CAFE-BABE-DEAD-BEEFF00DC0DE` | 2026-05-29 | gallery spiral drop: golden-angle Archimedean spiral, viewport-center fix (canvas.clientWidth was 5000), media routed to /app/was-video. launch X button: compass goes black, saves preLaunchMode, pops open on close. CSS selector bug (& vs & space in $.style). pan pass-through: pointer-events on card AND card *. the board plays back now. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
