@@ -7,86 +7,154 @@ const $ = Self(tag, { cards: {} })
 window.addEventListener('park:cards', e => {
   $.teach({ cards: e.detail.cards || {} })
 })
-
 window.dispatchEvent(new CustomEvent('park:ready'))
 
-// ── clusters ──────────────────────────────────────────────────────────────────
+// ── hex grid — level 5 in 5000×5000 world ≈ 38.6px per cell ──────────────────
 
-function overlaps(a, b) {
-  return a.x < b.x + b.w && a.x + a.w > b.x &&
-         a.y < b.y + b.h && a.y + a.h > b.y
+const HEX = 40
+const ROOT3 = Math.sqrt(3)
+const HEX_DIRS = [[1,0],[-1,0],[0,1],[0,-1],[1,-1],[-1,1]]
+
+function hexToWorld(q, r) {
+  return [HEX * (ROOT3 * q + ROOT3 / 2 * r), HEX * (1.5 * r)]
 }
 
-function findClusters(cards) {
-  const entries = Object.entries(cards)
-  const visited = new Set()
-  const clusters = []
-  for (const [id, card] of entries) {
-    if (visited.has(id)) continue
-    const cluster = []
-    const queue = [[id, card]]
-    while (queue.length) {
-      const [cid, cc] = queue.shift()
-      if (visited.has(cid)) continue
-      visited.add(cid)
-      cluster.push([cid, cc])
-      for (const [oid, oc] of entries) {
-        if (!visited.has(oid) && overlaps(cc, oc)) queue.push([oid, oc])
+function worldToHex(x, z) {
+  const q = (ROOT3 / 3 * x - z / 3) / HEX
+  const r = (2 / 3 * z) / HEX
+  const s = -q - r
+  let rq = Math.round(q), rr = Math.round(r), rs = Math.round(s)
+  const dq = Math.abs(rq - q), dr = Math.abs(rr - r), ds = Math.abs(rs - s)
+  if (dq > dr && dq > ds) rq = -rr - rs
+  else if (dr > ds) rr = -rq - rs
+  return [rq, rr]
+}
+
+function hexKey(q, r) { return `${q},${r}` }
+
+function cardHexNodes(card) {
+  const [q, r] = worldToHex(card.x + card.w / 2, card.y + card.h / 2)
+  return [[q, r], ...HEX_DIRS.map(([dq, dr]) => [q + dq, r + dr])]
+}
+
+// ── elevation map — each card contributes 10 to its 7 nodes ──────────────────
+
+function buildElevMap(cards) {
+  const map = new Map()
+  for (const [, card] of Object.entries(cards)) {
+    for (const [q, r] of cardHexNodes(card)) {
+      const k = hexKey(q, r)
+      map.set(k, (map.get(k) || 0) + 10)
+    }
+  }
+  return map
+}
+
+// ── terrain mesh ──────────────────────────────────────────────────────────────
+
+function elevColor(e) {
+  if (e > 400) return [0.75, 0.75, 0.75]  // dimgray
+  if (e > 250) return [0.55, 0.27, 0.07]  // saddlebrown
+  if (e > 100) return [0.13, 0.55, 0.13]  // forestgreen
+  if (e > 0)   return [0.24, 0.70, 0.44]  // mediumseagreen
+  return [0.00, 0.56, 1.00]               // dodgerblue sea floor
+}
+
+function buildTerrainMesh(elevMap) {
+  const THREE = window.AFRAME?.THREE
+  if (!THREE || elevMap.size === 0) return null
+
+  const positions = [], colors = [], indices = []
+  const verts = new Map()
+
+  function vertex(q, r) {
+    const k = hexKey(q, r)
+    if (verts.has(k)) return verts.get(k)
+    const e = elevMap.get(k) || 0
+    const [wx, wz] = hexToWorld(q, r)
+    const idx = positions.length / 3
+    positions.push(wx, 2500 + e, wz)
+    colors.push(...elevColor(e))
+    verts.set(k, idx)
+    return idx
+  }
+
+  // Two triangles per hex — correct CCW winding (normal +Y, visible from above)
+  // T1: (q,r)→(q,r+1)→(q+1,r)   T2: (q,r)→(q+1,r)→(q+1,r-1)
+  // These two pairs tile the full plane without overlap or gaps
+  for (const [k] of elevMap) {
+    const [q, r] = k.split(',').map(Number)
+    const tris = [
+      [[q,r],[q,r+1],[q+1,r]],
+      [[q,r],[q+1,r],[q+1,r-1]],
+    ]
+    for (const [[q0,r0],[q1,r1],[q2,r2]] of tris) {
+      // include fringe triangles (slope to sea) if any vertex is elevated
+      if (elevMap.has(hexKey(q0,r0)) || elevMap.has(hexKey(q1,r1)) || elevMap.has(hexKey(q2,r2))) {
+        indices.push(vertex(q0,r0), vertex(q1,r1), vertex(q2,r2))
       }
     }
-    clusters.push(cluster)
   }
-  return clusters
+
+  if (indices.length === 0) return null
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
+  geo.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(colors), 3))
+  geo.setIndex(indices)
+  geo.computeVertexNormals()
+
+  return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.85,
+    side: THREE.DoubleSide,
+  }))
 }
 
-// ── terrain ───────────────────────────────────────────────────────────────────
+// ── cloud platforms (sticky notes float 500 above terrain peak) ───────────────
 
-function hillColor(h) {
-  if (h > 400) return 'dimgray'
-  if (h > 250) return 'saddlebrown'
-  if (h > 100) return 'forestgreen'
-  return 'mediumseagreen'
-}
-
-function renderIslands(cards) {
-  return findClusters(cards).map(cluster => {
-    const count = cluster.length
-    const hillH = count * 10          // 10 units per card, 500 max = cloud base
-    const cloudY = 3000 + hillH       // cloud rides 500 above hill top
-
-    // bounding box of cluster footprint
-    const xs = cluster.flatMap(([, c]) => [c.x, c.x + c.w])
-    const zs = cluster.flatMap(([, c]) => [c.y, c.y + c.h])
-    const minX = Math.min(...xs), maxX = Math.max(...xs)
-    const minZ = Math.min(...zs), maxZ = Math.max(...zs)
-    const bw = maxX - minX, bd = maxZ - minZ
-    const cx = minX + bw / 2, cz = minZ + bd / 2
-
-    const ground = `
-      <a-box position="${cx} ${2500 + hillH / 2} ${cz}"
-             width="${Math.max(bw, 20)}" height="${Math.max(hillH, 4)}" depth="${Math.max(bd, 20)}"
-             color="${hillColor(hillH)}"></a-box>
-    `
-
-    const clouds = cluster.map(([, card]) => {
-      const nx = card.x + card.w / 2
-      const nz = card.y + card.h / 2
-      const color = card.color || 'lemonchiffon'
-      return `<a-box position="${nx} ${cloudY} ${nz}"
-                     width="${card.w}" height="10" depth="${card.h}"
-                     color="${color}"></a-box>`
-    }).join('')
-
-    return ground + clouds
+function renderCloudPlatforms(cards, elevMap) {
+  return Object.entries(cards).map(([, card]) => {
+    const [q, r] = worldToHex(card.x + card.w / 2, card.y + card.h / 2)
+    const elev = elevMap.get(hexKey(q, r)) || 0
+    const cloudY = 3000 + elev
+    const cx = card.x + card.w / 2
+    const cz = card.y + card.h / 2
+    const color = card.color || 'lemonchiffon'
+    return `<a-box position="${cx} ${cloudY} ${cz}"
+                   width="${card.w}" height="10" depth="${card.h}"
+                   color="${color}"></a-box>`
   }).join('')
 }
 
-// ── world container — 5-sided open-top box ────────────────────────────────────
+// ── spawn at centermost card, sea level ───────────────────────────────────────
+
+function spawnAtCenterIsland(target, cards) {
+  const WC = 2500
+  let spawnX = WC, spawnZ = WC
+
+  const entries = Object.entries(cards)
+  if (entries.length > 0) {
+    let closest = null, minDist = Infinity
+    for (const [, card] of entries) {
+      const cx = card.x + card.w / 2, cz = card.y + card.h / 2
+      const d = Math.hypot(cx - WC, cz - WC)
+      if (d < minDist) { minDist = d; closest = card }
+    }
+    if (closest) {
+      spawnX = closest.x + closest.w / 2
+      spawnZ = closest.y + closest.h / 2
+    }
+  }
+
+  const cam = target.querySelector('[camera]')
+  if (cam) cam.setAttribute('position', `${spawnX} 2600 ${spawnZ}`)
+}
+
+// ── perimeter — 5-sided open-top container ────────────────────────────────────
 
 function renderPerimeter() {
   const c = 'mediumpurple'
-  // walls go from y=0 up to skyline/cloud level (y=3000), height=3000, center y=1500
-  // bottom floor sits below lava
   return `
     <a-box position="2500 1500 -100"  width="5400" height="3000" depth="200"  color="${c}"></a-box>
     <a-box position="2500 1500 5100"  width="5400" height="3000" depth="200"  color="${c}"></a-box>
@@ -94,36 +162,6 @@ function renderPerimeter() {
     <a-box position="5100 1500 2500"  width="200"  height="3000" depth="5400" color="${c}"></a-box>
     <a-box position="2500 -100 2500"  width="5400" height="200"  depth="5400" color="${c}"></a-box>
   `
-}
-
-// ── spawn ─────────────────────────────────────────────────────────────────────
-
-function spawnAtCenterIsland(target, cards) {
-  const entries = Object.entries(cards)
-  const WC = 2500
-  let spawnX = WC, spawnZ = WC, spawnY = 2600
-
-  if (entries.length > 0) {
-    // find card whose center is closest to world center (2500, 2500)
-    let closest = null, minDist = Infinity
-    for (const [, card] of entries) {
-      const cx = card.x + card.w / 2
-      const cz = card.y + card.h / 2
-      const dist = Math.hypot(cx - WC, cz - WC)
-      if (dist < minDist) { minDist = dist; closest = card }
-    }
-    if (closest) {
-      const cluster = findClusters(cards).find(c => c.some(([, c2]) => c2 === closest))
-      const hillH = (cluster?.length || 1) * 10
-      const cloudY = 3000 + hillH
-      spawnX = closest.x + closest.w / 2
-      spawnZ = closest.y + closest.h / 2
-      spawnY = 2600             // sea level — look up at the cloud platforms
-    }
-  }
-
-  const cam = target.querySelector('[camera]')
-  if (cam) cam.setAttribute('position', `${spawnX} ${spawnY} ${spawnZ}`)
 }
 
 // ── scene ─────────────────────────────────────────────────────────────────────
@@ -134,21 +172,16 @@ $.draw(target => {
   return `
     <a-scene embedded vr-mode-ui="enabled: false" background="color: black">
       <a-entity camera wasd-controls="acceleration:2000" look-controls
-                position="2500 2600 2500"
-                rotation="-10 0 0">
+                position="2500 2600 2500" rotation="-10 0 0">
         <a-cursor color="white" opacity="0.4" fuse="false"></a-cursor>
       </a-entity>
 
-<!-- ambient brightens at day, dims at night — in sync with sun orbit -->
       <a-light type="ambient" color="darkorange" intensity="2.2"
                animation="property: intensity; from: 2.2; to: 0.1;
                           dur: 30000; loop: true; dir: alternate;
                           easing: easeInOutSine"></a-light>
-
-      <!-- base night fill so world is never fully black -->
       <a-light type="ambient" color="#111133" intensity="0.6"></a-light>
 
-      <!-- sun: vertical orbit — sphere is purely visual, no light bleed -->
       <a-entity position="2500 2500 2500"
                 animation="property: rotation; from: 0 0 0; to: 0 0 -360;
                            dur: 60000; loop: true; easing: linear">
@@ -156,29 +189,40 @@ $.draw(target => {
                   material="color: darkorange; shader: flat"></a-sphere>
       </a-entity>
 
-      <!-- mediumpurple emanates from the mountains (ground hemisphere) -->
       <a-light type="hemisphere" color="darkorange"
                ground-color="mediumpurple" intensity="0.4"></a-light>
 
-      <!-- world layers -->
-      <a-box position="2500 500 2500"   width="5000" height="1000" depth="5000" color="firebrick"></a-box>
-      <a-box position="2500 1500 2500"  width="5000" height="1000" depth="5000" color="gold"></a-box>
-      <a-box position="2500 2250 2500"  width="5000" height="500"  depth="5000"
+      <a-box position="2500 500 2500"  width="5000" height="1000" depth="5000" color="firebrick"></a-box>
+      <a-box position="2500 1500 2500" width="5000" height="1000" depth="5000" color="gold"></a-box>
+      <a-box position="2500 2250 2500" width="5000" height="500"  depth="5000"
              color="dodgerblue" opacity="0.72" transparent="true"></a-box>
 
-      <!-- perimeter collision walls -->
       <a-entity class="perimeter">${renderPerimeter()}</a-entity>
-
-      <!-- card terrain + cloud platforms (reactive) -->
-      <a-entity class="card-islands"></a-entity>
+      <a-entity class="terrain-mesh"></a-entity>
+      <a-entity class="cloud-platforms"></a-entity>
     </a-scene>
   `
 }, {
   afterUpdate(target) {
-    const islands = target.querySelector('.card-islands')
-    if (!islands) return
     const { cards } = $.learn()
-    islands.innerHTML = renderIslands(cards)
+
+    const elevMap = buildElevMap(cards)
+
+    // hex terrain mesh
+    const terrainEl = target.querySelector('.terrain-mesh')
+    if (terrainEl) {
+      const old = terrainEl.getObject3D?.('terrain')
+      if (old) { old.geometry.dispose(); old.material.dispose() }
+      const mesh = buildTerrainMesh(elevMap)
+      if (mesh) terrainEl.setObject3D('terrain', mesh)
+      else terrainEl.removeObject3D?.('terrain')
+    }
+
+    // cloud platforms
+    const cloudEl = target.querySelector('.cloud-platforms')
+    if (cloudEl) cloudEl.innerHTML = renderCloudPlatforms(cards, elevMap)
+
+    // spawn on first card load
     if (!target._spawned && Object.keys(cards).length > 0) {
       target._spawned = true
       spawnAtCenterIsland(target, cards)
