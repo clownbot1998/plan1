@@ -1278,6 +1278,12 @@ function dispatchParkCards() {
   window.dispatchEvent(new CustomEvent('park:cards', { detail: { cards } }))
 }
 
+window.addEventListener('park:ready', () => {
+  _lastCardsJson = null
+  const { mode } = $.learn()
+  if (mode === 'os') dispatchParkCards()
+})
+
 function afterUpdate(target) {
   const { mode, cards } = $.learn()
   const osBtn = target.querySelector('.c-os')
@@ -2479,7 +2485,7 @@ $.style(`
   & .the-compass .c-browse { grid-row: 3/5; grid-column: 5/7; background: darkorange; }
   & .the-compass .c-qr     { grid-row: 5/7; grid-column: 4/6; background: gold; color: #333; }
   & .the-compass .c-move   { grid-row: 5/7; grid-column: 2/4; background: mediumseagreen; }
-  & .the-compass .c-os     { grid-row: 3/5; grid-column: 1/3; background: #6644aa; }
+  & .the-compass .c-os     { grid-row: 3/5; grid-column: 1/3; background: dodgerblue; }
   & .the-compass .c-camera { grid-row: 1/3; grid-column: 2/4; background: mediumpurple; }
 
   & .the-compass[data-open="false"] button:not(.root) {

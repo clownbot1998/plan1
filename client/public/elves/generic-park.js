@@ -8,64 +8,138 @@ window.addEventListener('park:cards', e => {
   $.teach({ cards: e.detail.cards || {} })
 })
 
-function computeIslandY(id, card, allCards) {
-  let overlaps = 0
-  for (const [otherId, other] of Object.entries(allCards)) {
-    if (otherId === id) continue
-    const xOverlap = card.x < other.x + other.w && card.x + card.w > other.x
-    const yOverlap = card.y < other.y + other.h && card.y + card.h > other.y
-    if (xOverlap && yOverlap) overlaps++
+window.dispatchEvent(new CustomEvent('park:ready'))
+
+// ── clusters ──────────────────────────────────────────────────────────────────
+
+function overlaps(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x &&
+         a.y < b.y + b.h && a.y + a.h > b.y
+}
+
+function findClusters(cards) {
+  const entries = Object.entries(cards)
+  const visited = new Set()
+  const clusters = []
+  for (const [id, card] of entries) {
+    if (visited.has(id)) continue
+    const cluster = []
+    const queue = [[id, card]]
+    while (queue.length) {
+      const [cid, cc] = queue.shift()
+      if (visited.has(cid)) continue
+      visited.add(cid)
+      cluster.push([cid, cc])
+      for (const [oid, oc] of entries) {
+        if (!visited.has(oid) && overlaps(cc, oc)) queue.push([oid, oc])
+      }
+    }
+    clusters.push(cluster)
   }
-  return 2500 + overlaps * 60
+  return clusters
+}
+
+// ── terrain ───────────────────────────────────────────────────────────────────
+
+function hillColor(h) {
+  if (h > 400) return 'dimgray'
+  if (h > 250) return 'saddlebrown'
+  if (h > 100) return 'forestgreen'
+  return 'mediumseagreen'
 }
 
 function renderIslands(cards) {
-  return Object.entries(cards).map(([id, card]) => {
-    const cx = card.x + card.w / 2
-    const cz = card.y + card.h / 2
-    const wy = computeIslandY(id, card, cards)
-    const color = card.color || 'lemonchiffon'
-    const cw = card.w
-    const cd = card.h
-    return `
-      <a-box position="${cx} ${wy + 20} ${cz}"
-             width="${cw}" height="40" depth="${cd}"
-             color="${color}"></a-box>
-      <a-box position="${cx} ${wy + 51} ${cz}"
-             width="${cw + 24}" height="22" depth="${cd + 24}"
-             color="mediumseagreen"></a-box>
+  return findClusters(cards).map(cluster => {
+    const count = cluster.length
+    const hillH = count * 10          // 10 units per card, 500 max = cloud base
+    const cloudY = 3000 + hillH       // cloud rides 500 above hill top
+
+    // bounding box of cluster footprint
+    const xs = cluster.flatMap(([, c]) => [c.x, c.x + c.w])
+    const zs = cluster.flatMap(([, c]) => [c.y, c.y + c.h])
+    const minX = Math.min(...xs), maxX = Math.max(...xs)
+    const minZ = Math.min(...zs), maxZ = Math.max(...zs)
+    const bw = maxX - minX, bd = maxZ - minZ
+    const cx = minX + bw / 2, cz = minZ + bd / 2
+
+    const ground = `
+      <a-box position="${cx} ${2500 + hillH / 2} ${cz}"
+             width="${Math.max(bw, 20)}" height="${Math.max(hillH, 4)}" depth="${Math.max(bd, 20)}"
+             color="${hillColor(hillH)}"></a-box>
     `
+
+    const clouds = cluster.map(([, card]) => {
+      const nx = card.x + card.w / 2
+      const nz = card.y + card.h / 2
+      const color = card.color || 'lemonchiffon'
+      return `<a-box position="${nx} ${cloudY} ${nz}"
+                     width="${card.w}" height="10" depth="${card.h}"
+                     color="${color}"></a-box>`
+    }).join('')
+
+    return ground + clouds
   }).join('')
 }
+
+// ── world container — 5-sided open-top box ────────────────────────────────────
+
+function renderPerimeter() {
+  const c = 'mediumpurple'
+  // walls go from y=0 up to skyline/cloud level (y=3000), height=3000, center y=1500
+  // bottom floor sits below lava
+  return `
+    <a-box position="2500 1500 -100"  width="5400" height="3000" depth="200"  color="${c}"></a-box>
+    <a-box position="2500 1500 5100"  width="5400" height="3000" depth="200"  color="${c}"></a-box>
+    <a-box position="-100 1500 2500"  width="200"  height="3000" depth="5400" color="${c}"></a-box>
+    <a-box position="5100 1500 2500"  width="200"  height="3000" depth="5400" color="${c}"></a-box>
+    <a-box position="2500 -100 2500"  width="5400" height="200"  depth="5400" color="${c}"></a-box>
+  `
+}
+
+// ── scene ─────────────────────────────────────────────────────────────────────
 
 $.draw(target => {
   if (target._parkMounted) return
   target._parkMounted = true
   return `
-    <a-scene embedded vr-mode-ui="enabled: false">
+    <a-scene embedded vr-mode-ui="enabled: false" background="color: black">
       <a-entity camera wasd-controls="acceleration:2000" look-controls
-                position="2500 2600 2500"
+                position="2500 2700 2500"
                 rotation="-10 0 0">
         <a-cursor color="white" opacity="0.4" fuse="false"></a-cursor>
       </a-entity>
 
-      <!-- lava: 0–999 -->
-      <a-box position="2500 500 2500"
-             width="5000" height="1000" depth="5000"
-             color="firebrick"></a-box>
+<!-- ambient brightens at day, dims at night — in sync with sun orbit -->
+      <a-light type="ambient" color="darkorange" intensity="2.2"
+               animation="property: intensity; from: 2.2; to: 0.1;
+                          dur: 30000; loop: true; dir: alternate;
+                          easing: easeInOutSine"></a-light>
 
-      <!-- sand: 1000–1999 -->
-      <a-box position="2500 1500 2500"
-             width="5000" height="1000" depth="5000"
-             color="gold"></a-box>
+      <!-- base night fill so world is never fully black -->
+      <a-light type="ambient" color="#111133" intensity="0.6"></a-light>
 
-      <!-- water: 2000–2499 -->
-      <a-box position="2500 2250 2500"
-             width="5000" height="500" depth="5000"
-             color="dodgerblue"
-             opacity="0.72"
-             transparent="true"></a-box>
+      <!-- sun: vertical orbit — sphere is purely visual, no light bleed -->
+      <a-entity position="2500 2500 2500"
+                animation="property: rotation; from: 0 0 0; to: 0 0 -360;
+                           dur: 60000; loop: true; easing: linear">
+        <a-sphere position="0 9000 0" radius="220"
+                  material="color: darkorange; shader: flat"></a-sphere>
+      </a-entity>
 
+      <!-- mediumpurple emanates from the mountains (ground hemisphere) -->
+      <a-light type="hemisphere" color="darkorange"
+               ground-color="mediumpurple" intensity="0.4"></a-light>
+
+      <!-- world layers -->
+      <a-box position="2500 500 2500"   width="5000" height="1000" depth="5000" color="firebrick"></a-box>
+      <a-box position="2500 1500 2500"  width="5000" height="1000" depth="5000" color="gold"></a-box>
+      <a-box position="2500 2250 2500"  width="5000" height="500"  depth="5000"
+             color="dodgerblue" opacity="0.72" transparent="true"></a-box>
+
+      <!-- perimeter collision walls -->
+      <a-entity class="perimeter">${renderPerimeter()}</a-entity>
+
+      <!-- card terrain + cloud platforms (reactive) -->
       <a-entity class="card-islands"></a-entity>
     </a-scene>
   `
@@ -79,15 +153,6 @@ $.draw(target => {
 })
 
 $.style(`
-  & {
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
-
-  & a-scene {
-    width: 100% !important;
-    height: 100% !important;
-    display: block;
-  }
+  & { display: block; width: 100%; height: 100%; }
+  & a-scene { width: 100% !important; height: 100% !important; display: block; }
 `)
