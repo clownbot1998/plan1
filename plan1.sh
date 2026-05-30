@@ -43,6 +43,7 @@ case "$CMD" in
     else
       echo "not running"
     fi
+    fuser -k ${PORT}/tcp 2>/dev/null || true
     ;;
   restart)
     OLD_PID=$(cat "$PID_FILE" 2>/dev/null)
