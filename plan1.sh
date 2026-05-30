@@ -18,7 +18,7 @@ case "$CMD" in
     fi
     ENV_FLAG=""
     [ -f "$SCRIPT_DIR/.env" ] && ENV_FLAG="--env-file=$SCRIPT_DIR/.env"
-    deno run --allow-read --allow-net --allow-env --allow-run --allow-write $ENV_FLAG "$SCRIPT_DIR/server.js" &
+    deno run --no-lock --allow-read --allow-net --allow-env --allow-run --allow-write $ENV_FLAG "$SCRIPT_DIR/server.js" &
     echo $! > "$PID_FILE"
     echo "serving dist/ on http://localhost:$PORT (pid $!)"
     fuser -k 9208/tcp 2>/dev/null || true
@@ -160,7 +160,7 @@ case "$CMD" in
       ./plan1.sh build
       echo "── smoke test ──"
       PLAN1_PORT=19980 PLAN1_DIST="$PROD_DIR/dist" \
-        deno run --allow-net --allow-read --allow-env --allow-sys --allow-write server.js &
+        deno run --no-lock --allow-net --allow-read --allow-env --allow-sys --allow-write server.js &
       SMOKE_PID=$!
       sleep 3
       STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:19980/ 2>/dev/null || echo 000)
