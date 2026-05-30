@@ -96,6 +96,36 @@ function renderPerimeter() {
   `
 }
 
+// ── spawn ─────────────────────────────────────────────────────────────────────
+
+function spawnAtCenterIsland(target, cards) {
+  const entries = Object.entries(cards)
+  const WC = 2500
+  let spawnX = WC, spawnZ = WC, spawnY = 2600
+
+  if (entries.length > 0) {
+    // find card whose center is closest to world center (2500, 2500)
+    let closest = null, minDist = Infinity
+    for (const [, card] of entries) {
+      const cx = card.x + card.w / 2
+      const cz = card.y + card.h / 2
+      const dist = Math.hypot(cx - WC, cz - WC)
+      if (dist < minDist) { minDist = dist; closest = card }
+    }
+    if (closest) {
+      const cluster = findClusters(cards).find(c => c.some(([, c2]) => c2 === closest))
+      const hillH = (cluster?.length || 1) * 10
+      const cloudY = 3000 + hillH
+      spawnX = closest.x + closest.w / 2
+      spawnZ = closest.y + closest.h / 2
+      spawnY = 2600             // sea level — look up at the cloud platforms
+    }
+  }
+
+  const cam = target.querySelector('[camera]')
+  if (cam) cam.setAttribute('position', `${spawnX} ${spawnY} ${spawnZ}`)
+}
+
 // ── scene ─────────────────────────────────────────────────────────────────────
 
 $.draw(target => {
@@ -104,7 +134,7 @@ $.draw(target => {
   return `
     <a-scene embedded vr-mode-ui="enabled: false" background="color: black">
       <a-entity camera wasd-controls="acceleration:2000" look-controls
-                position="2500 2700 2500"
+                position="2500 2600 2500"
                 rotation="-10 0 0">
         <a-cursor color="white" opacity="0.4" fuse="false"></a-cursor>
       </a-entity>
@@ -149,6 +179,10 @@ $.draw(target => {
     if (!islands) return
     const { cards } = $.learn()
     islands.innerHTML = renderIslands(cards)
+    if (!target._spawned && Object.keys(cards).length > 0) {
+      target._spawned = true
+      spawnAtCenterIsland(target, cards)
+    }
   }
 })
 

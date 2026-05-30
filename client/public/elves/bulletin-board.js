@@ -1284,10 +1284,13 @@ window.addEventListener('park:ready', () => {
   if (mode === 'os') dispatchParkCards()
 })
 
+let _prevOsMode = false
 function afterUpdate(target) {
   const { mode, cards } = $.learn()
   const osBtn = target.querySelector('.c-os')
   let park = target.querySelector('.os-overlay')
+  const entering = mode === 'os' && !_prevOsMode
+  _prevOsMode = mode === 'os'
 
   if (mode === 'os') {
     if (osBtn) osBtn.classList.add('active')
@@ -1297,6 +1300,7 @@ function afterUpdate(target) {
       target.appendChild(park)
       setTimeout(dispatchParkCards, 300)
     }
+    if (entering && park) park._spawned = false
     park.style.display = 'block'
     dispatchParkCards()
   } else {
