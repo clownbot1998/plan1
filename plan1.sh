@@ -175,9 +175,9 @@ case "$CMD" in
       mkdir -p "$RUNTIME_DIR"
       rsync -a --delete "$PROD_DIR/dist/" "$RUNTIME_DIR/"
       echo "── restart ──"
-      ./plan1.sh stop || true
-      sleep 2
-      PLAN1_DIST="$RUNTIME_DIR" ./plan1.sh serve
+      export XDG_RUNTIME_DIR=/run/user/$(id -u)
+      systemctl --user restart plan1
+      sleep 1
       echo "── deployed ──"
 ENDSSH
     ;;
