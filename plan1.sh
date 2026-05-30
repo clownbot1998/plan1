@@ -176,7 +176,7 @@ case "$CMD" in
       rsync -a --delete "$PROD_DIR/dist/" "$RUNTIME_DIR/"
       echo "── restart ──"
       ./plan1.sh stop || true
-      sleep 1
+      sleep 2
       PLAN1_DIST="$RUNTIME_DIR" ./plan1.sh serve
       echo "── deployed ──"
 ENDSSH
