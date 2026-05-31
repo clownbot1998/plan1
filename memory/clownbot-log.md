@@ -81,4 +81,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `BEEFD00D-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-05-30 | Rapier3D physics: fall from clouds, sink through water, land on terrain trimesh. sea floor arrows navigate around islands. sphere+cone portal markers player-scale. the clown falls from clouds every time. that's the bit. |
 
+| `BEEFD00D-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-05-31 (2) | island inspector: ray from camera center → card HUD overlay. gamepad joysticks wired to physics+look-controls. multiplayer via plan98 geckos kernel (two lines). portals work. perimeter walls close the world. alive. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
