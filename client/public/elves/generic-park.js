@@ -47,30 +47,38 @@ function buildTerrainMesh(cards) {
   const geo = new THREE.PlaneGeometry(WORLD, WORLD, SEGS, SEGS)
   geo.rotateX(-Math.PI / 2)
 
-  const pos    = geo.attributes.position
-  const colors = new Float32Array(pos.count * 3)
+  const pos     = geo.attributes.position
+  const colors  = new Float32Array(pos.count * 3)
+  const heights = new Float32Array(pos.count)
 
   for (let i = 0; i < pos.count; i++) {
-    // PlaneGeometry is centered at origin; shift to 0-5000
     const vx = pos.getX(i) + WORLD / 2
     const vz = pos.getZ(i) + WORLD / 2
     const h  = computeHeight(vx, vz, entries)
-    pos.setY(i, SEA + h)
+    heights[i] = h
+    pos.setY(i, SEA + 1 + h)  // +1 lifts floor above water top → no Z-fighting
     const [r, g, b] = elevColor(h)
     colors[i * 3] = r; colors[i * 3 + 1] = g; colors[i * 3 + 2] = b
   }
+
+  // only render triangles where at least one vertex is elevated
+  // — punches holes at sea level so water box shows through
+  const src = geo.index.array
+  const kept = []
+  for (let i = 0; i < src.length; i += 3) {
+    if (heights[src[i]] > 0 || heights[src[i+1]] > 0 || heights[src[i+2]] > 0) {
+      kept.push(src[i], src[i+1], src[i+2])
+    }
+  }
+  geo.setIndex(kept)
 
   pos.needsUpdate = true
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
   geo.computeVertexNormals()
 
-  const mat = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.85,
-    side: THREE.DoubleSide,
-  })
-
-  const mesh = new THREE.Mesh(geo, mat)
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.85, side: THREE.DoubleSide,
+  }))
   mesh.position.set(WORLD / 2, 0, WORLD / 2)
   return mesh
 }
@@ -160,6 +168,9 @@ $.draw(target => {
 }, {
   afterUpdate(target) {
     const { cards } = $.learn()
+    const json = JSON.stringify(cards)
+    if (json === target._lastCards) return
+    target._lastCards = json
 
     const terrainEl = target.querySelector('.terrain-mesh')
     if (terrainEl) {
