@@ -1254,6 +1254,8 @@ function renderCompassButtons(mode) {
   `
 }
 
+let _prevOsMode = false
+
 // ── draw ──────────────────────────────────────────────────────────────────────
 
 $.draw(target => {
@@ -1284,7 +1286,6 @@ window.addEventListener('park:ready', () => {
   if (mode === 'os') dispatchParkCards()
 })
 
-let _prevOsMode = false
 function afterUpdate(target) {
   const { mode, cards } = $.learn()
   const osBtn = target.querySelector('.c-os')

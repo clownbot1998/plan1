@@ -12,6 +12,7 @@ let _physKeys   = {}
 let _physTarget = null
 let _physLastT  = 0
 let _terrainGeoData = null  // filled by buildTerrainMesh each rebuild
+let _cloudBodies    = []    // rapier bodies for cloud platforms, rebuilt with cards
 
 window.addEventListener('keydown', e => { _physKeys[e.code] = true  })
 window.addEventListener('keyup',   e => { _physKeys[e.code] = false })
@@ -55,11 +56,11 @@ function computeHeight(vx, vz, entries) {
 }
 
 function elevColor(e) {
-  if (e > 400) return [0.75, 0.75, 0.75]
-  if (e > 250) return [0.55, 0.27, 0.07]
-  if (e > 100) return [0.13, 0.55, 0.13]
-  if (e > 0)   return [0.24, 0.70, 0.44]
-  return [0.00, 0.56, 1.00]
+  if (e > 400) return [1.00, 1.00, 0.95]  // near-white cream — approaching cloud
+  if (e > 250) return [1.00, 0.90, 0.60]  // warm peach
+  if (e > 100) return [1.00, 0.95, 0.70]  // light lemon
+  if (e > 0)   return [1.00, 0.98, 0.80]  // lemonchiffon — sea level
+  return [0.00, 0.56, 1.00]               // (holes punched at h=0, shouldn't render)
 }
 
 // ── terrain mesh ──────────────────────────────────────────────────────────────
@@ -120,7 +121,7 @@ function buildTerrainMesh(cards) {
       if (!bottomIdx.has(vi)) {
         bottomIdx.set(vi, nextIdx++)
         positions.push(positions[vi*3], CLIFF_FLOOR, positions[vi*3+2])
-        colors.push(0.50, 0.38, 0.12)
+        colors.push(0.24, 0.70, 0.44)  // mediumseagreen — underwater cliff wall
       }
     }
     const ba = bottomIdx.get(a), bb = bottomIdx.get(b)
@@ -307,12 +308,43 @@ function buildTunnelMesh(cards, edgeTypes) {
 
 // ── physics ───────────────────────────────────────────────────────────────────
 
+function rebuildCloudColliders(cards) {
+  if (!_phys) return
+  const { world } = _phys
+
+  // remove old cloud bodies
+  for (const body of _cloudBodies) {
+    try { world.removeRigidBody(body) } catch(_) {}
+  }
+  _cloudBodies = []
+
+  const entries = Object.entries(cards)
+  for (const [, card] of entries) {
+    const b  = cardBounds(card)
+    const h  = computeHeight(b.cx, b.cz, entries)
+    const cy = CLOUD + h
+    const body = world.createRigidBody(
+      RAPIER.RigidBodyDesc.fixed().setTranslation(b.cx, cy, b.cz),
+    )
+    world.createCollider(
+      RAPIER.ColliderDesc.cuboid(b.w / 2, 30, b.h / 2),
+      body,
+    )
+    _cloudBodies.push(body)
+  }
+}
+
 async function initPhysics(target, sx, sy, sz) {
   if (_phys) { try { _phys.world.free() } catch(_) {} }
   _phys = null
   _physTarget = target
 
-  await RAPIER.init()
+  try {
+    await RAPIER.init()
+  } catch(e) {
+    console.error('[generic-park] RAPIER.init() failed — physics disabled', e)
+    return
+  }
 
   const world = new RAPIER.World({ x: 0, y: -220, z: 0 })
 
@@ -352,6 +384,11 @@ async function initPhysics(target, sx, sy, sz) {
   _phys = { world, body, collider, ctrl }
   _physVel = { x: 0, y: 0, z: 0 }
   _physLastT = performance.now()
+
+  // build cloud colliders from current card state
+  const { cards } = $.learn()
+  rebuildCloudColliders(cards)
+
   requestAnimationFrame(physicsLoop)
 }
 
@@ -366,7 +403,7 @@ function physicsLoop(now) {
 
   // gravity — always
   _physVel.y -= 220 * dt
-  _physVel.y = Math.max(_physVel.y, -600)  // terminal velocity
+  _physVel.y = Math.max(_physVel.y, -300)  // terminal velocity — cap for CCD reliability
 
   // water: buoyancy + drag
   if (pos.y < SEA) {
@@ -416,6 +453,23 @@ function physicsLoop(now) {
 
   // camera eye = 40 units above capsule center
   if (cam) cam.setAttribute('position', `${nx} ${ny + 40} ${nz}`)
+
+  // underwater atmosphere — hysteresis band prevents surface flicker
+  const camY = ny + 40
+  const wasUnder = !!_physTarget._underwater
+  const underwater = wasUnder ? camY < SEA + 30 : camY < SEA - 30
+  if (underwater !== wasUnder) {
+    _physTarget._underwater = underwater
+    const scene = _physTarget.querySelector('a-scene')
+    if (scene) {
+      if (underwater) {
+        scene.setAttribute('fog', 'type: linear; color: #001144; near: 80; far: 500')
+        scene.setAttribute('background', 'color: #001133')
+      } else {
+        scene.removeAttribute('fog')
+      }
+    }
+  }
 
   requestAnimationFrame(physicsLoop)
 }
@@ -495,8 +549,16 @@ $.draw(target => {
 
       <a-box position="${WH} 500 ${WH}"  width="${W}" height="1000" depth="${W}" color="firebrick" shadow="receive: true"></a-box>
       <a-box position="${WH} 1500 ${WH}" width="${W}" height="1000" depth="${W}" color="gold"      shadow="receive: true"></a-box>
-      <a-box position="${WH} 2250 ${WH}" width="${W}" height="500"  depth="${W}"
-             color="dodgerblue" opacity="0.72" transparent="true"              shadow="receive: true"></a-box>
+      <a-box position="${WH} 2250 ${WH}" width="${W}" height="500" depth="${W}"
+             material="color: dodgerblue; opacity: 0.55; transparent: true; side: double"
+             shadow="receive: true"></a-box>
+
+      <!-- sky sphere — dodgerblue, just beyond sun orbit (r=9000), fades with day/night -->
+      <a-sphere position="${WH} ${SEA} ${WH}" radius="10200" segments-height="18" segments-width="36"
+                material="color: dodgerblue; opacity: 0.85; transparent: true; side: back; fog: false; shader: flat"
+                animation="property: material.opacity; from: 0.85; to: 0; dur: 30000;
+                           loop: true; dir: alternate; easing: easeInOutSine"></a-sphere>
+
 
       <a-entity class="perimeter">${renderPerimeter()}</a-entity>
       <a-entity class="terrain-mesh"></a-entity>
@@ -529,6 +591,7 @@ $.draw(target => {
 
     const cloudEl = target.querySelector('.cloud-platforms')
     if (cloudEl) cloudEl.innerHTML = renderCloudPlatforms(cards)
+    rebuildCloudColliders(cards)
 
     if (!target._spawned && Object.keys(cards).length > 0) {
       target._spawned = true
