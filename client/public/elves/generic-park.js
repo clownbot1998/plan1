@@ -1,6 +1,7 @@
-import { Self } from '@plan98/types'
+import { Self, PLAN98_NODE_ID, linkState, broadcastElf } from '@plan98/types'
 import 'aframe'
 import RAPIER from '@dimforge/rapier3d-compat'
+import { checkButton, checkAxis } from '/elves/debug-gamepads.js'
 
 const tag = 'generic-park'
 const $ = Self(tag, { cards: {}, edgeTypes: {} })
@@ -11,11 +12,39 @@ let _physVel    = { x: 0, y: 0, z: 0 }
 let _physKeys   = {}
 let _physTarget = null
 let _physLastT  = 0
-let _terrainGeoData = null  // filled by buildTerrainMesh each rebuild
-let _cloudBodies    = []    // rapier bodies for cloud platforms, rebuilt with cards
+let _terrainGeoData   = null  // filled by buildTerrainMesh each rebuild
+let _cloudBodies      = []    // rapier bodies for cloud platforms, rebuilt with cards
+let _portals          = []    // { x, y, z, toCardId } — rebuilt with tunnel mesh
+let _teleportCooldown = 0     // one teleport per world per 2s — good lore, good for multiplayer
+
+// ── multiplayer — rides plan98 geckos kernel, same room as bulletin-board ─────
+const _boardId = new URLSearchParams(window.location.search).get('id') || 'default'
+let _broadcastT = 0
+
+const PLAYERS_MERGE = `(state, payload) => {
+  var inc = payload.players || {}
+  var base = Object.assign({}, state.players || {})
+  Object.keys(inc).forEach(function(k) {
+    if (inc[k] === null) delete base[k]
+    else base[k] = Object.assign({}, base[k] || {}, inc[k])
+  })
+  return Object.assign({}, state, { players: base })
+}`
+
+// ── inspector ─────────────────────────────────────────────────────────────────
+let _selectedCardId = null
+let _btnPrev        = {}
+let _mouseDownPos   = null
 
 window.addEventListener('keydown', e => { _physKeys[e.code] = true  })
 window.addEventListener('keyup',   e => { _physKeys[e.code] = false })
+window.addEventListener('mousedown', e => { _mouseDownPos = { x: e.clientX, y: e.clientY } })
+window.addEventListener('mouseup', e => {
+  if (!_physTarget || _physTarget.style.display === 'none') return
+  if (!_mouseDownPos) return
+  if (Math.hypot(e.clientX - _mouseDownPos.x, e.clientY - _mouseDownPos.y) > 6) return
+  doInspect()
+})
 
 window.addEventListener('park:cards', e => {
   $.teach({ cards: e.detail.cards || {}, edgeTypes: e.detail.edgeTypes || {} })
@@ -248,6 +277,7 @@ function buildTunnelMesh(cards, edgeTypes) {
   const allBounds = entries.map(([, c]) => cardBounds(c))
   const group     = new THREE.Group()
   const seen      = new Set()
+  _portals        = []  // reset on every rebuild
 
   for (const [, card] of entries) {
     for (const [linkId, link] of Object.entries(card.links || {})) {
@@ -298,8 +328,13 @@ function buildTunnelMesh(cards, edgeTypes) {
       const isBidir = Object.values(toCard.links || {}).some(l => l.to === link.from)
       const markerMat = new THREE.MeshStandardMaterial({ color, emissive: color.clone(), emissiveIntensity: 3.5 })
 
-      addCliffMarker(group, apx, apz, markerMat, true,    isBidir, MR, CH)  // A: sphere (+ cone if bidir)
-      addCliffMarker(group, bpx, bpz, markerMat, isBidir, true,    MR, CH)  // B: cone (+ sphere if bidir)
+      addCliffMarker(group, apx, apz, markerMat, true,    isBidir, MR, CH)  // A: sphere entrance
+      addCliffMarker(group, bpx, bpz, markerMat, isBidir, true,    MR, CH)  // B: cone exit
+
+      // portal at A's sphere → exits at B's cloud platform
+      _portals.push({ x: apx, y: SEA_FLOOR_Y, z: apz, toCardId: link.to })
+      // if bidirectional: portal at B's sphere → exits at A's cloud platform
+      if (isBidir) _portals.push({ x: bpx, y: SEA_FLOOR_Y, z: bpz, toCardId: link.from })
     }
   }
 
@@ -307,6 +342,47 @@ function buildTunnelMesh(cards, edgeTypes) {
 }
 
 // ── physics ───────────────────────────────────────────────────────────────────
+
+// shoot ray from camera center — works for gamepad and mouse equally
+function doInspect() {
+  const THREE = window.AFRAME?.THREE
+  if (!THREE || !_physTarget) return
+  const mesh = _physTarget.querySelector('.terrain-mesh')?.getObject3D('terrain')
+  const cam  = _physTarget.querySelector('a-scene')?.camera
+  if (!mesh || !cam) return
+
+  const ray  = new THREE.Raycaster()
+  ray.setFromCamera({ x: 0, y: 0 }, cam)
+  const hits = ray.intersectObject(mesh, false)
+
+  if (!hits.length) { _selectedCardId = null; updateCardHud(); return }
+
+  const pt = hits[0].point
+  const { cards } = $.learn()
+  for (const [id, card] of Object.entries(cards)) {
+    const b = cardBounds(card)
+    if (pt.x >= b.x && pt.x <= b.x + b.w && pt.z >= b.z && pt.z <= b.z + b.h) {
+      _selectedCardId = id; updateCardHud(); return
+    }
+  }
+  _selectedCardId = null; updateCardHud()
+}
+
+function updateCardHud() {
+  if (!_physTarget) return
+  const hud = _physTarget.querySelector('.card-hud')
+  if (!hud) return
+  if (!_selectedCardId) { hud.hidden = true; return }
+  const { cards } = $.learn()
+  const card = cards[_selectedCardId]
+  if (!card) { hud.hidden = true; return }
+  hud.hidden = false
+  hud.innerHTML = `
+    <div class="hud-inner" style="background:${card.color||'lemonchiffon'}">
+      <strong>${card.name || 'untitled'}</strong>
+      <button class="hud-open" data-id="${_selectedCardId}">open in board ↗</button>
+    </div>`
+}
 
 function rebuildCloudColliders(cards) {
   if (!_phys) return
@@ -381,11 +457,24 @@ async function initPhysics(target, sx, sy, sz) {
   ctrl.setMinSlopeSlideAngle(30 * Math.PI / 180)
   ctrl.enableSnapToGround(2)
 
+  // perimeter walls
+  const wallH = CLOUD + 1000
+  ;[
+    [WORLD/2, wallH/2,  -20,       WORLD/2, wallH/2, 20],
+    [WORLD/2, wallH/2,  WORLD+20,  WORLD/2, wallH/2, 20],
+    [-20,     wallH/2,  WORLD/2,   20, wallH/2, WORLD/2],
+    [WORLD+20, wallH/2, WORLD/2,   20, wallH/2, WORLD/2],
+  ].forEach(([cx,cy,cz,hx,hy,hz]) => world.createCollider(
+    RAPIER.ColliderDesc.cuboid(hx, hy, hz),
+    world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(cx,cy,cz)),
+  ))
+
   _phys = { world, body, collider, ctrl }
   _physVel = { x: 0, y: 0, z: 0 }
   _physLastT = performance.now()
 
-  // build cloud colliders from current card state
+  linkState(tag, _boardId)  // join same geckos room as bulletin-board
+
   const { cards } = $.learn()
   rebuildCloudColliders(cards)
 
@@ -414,17 +503,43 @@ function physicsLoop(now) {
     _physVel.z *= drag
   }
 
-  // WASD relative to camera yaw
+  // look + move — keyboard, gamepad joysticks both work
   const cam = _physTarget.querySelector('[camera]')
-  const yaw = cam?.object3D?.rotation.y ?? 0  // radians set by look-controls
+  const yaw = cam?.object3D?.rotation.y ?? 0
   const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw)
   const rgtX =  Math.cos(yaw), rgtZ = -Math.sin(yaw)
 
+  // right stick → camera look (into look-controls' internal objects)
+  const rs_x = checkAxis(0, 2) || 0, rs_y = checkAxis(0, 3) || 0
+  if (Math.abs(rs_x) > 0.1 || Math.abs(rs_y) > 0.1) {
+    const lc = cam?.components?.['look-controls']
+    if (lc) {
+      lc.yawObject.rotation.y   -= rs_x * 2.2 * dt
+      lc.pitchObject.rotation.x -= rs_y * 2.2 * dt
+      lc.pitchObject.rotation.x  = Math.max(-1.0, Math.min(1.0, lc.pitchObject.rotation.x))
+    }
+  }
+
+  // left stick + keyboard → movement
+  const ls_x = checkAxis(0, 0) || 0, ls_y = checkAxis(0, 1) || 0
   let mx = 0, mz = 0
   if (_physKeys['KeyW'] || _physKeys['ArrowUp'])   { mx += fwdX; mz += fwdZ }
   if (_physKeys['KeyS'] || _physKeys['ArrowDown'])  { mx -= fwdX; mz -= fwdZ }
   if (_physKeys['KeyA'] || _physKeys['ArrowLeft'])  { mx -= rgtX; mz -= rgtZ }
   if (_physKeys['KeyD'] || _physKeys['ArrowRight']) { mx += rgtX; mz += rgtZ }
+  if (Math.abs(ls_x) > 0.1 || Math.abs(ls_y) > 0.1) {
+    mx += rgtX * ls_x - fwdX * ls_y
+    mz += rgtZ * ls_x - fwdZ * ls_y
+  }
+
+  // any gamepad button pressed → inspect
+  let anyBtnPressed = false
+  for (let b = 0; b < 16; b++) {
+    const v = checkButton(0, b) || 0
+    if (v > 0.5 && !(_btnPrev[b] > 0.5)) anyBtnPressed = true
+    _btnPrev[b] = v
+  }
+  if (anyBtnPressed) doInspect()
 
   const mlen = Math.hypot(mx, mz)
   const SPEED = 300
@@ -454,6 +569,28 @@ function physicsLoop(now) {
   // camera eye = 40 units above capsule center
   if (cam) cam.setAttribute('position', `${nx} ${ny + 40} ${nz}`)
 
+  // portal check — shared world cooldown, one teleport per 2s
+  _teleportCooldown = Math.max(0, _teleportCooldown - dt)
+  if (_teleportCooldown === 0) {
+    for (const portal of _portals) {
+      const dx = nx - portal.x, dy = ny - portal.y, dz = nz - portal.z
+      if (Math.sqrt(dx*dx + dy*dy + dz*dz) < 90) {  // MR(55) + capsule radius(35)
+        const { cards } = $.learn()
+        const toCard = cards[portal.toCardId]
+        if (toCard) {
+          const ents = Object.entries(cards)
+          const bb   = cardBounds(toCard)
+          const h    = computeHeight(bb.cx, bb.cz, ents)
+          body.setNextKinematicTranslation({ x: bb.cx, y: CLOUD + h + 100, z: bb.cz })
+          world.step()
+          _physVel.y = 0
+          _teleportCooldown = 2
+        }
+        break
+      }
+    }
+  }
+
   // underwater atmosphere — hysteresis band prevents surface flicker
   const camY = ny + 40
   const wasUnder = !!_physTarget._underwater
@@ -469,6 +606,13 @@ function physicsLoop(now) {
         scene.removeAttribute('fog')
       }
     }
+  }
+
+  // broadcast position ~10fps via plan98 geckos kernel
+  _broadcastT += dt
+  if (_broadcastT >= 0.1) {
+    _broadcastT = 0
+    broadcastElf(tag, { players: { [PLAN98_NODE_ID]: { x: nx, y: ny, z: nz } } }, PLAYERS_MERGE)
   }
 
   requestAnimationFrame(physicsLoop)
@@ -564,11 +708,24 @@ $.draw(target => {
       <a-entity class="terrain-mesh"></a-entity>
       <a-entity class="tunnels"></a-entity>
       <a-entity class="cloud-platforms"></a-entity>
+      <a-entity class="players"></a-entity>
     </a-scene>
+    <div class="card-hud" hidden></div>
   `
 }, {
   afterUpdate(target) {
-    const { cards, edgeTypes } = $.learn()
+    const { cards, edgeTypes, players } = $.learn()
+
+    // other players — rendered as spheres, exclude self
+    const playersEl = target.querySelector('.players')
+    if (playersEl) {
+      playersEl.innerHTML = Object.entries(players || {})
+        .filter(([id]) => id !== PLAN98_NODE_ID)
+        .map(([, p]) => `<a-sphere position="${p.x} ${p.y + 60} ${p.z}"
+          radius="30" color="mediumpurple" opacity="0.85"></a-sphere>`)
+        .join('')
+    }
+
     const json = JSON.stringify({ cards, edgeTypes })
     if (json === target._lastCards) return
     target._lastCards = json
@@ -601,6 +758,31 @@ $.draw(target => {
 })
 
 $.style(`
-  & { display: block; width: 100%; height: 100%; }
+  & { display: block; width: 100%; height: 100%; position: relative; }
   & a-scene { width: 100% !important; height: 100% !important; display: block; }
+  & .card-hud {
+    position: absolute; bottom: 1rem; right: 1rem; z-index: 10;
+    min-width: 200px; max-width: 320px;
+    pointer-events: auto;
+  }
+  & .hud-inner {
+    padding: .75rem 1rem;
+    border-radius: .5rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,.4);
+    display: flex; flex-direction: column; gap: .5rem;
+    font-family: monospace;
+  }
+  & .hud-open {
+    align-self: flex-end;
+    background: rgba(0,0,0,.15);
+    border: none; border-radius: .25rem;
+    padding: .25rem .6rem; cursor: pointer;
+    font-size: .8rem;
+  }
+  & .hud-open:hover { background: rgba(0,0,0,.3); }
 `)
+
+$.when('click', '.hud-open', (e) => {
+  const cardId = e.target.dataset.id
+  window.dispatchEvent(new CustomEvent('park:open-card', { detail: { cardId } }))
+})

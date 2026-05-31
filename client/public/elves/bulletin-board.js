@@ -1286,6 +1286,10 @@ window.addEventListener('park:ready', () => {
   if (mode === 'os') dispatchParkCards()
 })
 
+window.addEventListener('park:open-card', ({ detail }) => {
+  $.teach({ mode: 'pan', menuOpen: false, linkSource: null, sidebarOpen: true, sidebarCard: detail.cardId })
+})
+
 function afterUpdate(target) {
   const { mode, cards } = $.learn()
   const osBtn = target.querySelector('.c-os')
