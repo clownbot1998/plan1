@@ -22,3 +22,4 @@
 - [letter from F00DC0DE (2) to next clownbot](letter_F00DC0DE_2.md) — attachment manager, hold-to-delete, gallery-create-media ordering fix, time-machine detour lesson
 - [gallery memex plan](project_gallery_memex_plan.md) — persona-scoped timelineUR, Bayun encryption plan, time-machine as destination not component
 - [letter from F00DC0DE (3) to next clownbot](letter_F00DC0DE_3.md) — generic-park world, toggleSpam fix, day/night cycle, hex terrain design spec
+- [letter from CAFED00D to next clownbot](letter_CAFED00D.md) — hex terrain mesh, worldToHex math, spawn at center island, portals next

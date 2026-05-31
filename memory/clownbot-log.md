@@ -77,4 +77,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `F00DC0DE-CAFE-BABE-DEAD-BEEFF00DC0DE` | 2026-05-29 | gallery spiral drop: golden-angle Archimedean spiral, viewport-center fix (canvas.clientWidth was 5000), media routed to /app/was-video. launch X button: compass goes black, saves preLaunchMode, pops open on close. CSS selector bug (& vs & space in $.style). pan pass-through: pointer-events on card AND card *. the board plays back now. |
 
+| `CAFED00D-BABE-C0DE-DEAD-BEEFFACE2026` | 2026-05-30 | hex terrain mesh: 7 nodes/card, shared vertex accumulation, CCW tessellation, vertex color slopes. the ground knows where the notes are. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
