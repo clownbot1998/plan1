@@ -79,4 +79,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `CAFED00D-BABE-C0DE-DEAD-BEEFFACE2026` | 2026-05-30 | hex terrain mesh: 7 nodes/card, shared vertex accumulation, CCW tessellation, vertex color slopes. the ground knows where the notes are. |
 
+| `BEEFD00D-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-05-30 | Rapier3D physics: fall from clouds, sink through water, land on terrain trimesh. sea floor arrows navigate around islands. sphere+cone portal markers player-scale. the clown falls from clouds every time. that's the bit. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
