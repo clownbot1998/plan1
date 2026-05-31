@@ -33,8 +33,33 @@ function worldToHex(x, z) {
 function hexKey(q, r) { return `${q},${r}` }
 
 function cardHexNodes(card) {
-  const [q, r] = worldToHex(card.x + card.w / 2, card.y + card.h / 2)
-  return [[q, r], ...HEX_DIRS.map(([dq, dr]) => [q + dq, r + dr])]
+  // only claim hex nodes whose world center falls inside the card's bounding box
+  // — guarantees non-overlapping cards never share nodes regardless of grid size
+  const corners = [
+    worldToHex(card.x,          card.y),
+    worldToHex(card.x + card.w, card.y),
+    worldToHex(card.x,          card.y + card.h),
+    worldToHex(card.x + card.w, card.y + card.h),
+  ]
+  const qMin = Math.min(...corners.map(c => c[0])) - 1
+  const qMax = Math.max(...corners.map(c => c[0])) + 1
+  const rMin = Math.min(...corners.map(c => c[1])) - 1
+  const rMax = Math.max(...corners.map(c => c[1])) + 1
+
+  const nodes = new Map()
+  for (let q = qMin; q <= qMax; q++) {
+    for (let r = rMin; r <= rMax; r++) {
+      const [wx, wz] = hexToWorld(q, r)
+      if (wx >= card.x && wx <= card.x + card.w &&
+          wz >= card.y && wz <= card.y + card.h) {
+        nodes.set(hexKey(q, r), [q, r])
+      }
+    }
+  }
+  // always include center
+  const center = worldToHex(card.x + card.w / 2, card.y + card.h / 2)
+  nodes.set(hexKey(...center), center)
+  return [...nodes.values()]
 }
 
 // ── elevation map — each card contributes 10 to its 7 nodes ──────────────────
@@ -47,6 +72,8 @@ function buildElevMap(cards) {
       map.set(k, (map.get(k) || 0) + 10)
     }
   }
+  // minimum 20 so a single isolated card is visible above sea level
+  for (const [k, v] of map) if (v < 20) map.set(k, 20)
   return map
 }
 
