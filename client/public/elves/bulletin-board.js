@@ -1271,11 +1271,11 @@ function beforeUpdate(target) {
 
 let _lastCardsJson = null
 function dispatchParkCards() {
-  const { cards } = $.learn()
-  const json = JSON.stringify(cards)
+  const { cards, edgeTypes } = $.learn()
+  const json = JSON.stringify({ cards, edgeTypes })
   if (json === _lastCardsJson) return
   _lastCardsJson = json
-  window.dispatchEvent(new CustomEvent('park:cards', { detail: { cards } }))
+  window.dispatchEvent(new CustomEvent('park:cards', { detail: { cards, edgeTypes } }))
 }
 
 window.addEventListener('park:ready', () => {
@@ -1300,7 +1300,6 @@ function afterUpdate(target) {
       target.appendChild(park)
       setTimeout(dispatchParkCards, 300)
     }
-    if (entering && park) park._spawned = false
     park.style.display = 'block'
     dispatchParkCards()
   } else {

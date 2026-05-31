@@ -1,30 +1,54 @@
 import { Self } from '@plan98/types'
 import 'aframe'
+import RAPIER from '@dimforge/rapier3d-compat'
 
 const tag = 'generic-park'
-const $ = Self(tag, { cards: {} })
+const $ = Self(tag, { cards: {}, edgeTypes: {} })
+
+// ── physics state ─────────────────────────────────────────────────────────────
+let _phys       = null   // { world, body, collider, ctrl }
+let _physVel    = { x: 0, y: 0, z: 0 }
+let _physKeys   = {}
+let _physTarget = null
+let _physLastT  = 0
+let _terrainGeoData = null  // filled by buildTerrainMesh each rebuild
+
+window.addEventListener('keydown', e => { _physKeys[e.code] = true  })
+window.addEventListener('keyup',   e => { _physKeys[e.code] = false })
 
 window.addEventListener('park:cards', e => {
-  $.teach({ cards: e.detail.cards || {} })
+  $.teach({ cards: e.detail.cards || {}, edgeTypes: e.detail.edgeTypes || {} })
 })
 window.dispatchEvent(new CustomEvent('park:ready'))
 
-// ── height ────────────────────────────────────────────────────────────────────
+// ── constants ─────────────────────────────────────────────────────────────────
 
 const SEGS       = 200
-const WORLD      = 5000
-const SEA        = 2500
-const CLOUD      = 3000
-const CLIFF_FLOOR = 2000  // bottom of cliffs (visible through water)
+const SPREAD     = 1.5           // card centers pushed 1.5× apart; island size unchanged
+const WORLD      = 7500          // 5000 * SPREAD
+const SEA        = 2500          // sea surface Y
+const CLOUD      = 3000          // cloud platform base Y
+const CLIFF_FLOOR = 2000         // cliff base / sea floor Y
+
+// ── card coordinate helper ────────────────────────────────────────────────────
+
+function cardBounds(card) {
+  const x = card.x * SPREAD
+  const z = card.y * SPREAD
+  return { x, z, w: card.w, h: card.h, cx: x + card.w / 2, cz: z + card.h / 2 }
+}
+
+// ── height ────────────────────────────────────────────────────────────────────
 
 // tent function: max at card center, 0 at card edges, 0 outside
 function computeHeight(vx, vz, entries) {
   let h = 0
   for (const [, card] of entries) {
-    if (vx < card.x || vx > card.x + card.w) continue
-    if (vz < card.y || vz > card.y + card.h) continue
-    const tx = 1 - Math.abs(vx - (card.x + card.w / 2)) / (card.w / 2)
-    const tz = 1 - Math.abs(vz - (card.y + card.h / 2)) / (card.h / 2)
+    const b = cardBounds(card)
+    if (vx < b.x || vx > b.x + b.w) continue
+    if (vz < b.z || vz > b.z + b.h) continue
+    const tx = 1 - Math.abs(vx - b.cx) / (b.w / 2)
+    const tz = 1 - Math.abs(vz - b.cz) / (b.h / 2)
     h += 30 * tx * tz
   }
   return Math.min(h, 500)
@@ -45,14 +69,13 @@ function buildTerrainMesh(cards) {
   if (!THREE) return null
   const entries = Object.entries(cards)
 
-  // base grid for position data
   const base = new THREE.PlaneGeometry(WORLD, WORLD, SEGS, SEGS)
   base.rotateX(-Math.PI / 2)
   const basePosArr = base.attributes.position.array
   const baseIdxArr = base.index.array
   const N = SEGS + 1
 
-  // compute heights
+  // compute heights — vx/vz in 0..WORLD, card bounds already scaled
   const heights = new Float32Array(N * N)
   for (let i = 0; i < N * N; i++) {
     const vx = basePosArr[i * 3]     + WORLD / 2
@@ -60,9 +83,7 @@ function buildTerrainMesh(cards) {
     heights[i] = computeHeight(vx, vz, entries)
   }
 
-  // build top-surface vertex buffer
-  const positions = []
-  const colors    = []
+  const positions = [], colors = []
   for (let i = 0; i < N * N; i++) {
     const h = heights[i]
     positions.push(basePosArr[i*3], SEA + 1 + h, basePosArr[i*3+2])
@@ -70,14 +91,14 @@ function buildTerrainMesh(cards) {
     colors.push(r, g, b)
   }
 
-  // filter surface triangles — holes at sea level
+  // holes where h=0 on all three vertices
   const kept = []
   for (let i = 0; i < baseIdxArr.length; i += 3) {
     const v0=baseIdxArr[i], v1=baseIdxArr[i+1], v2=baseIdxArr[i+2]
     if (heights[v0]>0 || heights[v1]>0 || heights[v2]>0) kept.push(v0,v1,v2)
   }
 
-  // boundary edges: appear exactly once in kept
+  // boundary edges for cliff faces
   const edgeMap = new Map()
   for (let i = 0; i < kept.length; i += 3) {
     for (const [a,b] of [[kept[i],kept[i+1]],[kept[i+1],kept[i+2]],[kept[i+2],kept[i]]]) {
@@ -88,7 +109,6 @@ function buildTerrainMesh(cards) {
     }
   }
 
-  // cliff vertices (one per unique boundary vert) + cliff faces
   const bottomIdx = new Map()
   const cliffIndices = []
   let nextIdx = N * N
@@ -100,7 +120,7 @@ function buildTerrainMesh(cards) {
       if (!bottomIdx.has(vi)) {
         bottomIdx.set(vi, nextIdx++)
         positions.push(positions[vi*3], CLIFF_FLOOR, positions[vi*3+2])
-        colors.push(0.50, 0.38, 0.12)  // sandy cliff face
+        colors.push(0.50, 0.38, 0.12)
       }
     }
     const ba = bottomIdx.get(a), bb = bottomIdx.get(b)
@@ -108,6 +128,12 @@ function buildTerrainMesh(cards) {
   }
 
   base.dispose()
+
+  // save for rapier trimesh — local space, initPhysics adds WORLD/2 offset
+  _terrainGeoData = {
+    positions: new Float32Array(positions),
+    indices:   new Uint32Array([...kept, ...cliffIndices]),
+  }
 
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
@@ -129,42 +155,304 @@ function buildTerrainMesh(cards) {
 function renderCloudPlatforms(cards) {
   const entries = Object.entries(cards)
   return entries.map(([, card]) => {
-    const cx = card.x + card.w / 2
-    const cz = card.y + card.h / 2
-    const h  = computeHeight(cx, cz, entries)
+    const b = cardBounds(card)
+    const h = computeHeight(b.cx, b.cz, entries)
     const cloudY = CLOUD + h
     const color = card.color || 'lemonchiffon'
-    return `<a-box position="${cx} ${cloudY} ${cz}"
-                   width="${card.w}" height="10" depth="${card.h}"
+    return `<a-box position="${b.cx} ${cloudY} ${b.cz}"
+                   width="${b.w}" height="10" depth="${b.h}"
                    color="${color}"></a-box>`
   }).join('')
 }
 
-// ── spawn at centermost card, sea level ───────────────────────────────────────
+// ── sea floor path arrows + cliff rise terminators ───────────────────────────
+
+const SEA_FLOOR_Y = CLIFF_FLOOR + 15  // true sea floor — top of gold layer, bottom of water column
+
+// point where ray from bounds center in direction (nx,nz) exits the rectangle
+function cliffFaceEdge(b, nx, nz) {
+  const halfW = b.w / 2, halfH = b.h / 2
+  const t = Math.min(
+    nx !== 0 ? halfW / Math.abs(nx) : Infinity,
+    nz !== 0 ? halfH / Math.abs(nz) : Infinity,
+  )
+  return [b.cx + nx * t, b.cz + nz * t]
+}
+
+function insideIsland(px, pz, b) {
+  return px > b.x && px < b.x + b.w && pz > b.z && pz < b.z + b.h
+}
+
+function segmentClear(x1, z1, x2, z2, skipA, skipB, allBounds) {
+  for (let i = 1; i < 20; i++) {
+    const t = i / 20
+    const px = x1 + (x2 - x1) * t, pz = z1 + (z2 - z1) * t
+    for (const b of allBounds) {
+      if (b === skipA || b === skipB) continue
+      if (insideIsland(px, pz, b)) return false
+    }
+  }
+  return true
+}
+
+// push outward until clear of all other islands, then add exactly one grid cell
+function safePush(cx, cz, dx, dz, skip, allBounds) {
+  const GRID = WORLD / SEGS  // ~37.5 units — one terrain cell
+  let clearDist = 0
+  for (let dist = 0; dist <= 1200; dist += 8) {
+    const px = cx + dx * dist, pz = cz + dz * dist
+    if (!allBounds.some(b => b !== skip && insideIsland(px, pz, b))) { clearDist = dist; break }
+  }
+  const d = clearDist + GRID
+  return [cx + dx * d, cz + dz * d]
+}
+
+// returns extra [x,z] waypoints between cliff exit and cliff entry
+function findClearWaypoints(x1, z1, x2, z2, skipA, skipB, allBounds) {
+  if (segmentClear(x1, z1, x2, z2, skipA, skipB, allBounds)) return []
+  const dx = x2 - x1, dz = z2 - z1, len = Math.hypot(dx, dz)
+  const px = -dz / len, pz = dx / len  // left-perpendicular unit
+  for (const sign of [1, -1]) {
+    for (const off of [500, 900, 1400]) {
+      const wx = (x1 + x2) / 2 + px * off * sign
+      const wz = (z1 + z2) / 2 + pz * off * sign
+      if (allBounds.some(b => b !== skipA && b !== skipB && insideIsland(wx, wz, b))) continue
+      if (!segmentClear(x1, z1, wx, wz, skipA, skipB, allBounds)) continue
+      if (!segmentClear(wx, wz, x2, z2, skipA, skipB, allBounds)) continue
+      return [[wx, wz]]
+    }
+  }
+  return []
+}
+
+// sphere always at tube/sea-floor level, cone always at mid-cliff — only presence changes
+function addCliffMarker(group, x, z, mat, withSphere, withCone, MR, CH) {
+  if (withSphere) {
+    const sph = new THREE.Mesh(new THREE.SphereGeometry(MR, 12, 8), mat)
+    sph.position.set(x, SEA_FLOOR_Y, z)
+    group.add(sph)
+  }
+  if (withCone) {
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(MR, CH, 8), mat)
+    cone.position.set(x, SEA_FLOOR_Y + MR + CH / 2, z)
+    group.add(cone)
+  }
+}
+
+function buildTunnelMesh(cards, edgeTypes) {
+  const THREE = window.AFRAME?.THREE
+  if (!THREE) return null
+
+  const entries   = Object.entries(cards)
+  const allBounds = entries.map(([, c]) => cardBounds(c))
+  const group     = new THREE.Group()
+  const seen      = new Set()
+
+  for (const [, card] of entries) {
+    for (const [linkId, link] of Object.entries(card.links || {})) {
+      if (seen.has(linkId)) continue
+      seen.add(linkId)
+
+      const fromCard = cards[link.from]
+      const toCard   = cards[link.to]
+      if (!fromCard || !toCard || link.from === link.to) continue
+
+      const ba = cardBounds(fromCard)
+      const bb = cardBounds(toCard)
+      const dist = Math.hypot(bb.cx - ba.cx, bb.cz - ba.cz)
+      if (dist < 1) continue
+      const nx = (bb.cx - ba.cx) / dist, nz = (bb.cz - ba.cz) / dist
+
+      const typeColor = edgeTypes[link.typeId]?.color || 'dodgerblue'
+      const color     = new THREE.Color(typeColor)
+      const mat = new THREE.MeshStandardMaterial({ color, emissive: color.clone(), emissiveIntensity: 2.5 })
+
+      const MR = 55, CH = 130
+      const [ex, ez] = cliffFaceEdge(ba,  nx,  nz)
+      const [fx, fz] = cliffFaceEdge(bb, -nx, -nz)
+
+      // push markers into open water, stepping past any island in the way
+      const [apx, apz] = safePush(ex, ez,  nx,  nz, ba, allBounds)  // A outward = toward B
+      const [bpx, bpz] = safePush(fx, fz, -nx, -nz, bb, allBounds)  // B outward = toward A
+
+      // sea floor path between pushed marker positions, navigating around islands
+      const waypts = findClearWaypoints(apx, apz, bpx, bpz, ba, bb, allBounds)
+
+      // tube: floor path → rise to cone base only
+      const pts = [
+        new THREE.Vector3(apx, SEA_FLOOR_Y, apz),
+        ...waypts.map(([wx, wz]) => new THREE.Vector3(wx, SEA_FLOOR_Y, wz)),
+        new THREE.Vector3(bpx, SEA_FLOOR_Y, bpz),
+        new THREE.Vector3(bpx, SEA_FLOOR_Y + MR, bpz),  // rise to cone base, no further
+      ]
+      if (pts.length < 3) {
+        pts.splice(1, 0, new THREE.Vector3((apx + bpx) / 2, SEA_FLOOR_Y, (apz + bpz) / 2))
+      }
+
+      const curve   = new THREE.CatmullRomCurve3(pts)
+      const tubeGeo = new THREE.TubeGeometry(curve, pts.length * 10, 25, 8, false)
+      group.add(new THREE.Mesh(tubeGeo, mat))
+
+      // determine directionality — check if B also has a link back to A
+      const isBidir = Object.values(toCard.links || {}).some(l => l.to === link.from)
+      const markerMat = new THREE.MeshStandardMaterial({ color, emissive: color.clone(), emissiveIntensity: 3.5 })
+
+      addCliffMarker(group, apx, apz, markerMat, true,    isBidir, MR, CH)  // A: sphere (+ cone if bidir)
+      addCliffMarker(group, bpx, bpz, markerMat, isBidir, true,    MR, CH)  // B: cone (+ sphere if bidir)
+    }
+  }
+
+  return group
+}
+
+// ── physics ───────────────────────────────────────────────────────────────────
+
+async function initPhysics(target, sx, sy, sz) {
+  if (_phys) { try { _phys.world.free() } catch(_) {} }
+  _phys = null
+  _physTarget = target
+
+  await RAPIER.init()
+
+  const world = new RAPIER.World({ x: 0, y: -220, z: 0 })
+
+  // terrain trimesh — transform local → world space
+  if (_terrainGeoData) {
+    const { positions: lp, indices } = _terrainGeoData
+    const verts = new Float32Array(lp.length)
+    for (let i = 0; i < lp.length; i += 3) {
+      verts[i]   = lp[i]   + WORLD / 2
+      verts[i+1] = lp[i+1]
+      verts[i+2] = lp[i+2] + WORLD / 2
+    }
+    world.createCollider(
+      RAPIER.ColliderDesc.trimesh(verts, indices),
+      world.createRigidBody(RAPIER.RigidBodyDesc.fixed()),
+    )
+  }
+
+  // sea floor slab
+  world.createCollider(
+    RAPIER.ColliderDesc.cuboid(WORLD / 2, 10, WORLD / 2),
+    world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(WORLD / 2, CLIFF_FLOOR - 10, WORLD / 2)),
+  )
+
+  // player capsule — radius 30, half-height 30 → 120 units tall
+  const body = world.createRigidBody(
+    RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(sx, sy, sz),
+  )
+  const collider = world.createCollider(RAPIER.ColliderDesc.capsule(30, 30), body)
+
+  const ctrl = world.createCharacterController(0.1)
+  ctrl.setSlideEnabled(true)
+  ctrl.setMaxSlopeClimbAngle(50 * Math.PI / 180)
+  ctrl.setMinSlopeSlideAngle(30 * Math.PI / 180)
+  ctrl.enableSnapToGround(2)
+
+  _phys = { world, body, collider, ctrl }
+  _physVel = { x: 0, y: 0, z: 0 }
+  _physLastT = performance.now()
+  requestAnimationFrame(physicsLoop)
+}
+
+function physicsLoop(now) {
+  if (!_phys || !_physTarget || _physTarget.style.display === 'none') return
+
+  const dt = Math.min((now - _physLastT) / 1000, 0.033)
+  _physLastT = now
+
+  const { world, body, collider, ctrl } = _phys
+  const pos = body.translation()
+
+  // gravity — always
+  _physVel.y -= 220 * dt
+  _physVel.y = Math.max(_physVel.y, -600)  // terminal velocity
+
+  // water: buoyancy + drag
+  if (pos.y < SEA) {
+    const depth = Math.min((SEA - pos.y) / (SEA - CLIFF_FLOOR), 1)
+    _physVel.y += 175 * depth * dt
+    const drag = Math.pow(0.88, dt * 60)
+    _physVel.x *= drag
+    _physVel.z *= drag
+  }
+
+  // WASD relative to camera yaw
+  const cam = _physTarget.querySelector('[camera]')
+  const yaw = cam?.object3D?.rotation.y ?? 0  // radians set by look-controls
+  const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw)
+  const rgtX =  Math.cos(yaw), rgtZ = -Math.sin(yaw)
+
+  let mx = 0, mz = 0
+  if (_physKeys['KeyW'] || _physKeys['ArrowUp'])   { mx += fwdX; mz += fwdZ }
+  if (_physKeys['KeyS'] || _physKeys['ArrowDown'])  { mx -= fwdX; mz -= fwdZ }
+  if (_physKeys['KeyA'] || _physKeys['ArrowLeft'])  { mx -= rgtX; mz -= rgtZ }
+  if (_physKeys['KeyD'] || _physKeys['ArrowRight']) { mx += rgtX; mz += rgtZ }
+
+  const mlen = Math.hypot(mx, mz)
+  const SPEED = 300
+  if (mlen > 0) {
+    _physVel.x = (mx / mlen) * SPEED
+    _physVel.z = (mz / mlen) * SPEED
+  } else {
+    const friction = pos.y < SEA ? 0.92 : 0.78
+    _physVel.x *= Math.pow(friction, dt * 60)
+    _physVel.z *= Math.pow(friction, dt * 60)
+  }
+
+  ctrl.computeColliderMovement(collider, {
+    x: _physVel.x * dt,
+    y: _physVel.y * dt,
+    z: _physVel.z * dt,
+  })
+  const mv = ctrl.computedMovement()
+
+  // reset vertical velocity if blocked (landed or ceiling)
+  if (Math.abs(mv.y) < 0.5 && Math.abs(_physVel.y * dt) > 1) _physVel.y = 0
+
+  const nx = pos.x + mv.x, ny = pos.y + mv.y, nz = pos.z + mv.z
+  body.setNextKinematicTranslation({ x: nx, y: ny, z: nz })
+  world.step()
+
+  // camera eye = 40 units above capsule center
+  if (cam) cam.setAttribute('position', `${nx} ${ny + 40} ${nz}`)
+
+  requestAnimationFrame(physicsLoop)
+}
+
+// ── spawn at centermost card, sea level (first load only) ─────────────────────
 
 function spawnAtCenterIsland(target, cards) {
   const WC = WORLD / 2
-  let sx = WC, sz = WC
-  let minDist = Infinity
-  for (const [, card] of Object.entries(cards)) {
-    const cx = card.x + card.w / 2, cz = card.y + card.h / 2
-    const d = Math.hypot(cx - WC, cz - WC)
-    if (d < minDist) { minDist = d; sx = cx; sz = cz }
+  const entries = Object.entries(cards)
+  let bestCard = null, minDist = Infinity
+  for (const [, card] of entries) {
+    const b = cardBounds(card)
+    const d = Math.hypot(b.cx - WC, b.cz - WC)
+    if (d < minDist) { minDist = d; bestCard = card }
   }
+  if (!bestCard) return
+  const b = cardBounds(bestCard)
+  const h = computeHeight(b.cx, b.cz, entries)
+  const sy = CLOUD + h + 300  // spawn above cloud — fall to island
+
   const cam = target.querySelector('[camera]')
-  if (cam) cam.setAttribute('position', `${sx} ${SEA + 100} ${sz}`)
+  if (cam) cam.setAttribute('position', `${b.cx} ${sy + 40} ${b.cz}`)
+
+  initPhysics(target, b.cx, sy, b.cz)
 }
 
 // ── perimeter ─────────────────────────────────────────────────────────────────
 
 function renderPerimeter() {
   const c = 'mediumpurple', h = CLOUD, y = h / 2
+  const W = WORLD, H = W + 400
   return `
-    <a-box position="2500 ${y} -100"  width="5400" height="${h}" depth="200"  color="${c}"></a-box>
-    <a-box position="2500 ${y} 5100"  width="5400" height="${h}" depth="200"  color="${c}"></a-box>
-    <a-box position="-100 ${y} 2500"  width="200"  height="${h}" depth="5400" color="${c}"></a-box>
-    <a-box position="5100 ${y} 2500"  width="200"  height="${h}" depth="5400" color="${c}"></a-box>
-    <a-box position="2500 -100 2500"  width="5400" height="200"  depth="5400" color="${c}"></a-box>
+    <a-box position="${W/2} ${y} ${-100}"  width="${H}" height="${h}" depth="200"  color="${c}"></a-box>
+    <a-box position="${W/2} ${y} ${W+100}" width="${H}" height="${h}" depth="200"  color="${c}"></a-box>
+    <a-box position="${-100} ${y} ${W/2}"  width="200"  height="${h}" depth="${H}" color="${c}"></a-box>
+    <a-box position="${W+100} ${y} ${W/2}" width="200"  height="${h}" depth="${H}" color="${c}"></a-box>
+    <a-box position="${W/2} -100 ${W/2}"   width="${H}" height="200"  depth="${H}" color="${c}"></a-box>
   `
 }
 
@@ -173,11 +461,12 @@ function renderPerimeter() {
 $.draw(target => {
   if (target._parkMounted) return
   target._parkMounted = true
+  const W = WORLD, WH = W / 2
   return `
     <a-scene embedded vr-mode-ui="enabled: false" background="color: black"
              renderer="shadowMapEnabled: true; shadowMapType: pcfsoft">
-      <a-entity camera wasd-controls="acceleration:2000" look-controls
-                position="2500 2600 2500" rotation="-10 0 0">
+      <a-entity camera look-controls
+                position="${WH} ${SEA + 100} ${WH}" rotation="-10 0 0">
         <a-cursor color="white" opacity="0.4" fuse="false"></a-cursor>
       </a-entity>
 
@@ -187,7 +476,7 @@ $.draw(target => {
                           easing: easeInOutSine"></a-light>
       <a-light type="ambient" color="#111133" intensity="0.3"></a-light>
 
-      <a-entity position="2500 2500 2500"
+      <a-entity position="${WH} ${SEA} ${WH}"
                 animation="property: rotation; from: 0 0 0; to: 0 0 -360;
                            dur: 60000; loop: true; easing: linear">
         <a-sphere position="0 9000 0" radius="220"
@@ -195,29 +484,30 @@ $.draw(target => {
         <a-light type="directional" color="#ff9966" intensity="1.2"
                  position="0 9000 0" rotation="-90 0 0"
                  cast-shadow="true"
-                 shadow-camera-left="-3000" shadow-camera-right="3000"
-                 shadow-camera-top="3000"  shadow-camera-bottom="-3000"
-                 shadow-camera-near="500"  shadow-camera-far="16000"
-                 shadow-map-width="1024"   shadow-map-height="1024"></a-light>
+                 shadow-camera-left="${-WH}" shadow-camera-right="${WH}"
+                 shadow-camera-top="${WH}"   shadow-camera-bottom="${-WH}"
+                 shadow-camera-near="500"    shadow-camera-far="16000"
+                 shadow-map-width="1024"     shadow-map-height="1024"></a-light>
       </a-entity>
 
       <a-light type="hemisphere" color="darkorange"
                ground-color="mediumpurple" intensity="0.4"></a-light>
 
-      <a-box position="2500 500 2500"  width="5000" height="1000" depth="5000" color="firebrick" shadow="receive: true"></a-box>
-      <a-box position="2500 1500 2500" width="5000" height="1000" depth="5000" color="gold"      shadow="receive: true"></a-box>
-      <a-box position="2500 2250 2500" width="5000" height="500"  depth="5000"
-             color="dodgerblue" opacity="0.72" transparent="true"             shadow="receive: true"></a-box>
+      <a-box position="${WH} 500 ${WH}"  width="${W}" height="1000" depth="${W}" color="firebrick" shadow="receive: true"></a-box>
+      <a-box position="${WH} 1500 ${WH}" width="${W}" height="1000" depth="${W}" color="gold"      shadow="receive: true"></a-box>
+      <a-box position="${WH} 2250 ${WH}" width="${W}" height="500"  depth="${W}"
+             color="dodgerblue" opacity="0.72" transparent="true"              shadow="receive: true"></a-box>
 
       <a-entity class="perimeter">${renderPerimeter()}</a-entity>
       <a-entity class="terrain-mesh"></a-entity>
+      <a-entity class="tunnels"></a-entity>
       <a-entity class="cloud-platforms"></a-entity>
     </a-scene>
   `
 }, {
   afterUpdate(target) {
-    const { cards } = $.learn()
-    const json = JSON.stringify(cards)
+    const { cards, edgeTypes } = $.learn()
+    const json = JSON.stringify({ cards, edgeTypes })
     if (json === target._lastCards) return
     target._lastCards = json
 
@@ -227,6 +517,14 @@ $.draw(target => {
       if (old) { old.geometry.dispose(); old.material.dispose() }
       const mesh = buildTerrainMesh(cards)
       if (mesh) terrainEl.setObject3D('terrain', mesh)
+    }
+
+    const tunnelsEl = target.querySelector('.tunnels')
+    if (tunnelsEl) {
+      const old = tunnelsEl.getObject3D?.('tunnels')
+      if (old) old.traverse(c => { c.geometry?.dispose(); c.material?.dispose() })
+      const tg = buildTunnelMesh(cards, edgeTypes)
+      if (tg) tunnelsEl.setObject3D('tunnels', tg)
     }
 
     const cloudEl = target.querySelector('.cloud-platforms')
