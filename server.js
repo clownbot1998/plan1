@@ -308,6 +308,7 @@ const NO_COEP_PATHS = ['/app/hail-mary', '/app/ur-shell'];
 const TTYD_BIN = '/home/clownbot/bin/ttyd'
 const SESSION_PORTS = new Map() // sessionName → port
 const partyRooms = new Map()   // partyId → { host, slots[4] }
+const signalRooms = new Map()  // roomId → Map<peerId, ws>
 
 async function spawnTtydSession(sessionName) {
   if (SESSION_PORTS.has(sessionName)) {
@@ -718,6 +719,35 @@ async function handleRequest(request) {
     };
     socket.onerror = socket.onclose;
     return response;
+  }
+
+  // /api/signal — WebRTC signaling relay for board-call proximity voice
+  if (path === '/api/signal' && request.headers.get('upgrade') === 'websocket') {
+    const { socket, response } = Deno.upgradeWebSocket(request)
+    const url = new URL(request.url)
+    const room = url.searchParams.get('room') || 'default'
+    const peer = url.searchParams.get('peer') || ''
+    socket.onopen = () => {
+      if (!signalRooms.has(room)) signalRooms.set(room, new Map())
+      const peers = signalRooms.get(room)
+      socket.send(JSON.stringify({ type: 'peers', peers: [...peers.keys()] }))
+      peers.forEach(ws => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'join', from: peer })) })
+      peers.set(peer, socket)
+    }
+    socket.onmessage = (e) => {
+      let msg; try { msg = JSON.parse(e.data) } catch { return }
+      const target = signalRooms.get(room)?.get(msg.to)
+      if (target?.readyState === WebSocket.OPEN) target.send(JSON.stringify({ ...msg, from: peer }))
+    }
+    socket.onclose = () => {
+      const peers = signalRooms.get(room)
+      if (!peers) return
+      peers.delete(peer)
+      peers.forEach(ws => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'leave', from: peer })) })
+      if (peers.size === 0) signalRooms.delete(room)
+    }
+    socket.onerror = socket.onclose
+    return response
   }
 
   // live reload — trigger broadcast

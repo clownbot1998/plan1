@@ -619,7 +619,7 @@ function physicsLoop(now) {
   _broadcastT += dt
   if (_broadcastT >= 0.1) {
     _broadcastT = 0
-    broadcastElf(tag, { players: { [PLAN98_NODE_ID]: { x: nx, y: ny, z: nz } } }, PLAYERS_MERGE)
+    broadcastElf(tag, { players: { [PLAN98_NODE_ID]: { x: nx, y: ny, z: nz, ts: Date.now() } } }, PLAYERS_MERGE)
   }
 
   requestAnimationFrame(physicsLoop)

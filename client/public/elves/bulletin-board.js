@@ -184,6 +184,16 @@ function clearPresence() {
   broadcastElf(tag, { players: { [PLAN98_NODE_ID]: null } }, PLAYERS_MERGE)
 }
 
+let _viewportBroadcastInterval = null
+function startViewportBroadcast() {
+  if (_viewportBroadcastInterval) return
+  _viewportBroadcastInterval = setInterval(() => {
+    const { panX, panY, mode } = $.learn()
+    if (mode === 'os') return  // generic-park handles 3D position
+    broadcastElf(tag, { players: { [PLAN98_NODE_ID]: { bx: -panX, by: -panY, mode: 'pan', ts: Date.now() } } }, PLAYERS_MERGE)
+  }, 2000)
+}
+
 function applyPeerPositions(cardsLayer, players) {
   // Clear previous peer-drag state
   cardsLayer.querySelectorAll('.card[data-peer-drag]').forEach(el => {
@@ -1374,6 +1384,7 @@ function mount(target) {
     <div class="camera-overlay" data-open="false"></div>
     <div class="park-hud" hidden></div>
     <dialog class="island-dialog"></dialog>
+    <board-call></board-call>
   `
 
   target.querySelector('.bulletin-canvas').style.backgroundImage = stars
@@ -1381,6 +1392,7 @@ function mount(target) {
     wasLoadOps()
     subscribe(target)
     linkState(tag, _boardId)
+    startViewportBroadcast()
     if (!_peerArrowInterval) {
       _peerArrowInterval = setInterval(patchPeerArrows, 83)
     }
