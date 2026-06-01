@@ -32,9 +32,13 @@ const PLAYERS_MERGE = `(state, payload) => {
 }`
 
 // ── inspector ─────────────────────────────────────────────────────────────────
-let _selectedCardId = null
-let _btnPrev        = {}
-let _mouseDownPos   = null
+let _selectedCardId  = null
+let _btnPrev         = {}
+let _mouseDownPos    = null
+let _islandPanelOpen = false
+let _inspectTick     = 0
+
+window.addEventListener('park:panel-state', e => { _islandPanelOpen = !!e.detail.open })
 
 window.addEventListener('keydown', e => { _physKeys[e.code] = true  })
 window.addEventListener('keyup',   e => { _physKeys[e.code] = false })
@@ -359,29 +363,17 @@ function doInspect() {
 
   const pt = hits[0].point
   const { cards } = $.learn()
+  const matchIds = []
   for (const [id, card] of Object.entries(cards)) {
     const b = cardBounds(card)
-    if (pt.x >= b.x && pt.x <= b.x + b.w && pt.z >= b.z && pt.z <= b.z + b.h) {
-      _selectedCardId = id; updateCardHud(); return
-    }
+    if (pt.x >= b.x && pt.x <= b.x + b.w && pt.z >= b.z && pt.z <= b.z + b.h) matchIds.push(id)
   }
-  _selectedCardId = null; updateCardHud()
+  _selectedCardId = matchIds[0] || null
+  updateCardHud(matchIds)
 }
 
-function updateCardHud() {
-  if (!_physTarget) return
-  const hud = _physTarget.querySelector('.card-hud')
-  if (!hud) return
-  if (!_selectedCardId) { hud.hidden = true; return }
-  const { cards } = $.learn()
-  const card = cards[_selectedCardId]
-  if (!card) { hud.hidden = true; return }
-  hud.hidden = false
-  hud.innerHTML = `
-    <div class="hud-inner" style="background:${card.color||'lemonchiffon'}">
-      <strong>${card.name || 'untitled'}</strong>
-      <button class="hud-open" data-id="${_selectedCardId}">open in board ↗</button>
-    </div>`
+function updateCardHud(cardIds = []) {
+  window.dispatchEvent(new CustomEvent('park:inspector', { detail: { cardId: _selectedCardId || null, cardIds } }))
 }
 
 function rebuildCloudColliders(cards) {
@@ -482,7 +474,8 @@ async function initPhysics(target, sx, sy, sz) {
 }
 
 function physicsLoop(now) {
-  if (!_phys || !_physTarget || _physTarget.style.display === 'none') return
+  if (!_phys || !_physTarget) { requestAnimationFrame(physicsLoop); return }
+  if (_physTarget.style.display === 'none') { requestAnimationFrame(physicsLoop); return }
 
   const dt = Math.min((now - _physLastT) / 1000, 0.033)
   _physLastT = now
@@ -509,13 +502,14 @@ function physicsLoop(now) {
   const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw)
   const rgtX =  Math.cos(yaw), rgtZ = -Math.sin(yaw)
 
-  // right stick → camera look (into look-controls' internal objects)
+  // right stick → camera look (into look-controls' internal objects), Y inverted
   const rs_x = checkAxis(0, 2) || 0, rs_y = checkAxis(0, 3) || 0
-  if (Math.abs(rs_x) > 0.1 || Math.abs(rs_y) > 0.1) {
+  const rsActive = Math.abs(rs_x) > 0.1 || Math.abs(rs_y) > 0.1
+  if (rsActive) {
     const lc = cam?.components?.['look-controls']
     if (lc) {
       lc.yawObject.rotation.y   -= rs_x * 2.2 * dt
-      lc.pitchObject.rotation.x -= rs_y * 2.2 * dt
+      lc.pitchObject.rotation.x += rs_y * 2.2 * dt  // inverted: + not -
       lc.pitchObject.rotation.x  = Math.max(-1.0, Math.min(1.0, lc.pitchObject.rotation.x))
     }
   }
@@ -532,14 +526,27 @@ function physicsLoop(now) {
     mz += rgtZ * ls_x - fwdZ * ls_y
   }
 
-  // any gamepad button pressed → inspect
+  // gamepad button logic
   let anyBtnPressed = false
+  let aBtnPressed = false
   for (let b = 0; b < 16; b++) {
     const v = checkButton(0, b) || 0
-    if (v > 0.5 && !(_btnPrev[b] > 0.5)) anyBtnPressed = true
+    const fresh = v > 0.5 && !(_btnPrev[b] > 0.5)
+    if (fresh) { anyBtnPressed = true; if (b === 0) aBtnPressed = true }
     _btnPrev[b] = v
   }
-  if (anyBtnPressed) doInspect()
+  if (_islandPanelOpen) {
+    if (anyBtnPressed) window.dispatchEvent(new CustomEvent('park:close-island'))
+  } else {
+    // raycast every frame while right stick is moving; throttle to ~10fps otherwise
+    if (rsActive) {
+      doInspect()
+    } else {
+      _inspectTick = (_inspectTick || 0) + dt
+      if (_inspectTick > 0.1) { _inspectTick = 0; doInspect() }
+    }
+    if (aBtnPressed && _selectedCardId) window.dispatchEvent(new CustomEvent('park:manage-island', { detail: { cardId: _selectedCardId } }))
+  }
 
   const mlen = Math.hypot(mx, mz)
   const SPEED = 300
@@ -710,7 +717,6 @@ $.draw(target => {
       <a-entity class="cloud-platforms"></a-entity>
       <a-entity class="players"></a-entity>
     </a-scene>
-    <div class="card-hud" hidden></div>
   `
 }, {
   afterUpdate(target) {
@@ -760,29 +766,6 @@ $.draw(target => {
 $.style(`
   & { display: block; width: 100%; height: 100%; position: relative; }
   & a-scene { width: 100% !important; height: 100% !important; display: block; }
-  & .card-hud {
-    position: absolute; bottom: 1rem; right: 1rem; z-index: 10;
-    min-width: 200px; max-width: 320px;
-    pointer-events: auto;
-  }
-  & .hud-inner {
-    padding: .75rem 1rem;
-    border-radius: .5rem;
-    box-shadow: 0 2px 12px rgba(0,0,0,.4);
-    display: flex; flex-direction: column; gap: .5rem;
-    font-family: monospace;
-  }
-  & .hud-open {
-    align-self: flex-end;
-    background: rgba(0,0,0,.15);
-    border: none; border-radius: .25rem;
-    padding: .25rem .6rem; cursor: pointer;
-    font-size: .8rem;
-  }
-  & .hud-open:hover { background: rgba(0,0,0,.3); }
+
 `)
 
-$.when('click', '.hud-open', (e) => {
-  const cardId = e.target.dataset.id
-  window.dispatchEvent(new CustomEvent('park:open-card', { detail: { cardId } }))
-})

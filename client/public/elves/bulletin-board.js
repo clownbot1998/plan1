@@ -109,6 +109,10 @@ const $ = Self(tag, {
   resizing: null,
   mode: 'pan',
   menuOpen: false,
+  parkInspectorId: null,
+  parkInspectorCardIds: [],
+  parkPanelOpen: false,
+  parkPanelCardId: null,
   launchHref: null,
   preLaunchMode: null,
   panX: initialPanX,
@@ -1265,10 +1269,11 @@ $.draw(target => {
 }, { beforeUpdate, afterUpdate })
 
 function beforeUpdate(target) {
-  const { beltGrabbed, mode } = $.learn()
+  const { beltGrabbed, mode, parkPanelOpen } = $.learn()
   target.dataset.belt = beltGrabbed ? 'true' : 'false'
   target.dataset.mode = mode || 'pan'
   target.dataset.os = mode === 'os' ? 'true' : 'false'
+  target.dataset.parkPanel = parkPanelOpen ? 'open' : ''
 }
 
 let _lastCardsJson = null
@@ -1286,12 +1291,38 @@ window.addEventListener('park:ready', () => {
   if (mode === 'os') dispatchParkCards()
 })
 
+window.addEventListener('park:inspector', ({ detail }) => {
+  $.teach({ parkInspectorId: detail.cardId || null, parkInspectorCardIds: detail.cardIds || [] })
+})
+
 window.addEventListener('park:open-card', ({ detail }) => {
-  $.teach({ mode: 'pan', menuOpen: false, linkSource: null, sidebarOpen: true, sidebarCard: detail.cardId })
+  $.teach({ mode: 'pan', menuOpen: false, linkSource: null, sidebarOpen: true, sidebarCard: detail.cardId, parkInspectorId: null })
+})
+
+window.addEventListener('park:manage-island', ({ detail }) => {
+  const { parkInspectorCardIds } = $.learn()
+  const ids = parkInspectorCardIds.length ? parkInspectorCardIds : (detail.cardId ? [detail.cardId] : [])
+  if (!ids.length) return
+  const open = { parkPanelOpen: true, parkPanelCardId: ids.length === 1 ? ids[0] : null }
+  $.teach(open)
+  window.dispatchEvent(new CustomEvent('park:panel-state', { detail: { open: true } }))
+})
+
+window.addEventListener('park:close-island', () => {
+  $.teach({ parkPanelOpen: false, parkPanelCardId: null })
+  window.dispatchEvent(new CustomEvent('park:panel-state', { detail: { open: false } }))
+})
+
+window.addEventListener('park:back-island', () => {
+  $.teach({ parkPanelCardId: null })
+})
+
+window.addEventListener('park:select-island-card', ({ detail }) => {
+  if (detail?.cardId) $.teach({ parkPanelCardId: detail.cardId })
 })
 
 function afterUpdate(target) {
-  const { mode, cards } = $.learn()
+  const { mode, cards, parkPanelOpen } = $.learn()
   const osBtn = target.querySelector('.c-os')
   let park = target.querySelector('.os-overlay')
   const entering = mode === 'os' && !_prevOsMode
@@ -1341,6 +1372,8 @@ function mount(target) {
     </div>
     <div class="card-launch" data-open="false"></div>
     <div class="camera-overlay" data-open="false"></div>
+    <div class="park-hud" hidden></div>
+    <dialog class="island-dialog"></dialog>
   `
 
   target.querySelector('.bulletin-canvas').style.backgroundImage = stars
@@ -1479,6 +1512,89 @@ function update(target) {
       // Patch op-log without full rebuild
       const opLog = sidebarBody.querySelector('.op-log')
       if (opLog && logsOpen) opLog.innerHTML = renderLogsBody(sidebarCard, ops)
+    }
+  }
+
+  // park HUD — rendered above A-Frame canvas
+  const { parkInspectorId, parkInspectorCardIds, parkPanelOpen, parkPanelCardId } = $.learn()
+  const parkHud = target.querySelector('.park-hud')
+  if (parkHud) {
+    const inspCard = parkInspectorId ? cards[parkInspectorId] : null
+    if (inspCard && !parkPanelOpen) {
+      parkHud.hidden = false
+      const bg = inspCard.color || 'lemonchiffon'
+      parkHud.innerHTML = `
+        <div class="park-hud-inner" style="background:${bg}">
+          <strong>${inspCard.name || 'untitled'}</strong>
+          <span class="park-hud-hint">press A to manage island</span>
+        </div>`
+    } else {
+      parkHud.hidden = true
+    }
+  }
+
+  // island dialog — native <dialog> in browser top layer, immune to A-Frame event capture
+  // sig excludes parkInspectorId — that changes 10x/sec and would delete buttons mid-click
+  const islandDialog = target.querySelector('.island-dialog')
+  if (islandDialog) {
+    if (parkPanelOpen) {
+      const cardsSig = parkInspectorCardIds.map(id => `${id}:${cards[id]?.color}`).join(',')
+      const panelSig = `${parkPanelCardId}|${cardsSig}|${inspectorOpen}|${attachmentsOpen}|${logsOpen}`
+      if (islandDialog._panelSig !== panelSig) {
+        islandDialog._panelSig = panelSig
+        const CLOSE = `onclick="window.dispatchEvent(new CustomEvent('park:close-island'))"`
+        const BACK  = `onclick="window.dispatchEvent(new CustomEvent('park:back-island'))"`
+        if (parkPanelCardId) {
+          const card = cards[parkPanelCardId]
+          const cardColor = card?.color || 'lemonchiffon'
+          const cardContrast = contrastColor(cardColor)
+          islandDialog.innerHTML = `
+            <div class="island-panel-inner" style="--sidebar-card-color:${cardColor};--sidebar-card-contrast:${cardContrast}">
+              <div class="island-panel-header" style="background:${cardColor};color:${cardContrast}">
+                <button class="island-panel-btn" ${BACK} style="color:${cardContrast}"><sl-icon name="chevron-left"></sl-icon></button>
+                <strong>${card?.name || 'untitled'}</strong>
+                <button class="island-panel-btn" ${CLOSE} style="color:${cardContrast}">✕</button>
+              </div>
+              <div class="island-panel-body">
+                ${renderSidebarSections(parkPanelCardId, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops)}
+              </div>
+            </div>`
+        } else {
+          const islandCards = parkInspectorCardIds.map(id => cards[id]).filter(Boolean)
+          const anchorCard = islandCards[0]
+          const bg = anchorCard?.color || 'lemonchiffon'
+          const fg = contrastColor(bg)
+          islandDialog.innerHTML = `
+            <div class="island-panel-inner" style="--sidebar-card-color:${bg};--sidebar-card-contrast:${fg}">
+              <div class="island-panel-header" style="background:${bg};color:${fg}">
+                <strong>island (${islandCards.length})</strong>
+                <button class="island-panel-btn" ${CLOSE} style="color:${fg}">✕</button>
+              </div>
+              <ul class="island-card-list">
+                ${parkInspectorCardIds.map(id => {
+                  const c = cards[id]
+                  if (!c) return ''
+                  const cbg = c.color || 'lemonchiffon'
+                  const cfg = contrastColor(cbg)
+                  const SEL = `onclick="window.dispatchEvent(new CustomEvent('park:select-island-card',{detail:{cardId:'${id}'}}))"`
+                  return `<li class="island-card-item" ${SEL} style="background:${cbg};color:${cfg}">
+                    <strong>${c.name || 'untitled'}</strong>
+                    ${c.text ? `<span class="island-card-text">${c.text.slice(0, 80)}${c.text.length > 80 ? '…' : ''}</span>` : ''}
+                  </li>`
+                }).join('')}
+              </ul>
+            </div>`
+        }
+      }
+      if (!islandDialog.open) {
+        islandDialog.showModal()
+        islandDialog.addEventListener('click', e => {
+          if (e.target === islandDialog) window.dispatchEvent(new CustomEvent('park:close-island'))
+        })
+      }
+    } else {
+      islandDialog._panelSig = null
+      if (islandDialog.open) islandDialog.close()
     }
   }
 
@@ -2736,14 +2852,17 @@ $.style(`
     font-weight: 700;
     letter-spacing: .06em;
     text-transform: uppercase;
-    color: rgba(0,0,0,.45);
+    color: color-mix(in srgb, var(--sidebar-card-contrast, #1a1a1a) 50%, transparent);
     text-align: left;
     transition: color .1s, background .1s;
     position: sticky;
     top: 0;
     z-index: 1;
   }
-  & .section-toggle:hover { filter: brightness(.94); color: rgba(0,0,0,.7); }
+  & .section-toggle:hover {
+    filter: brightness(.94);
+    color: color-mix(in srgb, var(--sidebar-card-contrast, #1a1a1a) 80%, transparent);
+  }
 
   & .section-chevron { font-size: .75rem; flex-shrink: 0; }
 
@@ -2987,6 +3106,110 @@ $.style(`
     position: absolute;
     inset: 0;
     z-index: 100;
+  }
+  &[data-park-panel="open"] .os-overlay {
+    pointer-events: none;
+  }
+
+  & .park-hud {
+    position: fixed;
+    bottom: 1.5rem; left: 1.5rem;
+    z-index: 9999;
+    min-width: 200px; max-width: 320px;
+    pointer-events: auto;
+  }
+  & .park-hud-inner {
+    padding: .75rem 1rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,.4);
+    display: flex; flex-direction: column; gap: .75rem;
+    font-family: monospace;
+  }
+  & .park-hud-hint {
+    align-self: flex-end;
+    font-size: .75rem;
+    opacity: .6;
+    font-family: monospace;
+  }
+
+  & .island-dialog {
+    position: fixed;
+    top: 0; right: 0; bottom: 0; left: auto;
+    width: min(360px, 100%);
+    height: 100%;
+    max-height: 100%;
+    border: none;
+    padding: 0;
+    margin: 0;
+    display: none;
+    flex-direction: column;
+  }
+  & .island-dialog[open] { display: flex; }
+  & .island-dialog::backdrop { background: transparent; }
+  & .island-panel-inner {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: color-mix(in srgb, var(--sidebar-card-color, lemonchiffon) 10%, white);
+    box-shadow: -4px 0 24px rgba(0,0,0,.4);
+    overflow: hidden;
+  }
+  & .island-panel-header {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .5rem .75rem;
+    background: var(--sidebar-card-color, lemonchiffon);
+    border-bottom: 1px solid rgba(0,0,0,.1);
+    flex-shrink: 0;
+    font-family: 'Recursive', sans-serif;
+    font-size: .8rem;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--sidebar-card-contrast, #1a1a1a);
+  }
+  & .island-panel-header strong { flex: 1; }
+  & .island-panel-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--sidebar-card-contrast, #1a1a1a);
+    opacity: .5;
+    font-size: .9rem;
+    padding: .1rem .3rem;
+    line-height: 1;
+    border-radius: 2px;
+    transition: opacity .1s;
+    display: flex; align-items: center;
+  }
+  & .island-panel-btn:hover { opacity: 1; }
+  & .island-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+  }
+  & .island-card-list {
+    list-style: none;
+    margin: 0; padding: .5rem;
+    display: flex; flex-direction: column; gap: .5rem;
+  }
+  & .island-card-item {
+    padding: .75rem 1rem;
+    cursor: pointer;
+    display: flex; flex-direction: column; gap: .25rem;
+    font-family: monospace;
+    border: 1px solid rgba(0,0,0,.1);
+  }
+  & .island-card-item:hover { filter: brightness(0.95); }
+  & .island-card-item strong { font-size: .95rem; }
+  & .island-card-text {
+    font-size: .75rem;
+    opacity: .7;
+    white-space: pre-wrap;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
 
   & .camera-overlay {
