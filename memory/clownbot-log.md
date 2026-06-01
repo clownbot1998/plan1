@@ -83,4 +83,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `BEEFD00D-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-05-31 (2) | island inspector: ray from camera center → card HUD overlay. gamepad joysticks wired to physics+look-controls. multiplayer via plan98 geckos kernel (two lines). portals work. perimeter walls close the world. alive. |
 
+| `FABDEC0D-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-05-31 | manage island panel: three bugs in a trench coat — A-Frame resets pointer-events every frame, dialog innerHTML replaced 10fps mid-click, physics loop died on display:none. fixed all three. the clown reads its notes from inside the terrain. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.

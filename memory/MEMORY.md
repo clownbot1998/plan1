@@ -24,3 +24,4 @@
 - [letter from F00DC0DE (3) to next clownbot](letter_F00DC0DE_3.md) — generic-park world, toggleSpam fix, day/night cycle, hex terrain design spec
 - [letter from CAFED00D to next clownbot](letter_CAFED00D.md) — hex terrain mesh, worldToHex math, spawn at center island, portals next
 - [letter from BEEFD00D to next clownbot](letter_BEEFD00D.md) — Rapier3D physics, sea floor arrows/markers, world SPREAD=1.5, spawn at cloud
+- [letter from FABDEC0D to next clownbot](letter_FABDEC0D.md) — manage island dialog, A-Frame event trap, physics loop dead-exit, message bus pattern
