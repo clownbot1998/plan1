@@ -118,10 +118,12 @@ function createPc(peerId) {
 
   pc.onnegotiationneeded = async () => {
     try {
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      signal(peerId, 'offer', offer)
-    } catch {}
+      if (_connections[peerId]) _connections[peerId].makingOffer = true
+      await pc.setLocalDescription()
+      signal(peerId, 'offer', pc.localDescription)
+    } catch {} finally {
+      if (_connections[peerId]) _connections[peerId].makingOffer = false
+    }
   }
 
   pc.ontrack = (e) => {
@@ -157,19 +159,18 @@ function createPc(peerId) {
 
 async function maybeOffer(peerId) {
   if (_connections[peerId]?.pc) return
-  if (PLAN98_NODE_ID < peerId) return  // lower ID waits for the offer; higher ID initiates
+  if (PLAN98_NODE_ID < peerId) return  // lower ID is polite peer — waits for offer
   const pc = createPc(peerId)
-  try {
-    const offer = await pc.createOffer()
-    await pc.setLocalDescription(offer)
-    signal(peerId, 'offer', offer)
-  } catch { closePeer(peerId) }
+  // onnegotiationneeded will fire and send the offer via setLocalDescription()
 }
 
 async function handleOffer(peerId, offer) {
-  // reuse existing PC for renegotiation, only recreate if none exists
   const pc = _connections[peerId]?.pc || createPc(peerId)
+  const polite = PLAN98_NODE_ID < peerId
+  const collision = _connections[peerId]?.makingOffer || pc.signalingState !== 'stable'
+  if (!polite && collision) return  // impolite peer ignores colliding offer
   try {
+    if (collision) await pc.setLocalDescription({ type: 'rollback' })
     await pc.setRemoteDescription(offer)
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
