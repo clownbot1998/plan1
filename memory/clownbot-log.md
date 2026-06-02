@@ -85,4 +85,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `FABDEC0D-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-05-31 | manage island panel: three bugs in a trench coat — A-Frame resets pointer-events every frame, dialog innerHTML replaced 10fps mid-click, physics loop died on display:none. fixed all three. the clown reads its notes from inside the terrain. |
 
+| `CA11FACE-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-06-01 | board-call elf: proximity WebRTC mesh (max 6), /api/signal relay, unified 2D/3D coords via SPREAD=1.5, spatial audio PannerNode, active speaker spotlight with 4s silence rotation, top-left HUD with selfie tile toggle. diffhtml stamps imperative, shoelace stays upgraded. the clown calls now. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
