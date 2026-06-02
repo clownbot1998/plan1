@@ -531,19 +531,21 @@ function afterUpdate(target) {
   let picker = hud.querySelector('.device-picker')
   if (devicePicker) {
     const devices = devicePicker === 'audio' ? _audioDevices : _videoDevices
+    const selectedId = devicePicker === 'audio' ? _selectedAudioId : _selectedVideoId
     if (!picker) {
       picker = document.createElement('div')
       picker.className = 'device-picker'
-      hud.insertBefore(picker, bar)
+      hud.appendChild(picker)
     }
-    const selectedId = devicePicker === 'audio' ? _selectedAudioId : _selectedVideoId
     picker.innerHTML = `
-      ${devices.length
-        ? devices.map(d => `<button data-device-id="${d.deviceId}" data-device-kind="${d.kind}"
-            class="${d.deviceId === selectedId ? 'active' : ''}"
-          >${d.label || (devicePicker === 'audio' ? 'Microphone' : 'Camera')}</button>`).join('')
-        : `<span class="picker-empty">${devicePicker === 'audio' ? 'no mics found' : 'no cameras found'}</span>`}
-      <button data-picker-close class="picker-close">✕</button>
+      <button data-picker-close class="picker-close"><sl-icon name="x-lg"></sl-icon></button>
+      <div class="picker-list">
+        ${devices.length
+          ? devices.map(d => `<button data-device-id="${d.deviceId}" data-device-kind="${d.kind}"
+              class="picker-item${d.deviceId === selectedId ? ' active' : ''}"
+            >${d.label || (devicePicker === 'audio' ? 'Microphone' : 'Camera')}</button>`).join('')
+          : `<span class="picker-empty">${devicePicker === 'audio' ? 'no mics found' : 'no cameras found'}</span>`}
+      </div>
     `
   } else if (picker) {
     picker.remove()
@@ -617,6 +619,7 @@ $.style(`
     flex-direction: column;
     gap: 0.5rem;
     pointer-events: auto;
+    position: relative;
   }
   & .hud.visible { display: flex; }
 
@@ -701,42 +704,64 @@ $.style(`
   }
 
   & .device-picker {
+    position: absolute;
+    top: calc(100% + 0.4rem);
+    left: 0;
+    background: lemonchiffon;
+    border-radius: 2px;
+    padding: 0.5rem 0.65rem 0.65rem;
+    min-width: 200px;
+    max-width: 280px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 3px 8px rgba(0,0,0,.08), 0 6px 20px rgba(0,0,0,.06);
+    z-index: 10;
+  }
+  & .picker-close {
+    position: absolute;
+    top: 0.3rem;
+    right: 0.3rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: rgba(0,0,0,.35);
+    font-size: 0.65rem;
+    padding: 0.15rem 0.25rem;
+    width: auto;
+    height: auto;
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+    line-height: 1;
+  }
+  & .picker-close:hover { color: rgba(0,0,0,.7); }
+  & .picker-list {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
-    background: rgba(0,0,0,.85);
-    border-radius: 0.5rem;
-    padding: 0.4rem;
-    min-width: 160px;
-    max-width: 240px;
+    gap: 0.15rem;
+    margin-top: 0.5rem;
   }
-  & .device-picker button {
-    background: rgba(255,255,255,.07);
+  & .picker-item {
+    background: none;
     border: none;
-    color: rgba(255,255,255,.8);
-    font-size: 0.7rem;
-    padding: 0.35rem 0.6rem;
-    border-radius: 0.35rem;
     cursor: pointer;
+    color: dodgerblue;
+    font-family: monospace;
+    font-size: 0.72rem;
+    padding: 0.2rem 0.1rem;
     text-align: left;
     width: auto;
     height: auto;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    border-radius: 2px;
   }
-  & .device-picker button:hover { background: rgba(255,255,255,.15); }
-  & .device-picker button.active { outline: 1px solid rgba(255,255,255,.4); }
-  & .device-picker .picker-close {
-    align-self: flex-end;
-    color: rgba(255,255,255,.4);
-    font-size: 0.6rem;
-    padding: 0.2rem 0.4rem;
-  }
-  & .device-picker .picker-empty {
-    color: rgba(255,255,255,.35);
-    font-size: 0.65rem;
-    padding: 0.3rem 0.5rem;
+  & .picker-item:hover { text-decoration: underline; }
+  & .picker-item.active { font-weight: bold; }
+  & .picker-empty {
+    color: rgba(0,0,0,.4);
+    font-family: monospace;
+    font-size: 0.7rem;
+    padding: 0.2rem 0.1rem;
   }
 
   & .spotlight {
