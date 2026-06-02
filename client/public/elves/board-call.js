@@ -9,7 +9,10 @@ const MAX_PEERS = 6
 const HYSTERESIS = 1.3
 const RECONNECT_COOLDOWN = 5000
 const SAMPLE_RATE = 48000
-const ICE = [{ urls: 'stun:stun.l.google.com:19302' }]
+const ICE = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+]
 
 const _boardId = new URLSearchParams(window.location.search).get('id') || 'default'
 
@@ -86,7 +89,7 @@ function connectSignal() {
   _ws.onmessage = (e) => {
     let msg; try { msg = JSON.parse(e.data) } catch { return }
     const { type, from, peers, data } = msg
-    if (type === 'peers')  { peers.forEach(id => _roomPeers.add(id)) }
+    if (type === 'peers')  { peers.forEach(id => { _roomPeers.add(id); maybeOffer(id) }) }
     else if (type === 'join')   { _roomPeers.add(from); maybeOffer(from) }
     else if (type === 'leave')  { _roomPeers.delete(from); closePeer(from) }
     else if (type === 'offer')  { handleOffer(from, data) }
@@ -104,7 +107,7 @@ function signal(to, type, data) {
 // ── peer connections ──────────────────────────────────────────────────────────
 
 function createPc(peerId) {
-  const pc = new RTCPeerConnection({ iceServers: ICE })
+  const pc = new RTCPeerConnection({ iceServers: ICE, iceCandidatePoolSize: 2 })
   if (_localStream) _localStream.getTracks().forEach(t => pc.addTrack(t, _localStream))
 
   pc.onicecandidate = (e) => { if (e.candidate) signal(peerId, 'ice', e.candidate) }
