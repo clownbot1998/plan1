@@ -255,26 +255,29 @@ function updateSpeaker() {
 // ── camera toggle ─────────────────────────────────────────────────────────────
 
 async function toggleCamera(target) {
-  const { cameraOn } = $.learn()
+  const { cameraOn, muted } = $.learn()
   const next = !cameraOn
 
-  if (_localStream) {
-    _localStream.getTracks().forEach(t => t.stop())
-    _localStream = null
-  }
-
   if (next) {
-    _localStream = await getLocalStream(true)
-    if (!_localStream) return
+    if (_localStream) {
+      // already have audio — add video track only
+      try {
+        const vs = await navigator.mediaDevices.getUserMedia({ video: videoConstraints() })
+        vs.getVideoTracks().forEach(t => _localStream.addTrack(t))
+      } catch { return }
+    } else {
+      _localStream = await getLocalStream(true)
+      if (!_localStream) return
+    }
+    if (_localStream) _localStream.getAudioTracks().forEach(t => { t.enabled = !muted })
+  } else {
+    // stop only video; keep audio alive
+    if (_localStream) _localStream.getVideoTracks().forEach(t => { t.stop(); _localStream.removeTrack(t) })
   }
 
-  const { muted } = $.learn()
-  if (_localStream) _localStream.getAudioTracks().forEach(t => { t.enabled = !muted })
-
-  // teach after stream is ready so afterUpdate sees _localStream populated
   $.teach({ cameraOn: next })
 
-  // replace tracks in all open peer connections
+  // replace/add tracks in all open peer connections
   if (_localStream) {
     for (const [, conn] of Object.entries(_connections)) {
       if (!conn.pc) continue
@@ -291,10 +294,6 @@ async function toggleCamera(target) {
 // ── init ──────────────────────────────────────────────────────────────────────
 
 async function init(target) {
-  _localStream = await getLocalStream(false)  // audio only on start
-  if (_localStream) {
-    _localStream.getAudioTracks().forEach(t => { t.enabled = !$.learn().muted })
-  }
   connectSignal()
   linkState(tag, _boardId)
   setInterval(updateProximity, 2000)
@@ -445,8 +444,18 @@ $.when('click', '[data-toggle]', () => {
   $.teach({ expanded: !$.learn().expanded })
 })
 
-$.when('click', '[data-mute]', () => {
+$.when('click', '[data-mute]', async () => {
   const next = !$.learn().muted
+  if (!next && !_localStream) {
+    // first unmute — acquire audio stream now
+    _localStream = await getLocalStream($.learn().cameraOn)
+    if (!_localStream) return
+    // add tracks to any open peer connections
+    for (const [, conn] of Object.entries(_connections)) {
+      if (!conn.pc) continue
+      _localStream.getTracks().forEach(t => conn.pc.addTrack(t, _localStream))
+    }
+  }
   $.teach({ muted: next })
   if (_localStream) _localStream.getAudioTracks().forEach(t => { t.enabled = !next })
 })
