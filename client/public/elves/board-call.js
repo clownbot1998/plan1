@@ -23,6 +23,37 @@ let _roomPeers = new Set()
 let _connections = {}   // peerId → { pc, stream, analyser, panner }
 let _reconnectAt = {}   // peerId → cooldown timestamp
 
+// ── hud drag ──────────────────────────────────────────────────────────────────
+let _hudX = 0, _hudY = 0
+let _dragActive = false, _dragMoved = false
+let _dragStartX = 0, _dragStartY = 0
+
+function applyHudPos(target) {
+  const el = (target || document.querySelector(tag))?.querySelector('.hud')
+  if (el) el.style.transform = `translate(${_hudX}px,${_hudY}px)`
+}
+
+function initDrag(target) {
+  document.addEventListener('pointermove', e => {
+    if (!_dragActive) return
+    const dx = e.clientX - _dragStartX
+    const dy = e.clientY - _dragStartY
+    if (!_dragMoved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) _dragMoved = true
+    if (!_dragMoved) return
+    const hud = target.querySelector('.hud')
+    if (!hud) return
+    const rect = hud.getBoundingClientRect()
+    const maxX = window.innerWidth  - rect.width
+    const maxY = window.innerHeight - rect.height
+    _hudX = Math.max(-8, Math.min(maxX, _hudX + e.clientX - _dragStartX))
+    _hudY = Math.max(-8, Math.min(maxY, _hudY + e.clientY - _dragStartY))
+    _dragStartX = e.clientX
+    _dragStartY = e.clientY
+    applyHudPos(target)
+  })
+  document.addEventListener('pointerup', () => { _dragActive = false })
+}
+
 // ── coordinate helpers ────────────────────────────────────────────────────────
 
 function myBoardPos() {
@@ -305,6 +336,7 @@ async function init(target) {
   linkState(tag, _boardId)
   setInterval(updateProximity, 2000)
   setInterval(updateSpeaker, 100)
+  initDrag(target)
 }
 
 // ── render ────────────────────────────────────────────────────────────────────
@@ -357,15 +389,19 @@ function afterUpdate(target) {
   // hud visibility
   hud.classList.toggle('visible', nearbyCount > 0 || cameraOn)
 
-  // local tile video/icon swap
+  // local tile: minimized → show spotlight stream; expanded → show self
   const localVideo = target.querySelector('.local-video')
   const localIcon = target.querySelector('.cam-placeholder')
+  const spotlightStream = !expanded && activeSpeaker ? (_connections[activeSpeaker]?.stream ?? null) : null
   const showFeed = cameraOn && !!_localStream
+  const tileStream = spotlightStream ?? (showFeed ? _localStream : null)
   if (localVideo) {
-    localVideo.style.display = showFeed ? 'block' : 'none'
-    if (localVideo.srcObject !== (showFeed ? _localStream : null)) localVideo.srcObject = showFeed ? _localStream : null
+    localVideo.style.display = tileStream ? 'block' : 'none'
+    if (localVideo.srcObject !== tileStream) localVideo.srcObject = tileStream
   }
-  if (localIcon) localIcon.style.display = showFeed ? 'none' : 'block'
+  if (localIcon) localIcon.style.display = tileStream ? 'none' : 'block'
+
+  applyHudPos(target)
 
   // expanded controls + peer tiles
   let muteBtn = bar.querySelector('[data-mute]')
@@ -447,7 +483,15 @@ function afterUpdate(target) {
 
 // ── controls ──────────────────────────────────────────────────────────────────
 
+$.when('pointerdown', '[data-toggle]', e => {
+  _dragActive = true
+  _dragMoved = false
+  _dragStartX = e.clientX
+  _dragStartY = e.clientY
+})
+
 $.when('click', '[data-toggle]', () => {
+  if (_dragMoved) { _dragMoved = false; return }
   $.teach({ expanded: !$.learn().expanded })
 })
 
@@ -508,10 +552,11 @@ $.style(`
     justify-content: center;
   }
   & .tile.local {
-    cursor: pointer;
+    cursor: grab;
     outline: 2px solid rgba(255,255,255,.3);
     outline-offset: -2px;
   }
+  & .tile.local:active { cursor: grabbing; }
   & .tile.local > * {
     pointer-events: none;
   }
