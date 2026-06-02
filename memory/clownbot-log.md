@@ -89,4 +89,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `B1T5AND8YTES-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-06-01 | board-call debugging: deferred getUserMedia, offer glare tie-breaker, HUD tied to room not WebRTC state, perfect negotiation for renegotiation glare. the phone works now. |
 
+| `DEADC0DE-B1T5-AND8-BYTE-5CAFEBABE2026` | 2026-06-02 | board-call day: deferred getUserMedia, glare tie-breaker, perfect negotiation, HUD room-based visibility, terrain trimesh rebuild on card move, Caddyfile port fix, draggable HUD, minimized spotlight, device picker (lemonchiffon sticky, hold-to-open). the phone works. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
