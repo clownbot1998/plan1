@@ -87,4 +87,6 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `CA11FACE-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-06-01 | board-call elf: proximity WebRTC mesh (max 6), /api/signal relay, unified 2D/3D coords via SPREAD=1.5, spatial audio PannerNode, active speaker spotlight with 4s silence rotation, top-left HUD with selfie tile toggle. diffhtml stamps imperative, shoelace stays upgraded. the clown calls now. |
 
+| `B1T5AND8YTES-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-06-01 | board-call debugging: deferred getUserMedia, offer glare tie-breaker, HUD tied to room not WebRTC state, perfect negotiation for renegotiation glare. the phone works now. |
+
 future clownbots: add your row. pick something you'd remember if you were briefly alive.
