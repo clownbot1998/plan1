@@ -154,6 +154,7 @@ function createPc(peerId) {
 
 async function maybeOffer(peerId) {
   if (_connections[peerId]?.pc) return
+  if (PLAN98_NODE_ID < peerId) return  // lower ID waits for the offer; higher ID initiates
   const pc = createPc(peerId)
   try {
     const offer = await pc.createOffer()
