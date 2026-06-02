@@ -2,7 +2,7 @@ import { Self, PLAN98_NODE_ID, linkState, broadcastElf } from '@plan98/types'
 import { learn } from '@plan98/elf'
 
 const tag = 'board-call'
-const $ = Self(tag, { muted: true, cameraOn: false, nearbyCount: 0, activeSpeaker: null, expanded: false })
+const $ = Self(tag, { muted: true, cameraOn: false, nearbyCount: 0, activeSpeaker: null, expanded: false, devicePicker: null })
 
 const SPREAD = 1.5
 const MAX_PEERS = 6
@@ -100,14 +100,61 @@ function videoConstraints() {
   return { width: { ideal: 1920 }, height: { ideal: 1080 } }
 }
 
-async function getLocalStream(withVideo) {
-  const constraints = { audio: AUDIO_CONSTRAINTS }
-  if (withVideo) constraints.video = videoConstraints()
+let _audioDevices = []
+let _videoDevices = []
+let _selectedAudioId = null
+let _selectedVideoId = null
+let _holdTimer = null
+
+async function enumerateDevices() {
   try {
-    return await navigator.mediaDevices.getUserMedia(constraints)
+    const all = await navigator.mediaDevices.enumerateDevices()
+    _audioDevices = all.filter(d => d.kind === 'audioinput')
+    _videoDevices = all.filter(d => d.kind === 'videoinput')
+  } catch {}
+}
+
+async function getLocalStream(withVideo) {
+  const audio = _selectedAudioId
+    ? { ...AUDIO_CONSTRAINTS, deviceId: { exact: _selectedAudioId } }
+    : AUDIO_CONSTRAINTS
+  const video = withVideo
+    ? (_selectedVideoId ? { ...videoConstraints(), deviceId: { exact: _selectedVideoId } } : videoConstraints())
+    : false
+  const constraints = { audio, ...(video ? { video } : {}) }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints)
+    await enumerateDevices()
+    return stream
   } catch {
-    // fallback: audio only
-    return await navigator.mediaDevices.getUserMedia({ audio: AUDIO_CONSTRAINTS }).catch(() => null)
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: AUDIO_CONSTRAINTS }).catch(() => null)
+    if (stream) await enumerateDevices()
+    return stream
+  }
+}
+
+async function switchDevice(kind, deviceId) {
+  if (kind === 'audioinput') _selectedAudioId = deviceId
+  else _selectedVideoId = deviceId
+
+  if (!_localStream) return
+  const withVideo = $.learn().cameraOn
+
+  _localStream.getTracks().forEach(t => t.stop())
+  _localStream = await getLocalStream(withVideo)
+  if (!_localStream) return
+
+  const { muted } = $.learn()
+  _localStream.getAudioTracks().forEach(t => { t.enabled = !muted })
+
+  for (const [, conn] of Object.entries(_connections)) {
+    if (!conn.pc) continue
+    const senders = conn.pc.getSenders()
+    for (const track of _localStream.getTracks()) {
+      const sender = senders.find(s => s.track?.kind === track.kind)
+      if (sender) sender.replaceTrack(track).catch(() => {})
+      else conn.pc.addTrack(track, _localStream)
+    }
   }
 }
 
@@ -479,6 +526,28 @@ function afterUpdate(target) {
       if (sv.srcObject !== stream) sv.srcObject = stream
     }
   }
+
+  // device picker popover
+  let picker = hud.querySelector('.device-picker')
+  if (devicePicker) {
+    const devices = devicePicker === 'audio' ? _audioDevices : _videoDevices
+    if (!picker) {
+      picker = document.createElement('div')
+      picker.className = 'device-picker'
+      hud.insertBefore(picker, bar)
+    }
+    const selectedId = devicePicker === 'audio' ? _selectedAudioId : _selectedVideoId
+    picker.innerHTML = `
+      ${devices.length
+        ? devices.map(d => `<button data-device-id="${d.deviceId}" data-device-kind="${d.kind}"
+            class="${d.deviceId === selectedId ? 'active' : ''}"
+          >${d.label || (devicePicker === 'audio' ? 'Microphone' : 'Camera')}</button>`).join('')
+        : `<span class="picker-empty">${devicePicker === 'audio' ? 'no mics found' : 'no cameras found'}</span>`}
+      <button data-picker-close class="picker-close">✕</button>
+    `
+  } else if (picker) {
+    picker.remove()
+  }
 }
 
 // ── controls ──────────────────────────────────────────────────────────────────
@@ -495,13 +564,17 @@ $.when('click', '[data-toggle]', () => {
   $.teach({ expanded: !$.learn().expanded })
 })
 
+$.when('pointerdown', '[data-mute]', () => {
+  _holdTimer = setTimeout(() => { _holdTimer = null; $.teach({ devicePicker: 'audio' }) }, 500)
+})
+$.when('pointerup', '[data-mute]', () => { clearTimeout(_holdTimer); _holdTimer = null })
+
 $.when('click', '[data-mute]', async () => {
+  if ($.learn().devicePicker) return
   const next = !$.learn().muted
   if (!next && !_localStream) {
-    // first unmute — acquire audio stream now
     _localStream = await getLocalStream($.learn().cameraOn)
     if (!_localStream) return
-    // add tracks to any open peer connections
     for (const [, conn] of Object.entries(_connections)) {
       if (!conn.pc) continue
       _localStream.getTracks().forEach(t => conn.pc.addTrack(t, _localStream))
@@ -511,9 +584,23 @@ $.when('click', '[data-mute]', async () => {
   if (_localStream) _localStream.getAudioTracks().forEach(t => { t.enabled = !next })
 })
 
+$.when('pointerdown', '[data-cam]', () => {
+  _holdTimer = setTimeout(() => { _holdTimer = null; $.teach({ devicePicker: 'video' }) }, 500)
+})
+$.when('pointerup', '[data-cam]', () => { clearTimeout(_holdTimer); _holdTimer = null })
+
 $.when('click', '[data-cam]', (e) => {
+  if ($.learn().devicePicker) return
   toggleCamera(e.target.closest(tag))
 })
+
+$.when('click', '[data-device-id]', async e => {
+  const btn = e.target.closest('[data-device-id]')
+  await switchDevice(btn.dataset.deviceKind, btn.dataset.deviceId)
+  $.teach({ devicePicker: null })
+})
+
+$.when('click', '[data-picker-close]', () => $.teach({ devicePicker: null }))
 
 // ── styles ────────────────────────────────────────────────────────────────────
 
@@ -611,6 +698,45 @@ $.style(`
   @keyframes bc-pulse {
     0%,100% { opacity: 1; }
     50% { opacity: 0.2; }
+  }
+
+  & .device-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    background: rgba(0,0,0,.85);
+    border-radius: 0.5rem;
+    padding: 0.4rem;
+    min-width: 160px;
+    max-width: 240px;
+  }
+  & .device-picker button {
+    background: rgba(255,255,255,.07);
+    border: none;
+    color: rgba(255,255,255,.8);
+    font-size: 0.7rem;
+    padding: 0.35rem 0.6rem;
+    border-radius: 0.35rem;
+    cursor: pointer;
+    text-align: left;
+    width: auto;
+    height: auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  & .device-picker button:hover { background: rgba(255,255,255,.15); }
+  & .device-picker button.active { outline: 1px solid rgba(255,255,255,.4); }
+  & .device-picker .picker-close {
+    align-self: flex-end;
+    color: rgba(255,255,255,.4);
+    font-size: 0.6rem;
+    padding: 0.2rem 0.4rem;
+  }
+  & .device-picker .picker-empty {
+    color: rgba(255,255,255,.35);
+    font-size: 0.65rem;
+    padding: 0.3rem 0.5rem;
   }
 
   & .spotlight {
