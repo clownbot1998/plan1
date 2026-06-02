@@ -428,7 +428,7 @@ $.draw(target => {
 }, { afterUpdate })
 
 function afterUpdate(target) {
-  const { muted, cameraOn, nearbyCount, activeSpeaker, expanded } = $.learn()
+  const { muted, cameraOn, nearbyCount, activeSpeaker, expanded, devicePicker } = $.learn()
   const hud = target.querySelector('.hud')
   const bar = target.querySelector('.bar')
   if (!hud || !bar) return
