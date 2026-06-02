@@ -145,6 +145,7 @@ function createPc(peerId) {
   }
 
   pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected') $.teach({ nearbyCount: Object.keys(_connections).length })
     if (pc.connectionState === 'failed' || pc.connectionState === 'closed') closePeer(peerId)
   }
 
