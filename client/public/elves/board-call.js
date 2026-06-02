@@ -80,6 +80,10 @@ async function getLocalStream(withVideo) {
   }
 }
 
+function syncRoomCount() {
+  $.teach({ nearbyCount: Math.max(_roomPeers.size, Object.keys(_connections).length) })
+}
+
 // ── signaling ─────────────────────────────────────────────────────────────────
 
 function connectSignal() {
@@ -89,9 +93,9 @@ function connectSignal() {
   _ws.onmessage = (e) => {
     let msg; try { msg = JSON.parse(e.data) } catch { return }
     const { type, from, peers, data } = msg
-    if (type === 'peers')  { peers.forEach(id => { _roomPeers.add(id); maybeOffer(id) }) }
-    else if (type === 'join')   { _roomPeers.add(from); maybeOffer(from) }
-    else if (type === 'leave')  { _roomPeers.delete(from); closePeer(from) }
+    if (type === 'peers')  { peers.forEach(id => { _roomPeers.add(id); maybeOffer(id) }); syncRoomCount() }
+    else if (type === 'join')   { _roomPeers.add(from); maybeOffer(from); syncRoomCount() }
+    else if (type === 'leave')  { _roomPeers.delete(from); closePeer(from); syncRoomCount() }
     else if (type === 'offer')  { handleOffer(from, data) }
     else if (type === 'answer') { _connections[from]?.pc?.setRemoteDescription(data).catch(() => {}) }
     else if (type === 'ice')    { _connections[from]?.pc?.addIceCandidate(data).catch(() => {}) }
@@ -141,11 +145,9 @@ function createPc(peerId) {
       _connections[peerId] = { ..._connections[peerId], stream }
     }
     placePanner(peerId)
-    $.teach({ nearbyCount: Object.keys(_connections).length })
   }
 
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'connected') $.teach({ nearbyCount: Object.keys(_connections).length })
     if (pc.connectionState === 'failed' || pc.connectionState === 'closed') closePeer(peerId)
   }
 
@@ -181,7 +183,6 @@ function closePeer(peerId) {
   conn.pc?.close()
   delete _connections[peerId]
   _reconnectAt[peerId] = Date.now() + RECONNECT_COOLDOWN
-  $.teach({ nearbyCount: Object.keys(_connections).length })
 }
 
 // ── proximity engine ──────────────────────────────────────────────────────────
