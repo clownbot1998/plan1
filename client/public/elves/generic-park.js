@@ -402,6 +402,27 @@ function rebuildCloudColliders(cards) {
   }
 }
 
+function rebuildTerrainCollider(world) {
+  if (!_terrainGeoData) return
+  const w = world || _phys?.world
+  if (!w) return
+
+  if (_phys?.terrainCollider) w.removeCollider(_phys.terrainCollider, false)
+  if (_phys?.terrainBody)     w.removeRigidBody(_phys.terrainBody)
+
+  const { positions: lp, indices } = _terrainGeoData
+  const verts = new Float32Array(lp.length)
+  for (let i = 0; i < lp.length; i += 3) {
+    verts[i]   = lp[i]   + WORLD / 2
+    verts[i+1] = lp[i+1]
+    verts[i+2] = lp[i+2] + WORLD / 2
+  }
+  const terrainBody     = w.createRigidBody(RAPIER.RigidBodyDesc.fixed())
+  const terrainCollider = w.createCollider(RAPIER.ColliderDesc.trimesh(verts, indices), terrainBody)
+
+  if (_phys) { _phys.terrainBody = terrainBody; _phys.terrainCollider = terrainCollider }
+}
+
 async function initPhysics(target, sx, sy, sz) {
   if (_phys) { try { _phys.world.free() } catch(_) {} }
   _phys = null
@@ -416,20 +437,9 @@ async function initPhysics(target, sx, sy, sz) {
 
   const world = new RAPIER.World({ x: 0, y: -220, z: 0 })
 
-  // terrain trimesh — transform local → world space
-  if (_terrainGeoData) {
-    const { positions: lp, indices } = _terrainGeoData
-    const verts = new Float32Array(lp.length)
-    for (let i = 0; i < lp.length; i += 3) {
-      verts[i]   = lp[i]   + WORLD / 2
-      verts[i+1] = lp[i+1]
-      verts[i+2] = lp[i+2] + WORLD / 2
-    }
-    world.createCollider(
-      RAPIER.ColliderDesc.trimesh(verts, indices),
-      world.createRigidBody(RAPIER.RigidBodyDesc.fixed()),
-    )
-  }
+  // terrain trimesh — stored on _phys so rebuildTerrainCollider can swap it
+  _phys = { world, body: null, collider: null, ctrl: null, terrainBody: null, terrainCollider: null }
+  rebuildTerrainCollider(world)
 
   // sea floor slab
   world.createCollider(
@@ -461,7 +471,7 @@ async function initPhysics(target, sx, sy, sz) {
     world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(cx,cy,cz)),
   ))
 
-  _phys = { world, body, collider, ctrl }
+  Object.assign(_phys, { body, collider, ctrl })
   _physVel = { x: 0, y: 0, z: 0 }
   _physLastT = performance.now()
 
@@ -742,6 +752,7 @@ $.draw(target => {
       if (old) { old.geometry.dispose(); old.material.dispose() }
       const mesh = buildTerrainMesh(cards)
       if (mesh) terrainEl.setObject3D('terrain', mesh)
+      rebuildTerrainCollider()
     }
 
     const tunnelsEl = target.querySelector('.tunnels')
