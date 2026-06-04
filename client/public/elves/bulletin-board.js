@@ -447,9 +447,9 @@ function subscribe(target) {
             const host = document.querySelector(tag)
             const w = host ? host.clientWidth : window.innerWidth
             const h = host ? host.clientHeight : window.innerHeight
+            const { zoom } = $.learn()
             $.teach({
-              panX: w / 2 - (card.x + card.w / 2),
-              panY: h / 2 - (card.y + card.h / 2),
+              ...clampPan(w / 2 - (card.x + card.w / 2) * zoom, h / 2 - (card.y + card.h / 2) * zoom, zoom),
               focusedCard: _permalinkCard,
             })
           }
@@ -612,7 +612,7 @@ function createEdgeType(name, color = 'dodgerblue') {
 }
 
 function panToCard(cardId) {
-  const { cards } = $.learn()
+  const { cards, zoom } = $.learn()
   const card = cards[cardId]
   if (!card) return
   const host = document.querySelector(tag)
@@ -621,9 +621,9 @@ function panToCard(cardId) {
   const sidebarW = sidebar?.dataset.open === 'true' ? (sidebar.offsetWidth || 280) : 0
   const vw = host.clientWidth
   const vh = host.clientHeight
-  const panX = (vw - sidebarW) / 2 - (card.x + card.w / 2)
-  const panY = vh / 2 - (card.y + card.h / 2)
-  $.teach({ panX, panY, focusedCard: cardId, sidebarCard: cardId, sidebarOpen: true })
+  const panX = (vw - sidebarW) / 2 - (card.x + card.w / 2) * zoom
+  const panY = vh / 2 - (card.y + card.h / 2) * zoom
+  $.teach({ ...clampPan(panX, panY, zoom), focusedCard: cardId, sidebarCard: cardId, sidebarOpen: true })
 }
 
 function modeIcon(mode) {
@@ -1366,6 +1366,11 @@ function mount(target) {
       <div class="cards-layer"></div>
       <div class="create-preview"></div>
     </div>
+    <div class="zoom-widget">
+      <button class="zoom-btn" data-zoom-out>−</button>
+      <button class="zoom-label" data-zoom-reset data-zoom-lbl>${zoom >= 1 ? `${zoom * 100 | 0}%` : `${Math.round(zoom * 100)}%`}</button>
+      <button class="zoom-btn" data-zoom-in>+</button>
+    </div>
     <div class="the-compass" data-open="false" style="--belt-offset-x:0px; --belt-offset-y:0px;">
       <button class="root" data-toggle-menu title="menu (drag to move)" style="background:${(MODE_META[mode] || MODE_META.pan).color}"><sl-icon name="${(MODE_META[mode] || MODE_META.pan).icon}"></sl-icon></button>
       ${renderCompassButtons(mode)}
@@ -1388,6 +1393,25 @@ function mount(target) {
   `
 
   target.querySelector('.bulletin-canvas').style.backgroundImage = stars
+
+  target.addEventListener('wheel', e => {
+    const { mode, zoom, panX, panY } = $.learn()
+    if (mode !== 'pan' && mode !== 'manage') return
+    e.preventDefault()
+    if (e.ctrlKey) {
+      const rect = target.getBoundingClientRect()
+      const cursorX = e.clientX - rect.left
+      const cursorY = e.clientY - rect.top
+      const delta = -e.deltaY * (e.deltaMode === 1 ? 24 : e.deltaMode === 2 ? 400 : 1)
+      const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom * Math.exp(delta * 0.01)))
+      const anchorX = (cursorX - panX) / zoom
+      const anchorY = (cursorY - panY) / zoom
+      $.teach({ zoom: newZoom, ...clampPan(cursorX - anchorX * newZoom, cursorY - anchorY * newZoom, newZoom) })
+    } else {
+      $.teach(clampPan(panX - e.deltaX * 0.6, panY - e.deltaY * 0.6, zoom))
+    }
+  }, { passive: false })
+
   wasLoad().then(() => {
     wasLoadOps()
     subscribe(target)
@@ -1409,6 +1433,9 @@ function update(target) {
   workspace.style.setProperty('--pan-x', panX + 'px')
   workspace.style.setProperty('--pan-y', panY + 'px')
   workspace.style.setProperty('--zoom', zoom)
+
+  const zoomLbl = target.querySelector('[data-zoom-lbl]')
+  if (zoomLbl) zoomLbl.textContent = zoom >= 1 ? `${zoom * 100 | 0}%` : `${Math.round(zoom * 100)}%`
 
   const compass = target.querySelector('.the-compass')
   compass.dataset.open = menuOpen
@@ -1613,12 +1640,67 @@ function update(target) {
   return null
 }
 
-// ── canvas pointer: pan + rubber-band create ─────────────────────────────────
+// ── canvas pointer: pan + rubber-band create + pinch zoom ────────────────────
+
+const _canvasPointers = new Map()  // pointerId → {clientX, clientY}
+let _pinching = false
+let _pinchStartDist = 0
+let _pinchStartZoom = 1
+let _pinchStartPanX = 0
+let _pinchStartPanY = 0
+let _pinchMidClientX = 0
+let _pinchMidClientY = 0
+const ZOOM_MIN = 0.2
+const ZOOM_MAX = 4
+const CANVAS_SIZE = 5000
+
+function clampPan(panX, panY, zoom) {
+  const host = document.querySelector(tag)
+  if (!host) return { panX, panY }
+  const hw = host.clientWidth, hh = host.clientHeight
+  return {
+    panX: Math.max(hw / 2 - CANVAS_SIZE * zoom, Math.min(hw / 2, panX)),
+    panY: Math.max(hh / 2 - CANVAS_SIZE * zoom, Math.min(hh / 2, panY)),
+  }
+}
+
+function setZoom(newZ) {
+  const { zoom: oldZoom, panX, panY } = $.learn()
+  const host = document.querySelector(tag)
+  if (!host) return
+  const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZ))
+  const cx = host.clientWidth / 2
+  const cy = host.clientHeight / 2
+  const anchorX = (cx - panX) / oldZoom
+  const anchorY = (cy - panY) / oldZoom
+  $.teach({ zoom: newZoom, ...clampPan(cx - anchorX * newZoom, cy - anchorY * newZoom, newZoom) })
+}
+
+function pinchDist(a, b) {
+  const dx = a.clientX - b.clientX, dy = a.clientY - b.clientY
+  return Math.sqrt(dx * dx + dy * dy)
+}
 
 $.when('pointerdown', '.bulletin-canvas', e => {
   e.preventDefault()
+  _canvasPointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY })
+
+  const { mode, panX, panY, zoom } = $.learn()
+  const pts = [..._canvasPointers.values()]
+
+  if (pts.length === 2 && (mode === 'pan' || mode === 'manage')) {
+    _pinching = true
+    _pinchStartDist = pinchDist(pts[0], pts[1])
+    _pinchStartZoom = zoom
+    _pinchStartPanX = panX
+    _pinchStartPanY = panY
+    _pinchMidClientX = (pts[0].clientX + pts[1].clientX) / 2
+    _pinchMidClientY = (pts[0].clientY + pts[1].clientY) / 2
+    $.teach({ panHappening: false, isDrawing: false })
+    return
+  }
+
   $.teach({ focusedCard: null, sidebarOpen: false, sidebarCard: null })
-  const { mode, panX, panY } = $.learn()
   const host = e.target.closest(tag)
 
   if (mode === 'pan') {
@@ -1635,6 +1717,22 @@ $.when('pointerdown', '.bulletin-canvas', e => {
 
 $.when('pointermove', '.bulletin-canvas', e => {
   e.preventDefault()
+  _canvasPointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY })
+
+  if (_pinching) {
+    const pts = [..._canvasPointers.values()]
+    if (pts.length < 2) return
+    const dist = pinchDist(pts[0], pts[1])
+    const scale = dist / _pinchStartDist
+    const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, _pinchStartZoom * scale))
+    const midX = (pts[0].clientX + pts[1].clientX) / 2
+    const midY = (pts[0].clientY + pts[1].clientY) / 2
+    const anchorX = (_pinchMidClientX - _pinchStartPanX) / _pinchStartZoom
+    const anchorY = (_pinchMidClientY - _pinchStartPanY) / _pinchStartZoom
+    $.teach({ zoom: newZoom, ...clampPan(midX - anchorX * newZoom, midY - anchorY * newZoom, newZoom) })
+    return
+  }
+
   const { mode, panHappening, panStartClientX, panStartClientY, panStartPanX, panStartPanY,
           isDrawing, createStartX, createStartY, zoom } = $.learn()
 
@@ -1655,12 +1753,25 @@ $.when('pointermove', '.bulletin-canvas', e => {
 
 $.when('pointerup', '.bulletin-canvas', e => {
   e.preventDefault()
+  _canvasPointers.delete(e.pointerId)
+
+  if (_pinching) {
+    if (_canvasPointers.size < 2) {
+      _pinching = false
+      const { panX, panY } = $.learn()
+      const rhythm = parseFloat(getComputedStyle(document.documentElement).fontSize)
+      $.teach({ panXmod: panX % rhythm, panYmod: panY % rhythm })
+    }
+    return
+  }
+
   const { mode, panHappening, isDrawing, createStartX, createStartY, createX, createY } = $.learn()
 
   if (mode === 'pan' && panHappening) {
-    const { panX, panY } = $.learn()
+    const { panX, panY, zoom } = $.learn()
+    const clamped = clampPan(panX, panY, zoom)
     const rhythm = parseFloat(getComputedStyle(document.documentElement).fontSize)
-    $.teach({ panHappening: false, panXmod: panX % rhythm, panYmod: panY % rhythm })
+    $.teach({ panHappening: false, panXmod: clamped.panX % rhythm, panYmod: clamped.panY % rhythm, ...clamped })
     return
   }
 
@@ -1675,6 +1786,40 @@ $.when('pointerup', '.bulletin-canvas', e => {
     }
     $.teach({ isDrawing: false, createStartX: null, createX: 0, createY: 0 })
   }
+})
+
+$.when('dblclick', '.bulletin-canvas', e => {
+  e.preventDefault()
+  const { mode } = $.learn()
+  if (mode !== 'pan' && mode !== 'manage') return
+  setZoom(1)
+})
+
+$.when('click', '[data-zoom-in]', e => {
+  if (!e.target.closest(tag)) return
+  setZoom($.learn().zoom + 0.25)
+})
+
+$.when('click', '[data-zoom-out]', e => {
+  if (!e.target.closest(tag)) return
+  setZoom($.learn().zoom - 0.25)
+})
+
+$.when('click', '[data-zoom-reset]', e => {
+  if (!e.target.closest(tag)) return
+  setZoom(1)
+})
+
+document.addEventListener('keydown', e => {
+  const host = document.querySelector(tag)
+  if (!host?.isConnected) return
+  const active = document.activeElement
+  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return
+  const { mode } = $.learn()
+  if (mode !== 'pan' && mode !== 'manage') return
+  if (e.key === '+' || e.key === '=') { e.preventDefault(); setZoom($.learn().zoom + 0.25) }
+  if (e.key === '-') { e.preventDefault(); setZoom($.learn().zoom - 0.25) }
+  if (e.key === '0') { e.preventDefault(); setZoom(1) }
 })
 
 // ── card drag + resize — document-level pointerdown using closest() ───────────
@@ -2116,7 +2261,8 @@ function stopArrowInterval() {
   _lastRenderSig = null // force SVG rebuild on next draw
 }
 
-function cancelGesture() {
+function cancelGesture(e) {
+  if (e) { _canvasPointers.delete(e.pointerId); _pinching = false }
   const { grabbing, resizing } = $.learn()
   if (grabbing) {
     stopArrowInterval()
@@ -2388,7 +2534,7 @@ $.style(`
     width: 100%;
     height: 100%;
     display: block;
-    background: white;
+    background: lemonchiffon;
   }
 
   & .workspace {
@@ -2570,6 +2716,25 @@ $.style(`
   & .card-resize-se:hover { border-color: dodgerblue; }
 
   /* ── compass ── */
+
+  & .zoom-widget {
+    position: absolute;
+    top: .5rem; right: .5rem;
+    z-index: 200;
+    display: inline-flex; align-items: center;
+    background: white; border-radius: 4px;
+    box-shadow: 0 1px 6px rgba(0,0,0,.15); overflow: hidden;
+  }
+  & .zoom-widget button {
+    background: transparent; border: none; color: dodgerblue;
+    font-family: 'Recursive'; font-size: .75rem;
+    padding: .5rem; cursor: pointer; line-height: 1; font-size: 1rem; min-width: 2rem; text-align: center;
+    transition: background 80ms, color 80ms;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  & .zoom-widget button:hover { background: dodgerblue; color: white; }
+  & .zoom-widget [data-zoom-lbl] { min-width: 3.2em; text-align: center; }
+  &:not([data-mode="pan"]):not([data-mode="manage"]) .zoom-widget { display: none; }
 
   & .the-compass {
     position: absolute;
