@@ -50,6 +50,7 @@ import { Self, linkState, broadcastElf, PLAN98_NODE_ID } from '@plan98/types'
 import { checkButton } from './debug-gamepads.js'
 import * as braid from 'braid-http'
 import { showModal, hideModal } from '@plan98/modal'
+import { showPanel, hidePanel } from './plan98-panel.js'
 import { get as wasGet, put as wasPut, del as wasDel, getKeycard, ensureSpace } from './plan98-wallet.js'
 
 self.braid_fetch = braid.fetch
@@ -111,8 +112,7 @@ const $ = Self(tag, {
   menuOpen: false,
   parkInspectorId: null,
   parkInspectorCardIds: [],
-  parkPanelOpen: false,
-  parkPanelCardId: null,
+  openedFromOs: false,
   launchHref: null,
   preLaunchMode: null,
   panX: initialPanX,
@@ -547,6 +547,8 @@ function deleteCard(id) {
 function linkCards(fromId, toId, fromDir, toDir, typeId = HYPER_ID) {
   const { cards } = $.learn()
   if (!cards[fromId] || !cards[toId] || fromId === toId) return
+  const alreadyLinked = Object.values(cards[fromId].links || {}).some(l => l.to === toId && l.typeId === typeId)
+  if (alreadyLinked) return
   if (!fromDir || !toDir) {
     ;[fromDir, toDir] = bestCompassPair(cards[fromId], cards[toId])
   }
@@ -1279,11 +1281,10 @@ $.draw(target => {
 }, { beforeUpdate, afterUpdate })
 
 function beforeUpdate(target) {
-  const { beltGrabbed, mode, parkPanelOpen } = $.learn()
+  const { beltGrabbed, mode } = $.learn()
   target.dataset.belt = beltGrabbed ? 'true' : 'false'
   target.dataset.mode = mode || 'pan'
   target.dataset.os = mode === 'os' ? 'true' : 'false'
-  target.dataset.parkPanel = parkPanelOpen ? 'open' : ''
 }
 
 let _lastCardsJson = null
@@ -1309,30 +1310,50 @@ window.addEventListener('park:open-card', ({ detail }) => {
   $.teach({ mode: 'pan', menuOpen: false, linkSource: null, sidebarOpen: true, sidebarCard: detail.cardId, parkInspectorId: null })
 })
 
+function openInBoard(cardId) {
+  const { cards, zoom } = $.learn()
+  const card = cards[cardId]
+  const host = document.querySelector(tag)
+  const vw = host ? host.clientWidth : window.innerWidth
+  const vh = host ? host.clientHeight : window.innerHeight
+  const panX = card ? vw / 2 - (card.x + card.w / 2) * zoom : 0
+  const panY = card ? vh / 2 - (card.y + card.h / 2) * zoom : 0
+  $.teach({
+    mode: 'pan', menuOpen: false, openedFromOs: true,
+    sidebarOpen: true, sidebarCard: cardId, focusedCard: cardId,
+    ...clampPan(panX, panY, zoom),
+  })
+  window.dispatchEvent(new CustomEvent('park:panel-state', { detail: { open: false } }))
+}
+
+window.addEventListener('park:open-in-board', ({ detail }) => {
+  hidePanel()
+  openInBoard(detail.cardId)
+})
+
 window.addEventListener('park:manage-island', ({ detail }) => {
-  const { parkInspectorCardIds } = $.learn()
+  const { parkInspectorCardIds, cards } = $.learn()
   const ids = parkInspectorCardIds.length ? parkInspectorCardIds : (detail.cardId ? [detail.cardId] : [])
   if (!ids.length) return
-  const open = { parkPanelOpen: true, parkPanelCardId: ids.length === 1 ? ids[0] : null }
-  $.teach(open)
-  window.dispatchEvent(new CustomEvent('park:panel-state', { detail: { open: true } }))
+  if (ids.length === 1) { openInBoard(ids[0]); return }
+  const items = ids.map(id => {
+    const c = cards[id]
+    if (!c) return ''
+    const bg = c.color || 'lemonchiffon'
+    return `<button onclick="window.dispatchEvent(new CustomEvent('park:open-in-board',{detail:{cardId:'${id}'}}));" style="display:block;width:100%;text-align:left;padding:.6rem .75rem;border:none;border-bottom:1px solid rgba(0,0,0,.08);background:${bg};cursor:pointer;font-family:'Recursive',sans-serif;font-size:.9rem;">
+      <strong>${c.name || 'untitled'}</strong>
+      ${c.text ? `<span style="display:block;font-size:.75rem;opacity:.6;margin-top:.15rem;">${c.text.slice(0, 60)}${c.text.length > 60 ? '…' : ''}</span>` : ''}
+    </button>`
+  }).join('')
+  showPanel(`<div style="padding:.5rem 0">${items}</div>`)
 })
 
 window.addEventListener('park:close-island', () => {
-  $.teach({ parkPanelOpen: false, parkPanelCardId: null })
-  window.dispatchEvent(new CustomEvent('park:panel-state', { detail: { open: false } }))
-})
-
-window.addEventListener('park:back-island', () => {
-  $.teach({ parkPanelCardId: null })
-})
-
-window.addEventListener('park:select-island-card', ({ detail }) => {
-  if (detail?.cardId) $.teach({ parkPanelCardId: detail.cardId })
+  hidePanel()
 })
 
 function afterUpdate(target) {
-  const { mode, cards, parkPanelOpen } = $.learn()
+  const { mode, cards } = $.learn()
   const osBtn = target.querySelector('.c-os')
   let park = target.querySelector('.os-overlay')
   const entering = mode === 'os' && !_prevOsMode
@@ -1388,7 +1409,6 @@ function mount(target) {
     <div class="card-launch" data-open="false"></div>
     <div class="camera-overlay" data-open="false"></div>
     <div class="park-hud" hidden></div>
-    <dialog class="island-dialog"></dialog>
     <board-call></board-call>
   `
 
@@ -1498,7 +1518,7 @@ function update(target) {
   }
 
   if (sidebarOpen && sidebarCard && !cards[sidebarCard]) {
-    $.teach({ sidebarOpen: false, sidebarCard: null })
+    $.teach({ sidebarOpen: false, sidebarCard: null, openedFromOs: false })
     return
   }
 
@@ -1555,11 +1575,11 @@ function update(target) {
   }
 
   // park HUD — rendered above A-Frame canvas
-  const { parkInspectorId, parkInspectorCardIds, parkPanelOpen, parkPanelCardId } = $.learn()
+  const { parkInspectorId } = $.learn()
   const parkHud = target.querySelector('.park-hud')
   if (parkHud) {
     const inspCard = parkInspectorId ? cards[parkInspectorId] : null
-    if (inspCard && !parkPanelOpen) {
+    if (inspCard && mode === 'os') {
       parkHud.hidden = false
       const bg = inspCard.color || 'lemonchiffon'
       parkHud.innerHTML = `
@@ -1569,71 +1589,6 @@ function update(target) {
         </div>`
     } else {
       parkHud.hidden = true
-    }
-  }
-
-  // island dialog — native <dialog> in browser top layer, immune to A-Frame event capture
-  // sig excludes parkInspectorId — that changes 10x/sec and would delete buttons mid-click
-  const islandDialog = target.querySelector('.island-dialog')
-  if (islandDialog) {
-    if (parkPanelOpen) {
-      const cardsSig = parkInspectorCardIds.map(id => `${id}:${cards[id]?.color}`).join(',')
-      const panelSig = `${parkPanelCardId}|${cardsSig}|${inspectorOpen}|${attachmentsOpen}|${logsOpen}`
-      if (islandDialog._panelSig !== panelSig) {
-        islandDialog._panelSig = panelSig
-        const CLOSE = `onclick="window.dispatchEvent(new CustomEvent('park:close-island'))"`
-        const BACK  = `onclick="window.dispatchEvent(new CustomEvent('park:back-island'))"`
-        if (parkPanelCardId) {
-          const card = cards[parkPanelCardId]
-          const cardColor = card?.color || 'lemonchiffon'
-          const cardContrast = contrastColor(cardColor)
-          islandDialog.innerHTML = `
-            <div class="island-panel-inner" style="--sidebar-card-color:${cardColor};--sidebar-card-contrast:${cardContrast}">
-              <div class="island-panel-header" style="background:${cardColor};color:${cardContrast}">
-                <button class="island-panel-btn" ${BACK} style="color:${cardContrast}"><sl-icon name="chevron-left"></sl-icon></button>
-                <strong>${card?.name || 'untitled'}</strong>
-                <button class="island-panel-btn" ${CLOSE} style="color:${cardContrast}">✕</button>
-              </div>
-              <div class="island-panel-body">
-                ${renderSidebarSections(parkPanelCardId, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops)}
-              </div>
-            </div>`
-        } else {
-          const islandCards = parkInspectorCardIds.map(id => cards[id]).filter(Boolean)
-          const anchorCard = islandCards[0]
-          const bg = anchorCard?.color || 'lemonchiffon'
-          const fg = contrastColor(bg)
-          islandDialog.innerHTML = `
-            <div class="island-panel-inner" style="--sidebar-card-color:${bg};--sidebar-card-contrast:${fg}">
-              <div class="island-panel-header" style="background:${bg};color:${fg}">
-                <strong>island (${islandCards.length})</strong>
-                <button class="island-panel-btn" ${CLOSE} style="color:${fg}">✕</button>
-              </div>
-              <ul class="island-card-list">
-                ${parkInspectorCardIds.map(id => {
-                  const c = cards[id]
-                  if (!c) return ''
-                  const cbg = c.color || 'lemonchiffon'
-                  const cfg = contrastColor(cbg)
-                  const SEL = `onclick="window.dispatchEvent(new CustomEvent('park:select-island-card',{detail:{cardId:'${id}'}}))"`
-                  return `<li class="island-card-item" ${SEL} style="background:${cbg};color:${cfg}">
-                    <strong>${c.name || 'untitled'}</strong>
-                    ${c.text ? `<span class="island-card-text">${c.text.slice(0, 80)}${c.text.length > 80 ? '…' : ''}</span>` : ''}
-                  </li>`
-                }).join('')}
-              </ul>
-            </div>`
-        }
-      }
-      if (!islandDialog.open) {
-        islandDialog.showModal()
-        islandDialog.addEventListener('click', e => {
-          if (e.target === islandDialog) window.dispatchEvent(new CustomEvent('park:close-island'))
-        })
-      }
-    } else {
-      islandDialog._panelSig = null
-      if (islandDialog.open) islandDialog.close()
     }
   }
 
@@ -1700,7 +1655,7 @@ $.when('pointerdown', '.bulletin-canvas', e => {
     return
   }
 
-  $.teach({ focusedCard: null, sidebarOpen: false, sidebarCard: null })
+  $.teach({ focusedCard: null, sidebarOpen: false, sidebarCard: null, openedFromOs: false })
   const host = e.target.closest(tag)
 
   if (mode === 'pan') {
@@ -1971,7 +1926,12 @@ $.when('click', '.card-pencil', e => {
 })
 
 $.when('click', '[data-close-sidebar]', () => {
-  $.teach({ sidebarOpen: false, sidebarCard: null })
+  const { openedFromOs } = $.learn()
+  if (openedFromOs) {
+    $.teach({ sidebarOpen: false, sidebarCard: null, mode: 'os', openedFromOs: false })
+  } else {
+    $.teach({ sidebarOpen: false, sidebarCard: null })
+  }
 })
 
 $.when('click', '[data-toggle-section]', e => {
@@ -2172,16 +2132,13 @@ $.when('click', '.card-body', e => {
 
 // ── overlap detection + edge-link algorithm ───────────────────────────────────
 
-function findOverlap(id, cards) {
+function findOverlaps(id, cards) {
   const a = cards[id]
-  if (!a) return null
-  for (const [otherId, b] of Object.entries(cards)) {
-    if (otherId === id) continue
-    if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) {
-      return otherId
-    }
-  }
-  return null
+  if (!a) return []
+  return Object.entries(cards)
+    .filter(([otherId, b]) => otherId !== id &&
+      a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y)
+    .map(([otherId]) => otherId)
 }
 
 function bestEdgePair(from, to) {
@@ -2287,15 +2244,12 @@ document.addEventListener('pointerup', e => {
       const { cards, pickupX, pickupY } = $.learn()
       const dropped = { ...(cards[grabbing] || {}), x: dragCardX, y: dragCardY }
       const tmpCards = { ...cards, [grabbing]: dropped }
-      const overlapping = findOverlap(grabbing, tmpCards)
-      if (overlapping) {
-        const [fromDir, toDir] = bestCompassPair(dropped, tmpCards[overlapping])
-        updateCard(grabbing, { x: pickupX, y: pickupY })
-        const cardEl = document.querySelector(`.card[data-id="${grabbing}"]`)
-        if (cardEl) { cardEl.style.left = pickupX + 'px'; cardEl.style.top = pickupY + 'px' }
-        linkCards(grabbing, overlapping, fromDir, toDir)
-      } else {
-        updateCard(grabbing, { x: dragCardX, y: dragCardY })
+      const overlapping = findOverlaps(grabbing, tmpCards)
+      updateCard(grabbing, { x: dragCardX, y: dragCardY })
+      for (const otherId of overlapping) {
+        const [fromDir, toDir] = bestCompassPair(dropped, tmpCards[otherId])
+        linkCards(grabbing, otherId, fromDir, toDir)
+        linkCards(otherId, grabbing, toDir, fromDir)
       }
       save(document.querySelector(tag))
     }
@@ -2719,7 +2673,7 @@ $.style(`
 
   & .zoom-widget {
     position: absolute;
-    top: .5rem; right: .5rem;
+    bottom: .5rem; right: .5rem;
     z-index: 200;
     display: inline-flex; align-items: center;
     background: white; border-radius: 4px;
@@ -3284,10 +3238,6 @@ $.style(`
     inset: 0;
     z-index: 100;
   }
-  &[data-park-panel="open"] .os-overlay {
-    pointer-events: none;
-  }
-
   & .park-hud {
     position: fixed;
     bottom: 1.5rem; left: 1.5rem;
@@ -3306,87 +3256,6 @@ $.style(`
     font-size: .75rem;
     opacity: .6;
     font-family: monospace;
-  }
-
-  & .island-dialog {
-    position: fixed;
-    top: 0; right: 0; bottom: 0; left: auto;
-    width: min(360px, 100%);
-    height: 100%;
-    max-height: 100%;
-    border: none;
-    padding: 0;
-    margin: 0;
-    display: none;
-    flex-direction: column;
-  }
-  & .island-dialog[open] { display: flex; }
-  & .island-dialog::backdrop { background: transparent; }
-  & .island-panel-inner {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    background: color-mix(in srgb, var(--sidebar-card-color, lemonchiffon) 10%, white);
-    box-shadow: -4px 0 24px rgba(0,0,0,.4);
-    overflow: hidden;
-  }
-  & .island-panel-header {
-    display: flex;
-    align-items: center;
-    gap: .5rem;
-    padding: .5rem .75rem;
-    background: var(--sidebar-card-color, lemonchiffon);
-    border-bottom: 1px solid rgba(0,0,0,.1);
-    flex-shrink: 0;
-    font-family: 'Recursive', sans-serif;
-    font-size: .8rem;
-    font-weight: 700;
-    letter-spacing: .05em;
-    text-transform: uppercase;
-    color: var(--sidebar-card-contrast, #1a1a1a);
-  }
-  & .island-panel-header strong { flex: 1; }
-  & .island-panel-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--sidebar-card-contrast, #1a1a1a);
-    opacity: .5;
-    font-size: .9rem;
-    padding: .1rem .3rem;
-    line-height: 1;
-    border-radius: 2px;
-    transition: opacity .1s;
-    display: flex; align-items: center;
-  }
-  & .island-panel-btn:hover { opacity: 1; }
-  & .island-panel-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 0;
-  }
-  & .island-card-list {
-    list-style: none;
-    margin: 0; padding: .5rem;
-    display: flex; flex-direction: column; gap: .5rem;
-  }
-  & .island-card-item {
-    padding: .75rem 1rem;
-    cursor: pointer;
-    display: flex; flex-direction: column; gap: .25rem;
-    font-family: monospace;
-    border: 1px solid rgba(0,0,0,.1);
-  }
-  & .island-card-item:hover { filter: brightness(0.95); }
-  & .island-card-item strong { font-size: .95rem; }
-  & .island-card-text {
-    font-size: .75rem;
-    opacity: .7;
-    white-space: pre-wrap;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
   }
 
   & .camera-overlay {
