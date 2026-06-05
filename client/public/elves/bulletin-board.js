@@ -2249,7 +2249,6 @@ document.addEventListener('pointerup', e => {
       for (const otherId of overlapping) {
         const [fromDir, toDir] = bestCompassPair(dropped, tmpCards[otherId])
         linkCards(grabbing, otherId, fromDir, toDir)
-        linkCards(otherId, grabbing, toDir, fromDir)
       }
       save(document.querySelector(tag))
     }

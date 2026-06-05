@@ -74,26 +74,34 @@ function cardBounds(card) {
 
 // ── height ────────────────────────────────────────────────────────────────────
 
-// tent function: max at card center, 0 at card edges, 0 outside
+const FLOOR_H = 10
+let _floorMemo = null   // populated by buildTerrainMesh, used by computeHeight
+let _boundsCache = null
+
 function computeHeight(vx, vz, entries) {
-  let h = 0
+  if (_floorMemo && _boundsCache) {
+    let maxFloor = 0, bestTent = 0
+    for (const [id] of entries) {
+      const b = _boundsCache[id]
+      if (!b || vx < b.x || vx > b.x+b.w || vz < b.z || vz > b.z+b.h) continue
+      const tx = 1 - Math.abs(vx - b.cx) / (b.w / 2)
+      const tz = 1 - Math.abs(vz - b.cz) / (b.h / 2)
+      const tent = tx * tz
+      const f = _floorMemo[id] || 1
+      if (f > maxFloor || (f === maxFloor && tent > bestTent)) { maxFloor = f; bestTent = tent }
+    }
+    return maxFloor > 0 ? Math.min((maxFloor - 1) * FLOOR_H + bestTent * 2, 500) : 0
+  }
+  // fallback before first terrain build
+  let count = 0, tentSum = 0
   for (const [, card] of entries) {
     const b = cardBounds(card)
-    if (vx < b.x || vx > b.x + b.w) continue
-    if (vz < b.z || vz > b.z + b.h) continue
+    if (vx < b.x || vx > b.x+b.w || vz < b.z || vz > b.z+b.h) continue
     const tx = 1 - Math.abs(vx - b.cx) / (b.w / 2)
     const tz = 1 - Math.abs(vz - b.cz) / (b.h / 2)
-    h += 30 * tx * tz
+    count++; tentSum += tx * tz
   }
-  return Math.min(h, 500)
-}
-
-function elevColor(e) {
-  if (e > 400) return [1.00, 1.00, 0.95]  // near-white cream — approaching cloud
-  if (e > 250) return [1.00, 0.90, 0.60]  // warm peach
-  if (e > 100) return [1.00, 0.95, 0.70]  // light lemon
-  if (e > 0)   return [1.00, 0.98, 0.80]  // lemonchiffon — sea level
-  return [0.00, 0.56, 1.00]               // (holes punched at h=0, shouldn't render)
+  return Math.min((count - 1) * FLOOR_H + tentSum * 2, 500)
 }
 
 // ── terrain mesh ──────────────────────────────────────────────────────────────
@@ -103,26 +111,82 @@ function buildTerrainMesh(cards) {
   if (!THREE) return null
   const entries = Object.entries(cards)
 
+  // ── pre-compute card floors via overlap graph + DFS ──
+  // directed by createdAt: older card = below, newer = on top
+  // floor(card) = 1 + max(floor of cards below it)
+  // chain of 45: card 33 → floor 33
+  const bounds = {}
+  for (const [id, card] of entries) bounds[id] = cardBounds(card)
+
+  const parents = {}
+  for (const [id] of entries) parents[id] = []
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const [idA, cA] = entries[i], [idB, cB] = entries[j]
+      const ba = bounds[idA], bb = bounds[idB]
+      if (ba.x >= bb.x+bb.w || ba.x+ba.w <= bb.x || ba.z >= bb.z+bb.h || ba.z+ba.h <= bb.z) continue
+      const tA = cA.createdAt || cA.z || 0, tB = cB.createdAt || cB.z || 0
+      if (tA < tB) parents[idB].push(idA)  // A below B
+      else         parents[idA].push(idB)  // B below A
+    }
+  }
+  const floorMemo = {}, visiting = new Set()
+  function cardFloor(id) {
+    if (id in floorMemo) return floorMemo[id]
+    if (visiting.has(id)) return 1
+    visiting.add(id)
+    let max = 0
+    for (const p of parents[id]) max = Math.max(max, cardFloor(p))
+    visiting.delete(id)
+    return (floorMemo[id] = max + 1)
+  }
+  for (const [id] of entries) cardFloor(id)
+
+  // pre-parse colors
+  const cardRGB = entries.map(([, card]) => {
+    const c = new THREE.Color().setStyle(card.color || 'lemonchiffon')
+    return [c.r, c.g, c.b]
+  })
+
   const base = new THREE.PlaneGeometry(WORLD, WORLD, SEGS, SEGS)
   base.rotateX(-Math.PI / 2)
   const basePosArr = base.attributes.position.array
   const baseIdxArr = base.index.array
   const N = SEGS + 1
 
-  // compute heights — vx/vz in 0..WORLD, card bounds already scaled
+  // single pass: height + color together
   const heights = new Float32Array(N * N)
-  for (let i = 0; i < N * N; i++) {
-    const vx = basePosArr[i * 3]     + WORLD / 2
-    const vz = basePosArr[i * 3 + 2] + WORLD / 2
-    heights[i] = computeHeight(vx, vz, entries)
-  }
-
   const positions = [], colors = []
+
   for (let i = 0; i < N * N; i++) {
-    const h = heights[i]
+    const vx = basePosArr[i*3]     + WORLD / 2
+    const vz = basePosArr[i*3+2]   + WORLD / 2
+
+    let maxFloor = 0, bestTent = 0, bestJ = -1
+    for (let j = 0; j < entries.length; j++) {
+      const [id] = entries[j]
+      const b = bounds[id]
+      if (vx < b.x || vx > b.x+b.w || vz < b.z || vz > b.z+b.h) continue
+      const tx = 1 - Math.abs(vx - b.cx) / (b.w / 2)
+      const tz = 1 - Math.abs(vz - b.cz) / (b.h / 2)
+      const tent = tx * tz
+      const f = floorMemo[id]
+      if (f > maxFloor || (f === maxFloor && tent > bestTent)) {
+        maxFloor = f; bestTent = tent; bestJ = j
+      }
+    }
+
+    const h = maxFloor > 0 ? Math.min((maxFloor - 1) * FLOOR_H + bestTent * 2, 500) : 0
+    heights[i] = h
     positions.push(basePosArr[i*3], SEA + 1 + h, basePosArr[i*3+2])
-    const [r,g,b] = elevColor(h)
-    colors.push(r, g, b)
+
+    if (bestJ >= 0) {
+      const t = Math.min(h / 500, 1) * 0.55
+      const [cr, cg, cb] = cardRGB[bestJ]
+      colors.push(cr + (1-cr)*t, cg + (1-cg)*t, cb + (1-cb)*t)
+    } else {
+      colors.push(0, 0.56, 1.0)
+    }
   }
 
   // holes where h=0 on all three vertices
@@ -161,6 +225,8 @@ function buildTerrainMesh(cards) {
     cliffIndices.push(a, ba, bb,  a, bb, b)
   }
 
+  _floorMemo = floorMemo
+  _boundsCache = bounds
   base.dispose()
 
   // save for rapier trimesh — local space, initPhysics adds WORLD/2 offset
@@ -457,7 +523,8 @@ async function initPhysics(target, sx, sy, sz) {
   ctrl.setSlideEnabled(true)
   ctrl.setMaxSlopeClimbAngle(50 * Math.PI / 180)
   ctrl.setMinSlopeSlideAngle(30 * Math.PI / 180)
-  ctrl.enableSnapToGround(2)
+  ctrl.enableAutostep(35, 5, false)
+  ctrl.enableSnapToGround(35)
 
   // perimeter walls
   const wallH = CLOUD + 1000
