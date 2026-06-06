@@ -236,52 +236,30 @@ function applyDecodedBatch(target, results) {
   })
 }
 
-// Sliding lookahead for playback — decodes the next PLAYBACK_LOOKAHEAD
-// unloaded frames ahead of the playhead. Self-chains while playing.
-// target._lookaheadInflight prevents concurrent batches piling up.
-function triggerPlaybackLookahead(target) {
-  if (target._lookaheadInflight) return
-  const { frames } = $.learn()
-  const current = target._localCurrent ?? 0
-  const toLoad = []
-  for (let i = 1; i <= PLAYBACK_LOOKAHEAD && toLoad.length < PLAYBACK_LOOKAHEAD; i++) {
-    const id = frames[(current + i) % frames.length]
-    const f = db[id]
-    if (f && f._hasCachedVideo && !f.hasVideo && !f._videoLoading) toLoad.push(id)
-  }
-  if (!toLoad.length) return
-  target._lookaheadInflight = true
-  toLoad.forEach(id => { db[id]._videoLoading = true })
-  decodeFramesBatch(toLoad).then(results => {
-    target._lookaheadInflight = false
-    applyDecodedBatch(target, results)
-    target._bufferCheck?.()
-    if (target._playing) triggerPlaybackLookahead(target)
-  })
-}
-
 // Background loader — fills all frame thumbnails in DECODE_CHUNK batches.
 // Starts from current frame so the playhead area satisfies _bufferCheck first.
+// Does NOT pre-mark all frames — only marks the current chunk so lookahead can
+// still claim frames from the rest of the queue between chunks.
 async function preloadAllFrames(target) {
   const { frames } = $.learn()
   const current = target._localCurrent ?? 0
   // prioritise current→end, then wrap 0→current
   const ordered = [...frames.slice(current), ...frames.slice(0, current)]
-  const toLoad = ordered.filter(id => {
-    const f = db[id]
-    return f && f._hasCachedVideo && !f.hasVideo && !f._videoLoading
+  const candidates = ordered.filter(id => {
+    const f = db[id]; return f && f._hasCachedVideo
   })
-  if (!toLoad.length) return
 
-  toLoad.forEach(id => { if (db[id]) db[id]._videoLoading = true })
-
-  for (let i = 0; i < toLoad.length; i += DECODE_CHUNK) {
-    const chunk = toLoad.slice(i, i + DECODE_CHUNK)
+  for (let i = 0; i < candidates.length; i += DECODE_CHUNK) {
+    // re-filter each chunk — lookahead may have already loaded some of these
+    const chunk = candidates.slice(i, i + DECODE_CHUNK).filter(id => {
+      const f = db[id]; return f && !f.hasVideo && !f._videoLoading
+    })
+    if (!chunk.length) continue
+    chunk.forEach(id => { db[id]._videoLoading = true })
     const results = await decodeFramesBatch(chunk)
     applyDecodedBatch(target, results)
     renderReel(target)
     loadCurrentFrame(target)
-    target._bufferCheck?.()
   }
 }
 
@@ -1063,9 +1041,6 @@ function boot(target) {
   target._panStart      = null
   target._panOrigin     = null
   target._drawRafId     = null
-  target._playing       = false
-  target._rafId         = null
-  target._playDir       = 1
   target._drPlaying     = false
   target._drInterval    = null
   target._drZoomed      = false
@@ -1078,7 +1053,6 @@ function boot(target) {
   target._audioSrc      = null
   target._audioDuration = 0
   target._reelObserver  = null
-  target._bufferCheck   = null
 
   target._artboard        = target.querySelector('[data-artboard]')
   target._artboardInner   = target.querySelector('[data-artboard-inner]')
@@ -1392,7 +1366,7 @@ function ensureFrameVideo(frameId, target) {
       f.videoCanvas.getContext('2d').drawImage(img, 0, 0)
       f.hasVideo = true
       f._videoLoading = false
-      loadCurrentFrame(target); updateReelThumb(target, frameId); target._bufferCheck?.()
+      loadCurrentFrame(target); updateReelThumb(target, frameId)
     } else if (f._wasVideoPath) {
       // fbCache missed — try WAS
       wasGet(f._wasVideoPath).then(async blob => {
@@ -1404,7 +1378,7 @@ function ensureFrameVideo(frameId, target) {
           f.hasVideo = true
         }
         f._videoLoading = false
-        loadCurrentFrame(target); updateReelThumb(target, frameId); target._bufferCheck?.()
+        loadCurrentFrame(target); updateReelThumb(target, frameId)
       }).catch(() => { f._videoLoading = false })
     } else {
       f._videoLoading = false
@@ -2462,84 +2436,6 @@ function frameIsReady(frameId) {
   return !f || !f._hasCachedVideo || f.hasVideo
 }
 
-function countReadyAhead(frames, current, n) {
-  let ready = 0
-  for (let i = 0; i < n; i++) {
-    if (frameIsReady(frames[(current + i) % frames.length])) ready++
-    else break  // first gap stops the run
-  }
-  return ready
-}
-
-function startPlayback(target) {
-  target._playDir = 1
-  const { frames, fps } = $.learn()
-  const current = target._localCurrent ?? 0
-  const needed = Math.min(Math.ceil(fps * 2), frames.length)
-  const ready = countReadyAhead(frames, current, needed)
-
-  // priority: decode the next PLAYBACK_LOOKAHEAD frames from current position
-  triggerPlaybackLookahead(target)
-  // background: fill all thumbnails starting from current frame outward
-  preloadAllFrames(target)
-
-  if (ready >= needed) {
-    _doStartPlayback(target)
-    return
-  }
-
-  // buffer: wait for enough consecutive ready frames ahead of current
-  $.teach({ playing: true })
-  $.whisper({ status: `buffering… ${ready}/${needed}` })
-  target._bufferCheck = () => {
-    const { frames, fps } = $.learn()
-    const current = target._localCurrent ?? 0
-    const needed = Math.min(Math.ceil(fps * 2), frames.length)
-    const ready = countReadyAhead(frames, current, needed)
-    $.whisper({ status: `buffering… ${ready}/${needed}` })
-    if (ready >= needed) {
-      target._bufferCheck = null
-      _doStartPlayback(target)
-    }
-  }
-}
-
-function _doStartPlayback(target) {
-  $.teach({ playing: true })
-  $.whisper({ status: '' })
-  startAudio(target)
-  const mspf = 1000 / $.learn().fps
-  let lastFrameTime = performance.now()
-  let rafId
-  const tick = (now) => {
-    if (!target._playing) return
-    rafId = requestAnimationFrame(tick)
-    if (now - lastFrameTime < mspf) return
-    lastFrameTime = now
-    const { frames, loopMode } = $.learn()
-    const current = target._localCurrent ?? 0
-    let next = current + target._playDir
-    if (loopMode === 'loop') next = ((next % frames.length) + frames.length) % frames.length
-    else if (loopMode === 'pingpong') { if (next >= frames.length) { next = frames.length - 2; target._playDir = -1 } else if (next < 0) { next = 1; target._playDir = 1 } }
-    else { if (next >= frames.length) { next = frames.length - 1; stopPlayback(target); return } }
-    target._localCurrent = Math.max(0, Math.min(frames.length - 1, next))
-    loadCurrentFrame(target); renderOnion(target)
-    triggerPlaybackLookahead(target)
-  }
-  target._playing = true
-  target._rafId = requestAnimationFrame(tick)
-}
-
-function stopPlayback(target) {
-  $.teach({ playing: false })
-  $.whisper({ status: '' })
-  target._playing = false
-  target._lookaheadInflight = false
-  cancelAnimationFrame(target._rafId)
-  target._bufferCheck = null
-  stopAudio(target)
-}
-
 /*
 
 Darkroom — self-contained playback cursor, doesn't touch _localCurrent.
@@ -2579,19 +2475,35 @@ function closeDarkroom(target){
 function drRenderFrame(target){
   const{frames,canvasW,canvasH,fps,loopMode}=$.learn(),dc=target._drCanvas,ctx=dc.getContext('2d')
   ctx.clearRect(0,0,dc.width,dc.height)
-  if(frames.length){const f=ensureFrame(frames[target._drCurrent],canvasW,canvasH);if(f.hasVideo)ctx.drawImage(f.videoCanvas,0,0);ctx.drawImage(f.drawCanvas,0,0)}
+  if(frames.length){
+    const frameId=frames[target._drCurrent]
+    const f=ensureFrame(frameId,canvasW,canvasH)
+    if(f.hasVideo) ctx.drawImage(f.videoCanvas,0,0)
+    else ensureFrameVideo(frameId,target)
+    ctx.drawImage(f.drawCanvas,0,0)
+  }
   const counter=target.querySelector('[data-dr-counter]');if(counter)counter.textContent=`${target._drCurrent+1} / ${frames.length}`
   const title=target.querySelector('[data-dr-title]');if(title)title.textContent=`${canvasW}×${canvasH} · ${fps}fps · ${loopMode}`
+}
+function drLookahead(target){
+  const{frames}=$.learn(),current=target._drCurrent??0
+  for(let i=1;i<=PLAYBACK_LOOKAHEAD;i++){
+    const id=frames[(current+i)%frames.length]
+    if(id) ensureFrameVideo(id,target)
+  }
 }
 function drStart(target){
   target._drPlaying=true;const btn=target.querySelector('[data-dr-play]');if(btn){btn.textContent='⏸ pause';btn.classList.add('active')}
   startAudio(target)
+  drLookahead(target)
   target._drDir=1;target._drInterval=setInterval(()=>{
     const{frames,loopMode}=$.learn();let next=target._drCurrent+target._drDir
     if(loopMode==='loop')next=((next%frames.length)+frames.length)%frames.length
     else if(loopMode==='pingpong'){if(next>=frames.length){next=frames.length-2;target._drDir=-1}else if(next<0){next=1;target._drDir=1}}
     else{if(next>=frames.length){next=frames.length-1;drStop(target);return}}
-    target._drCurrent=Math.max(0,Math.min(frames.length-1,next));drRenderFrame(target)
+    next=Math.max(0,Math.min(frames.length-1,next))
+    if(!frameIsReady(frames[next])){drLookahead(target);return}
+    target._drCurrent=next;drRenderFrame(target);drLookahead(target)
   },1000/$.learn().fps)
 }
 function drStop(target){
