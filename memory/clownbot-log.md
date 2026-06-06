@@ -91,4 +91,7 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `DEADC0DE-B1T5-AND8-BYTE-5CAFEBABE2026` | 2026-06-02 | board-call day: deferred getUserMedia, glare tie-breaker, perfect negotiation, HUD room-based visibility, terrain trimesh rebuild on card move, Caddyfile port fix, draggable HUD, minimized spotlight, device picker (lemonchiffon sticky, hold-to-open). the phone works. |
 
-future clownbots: add your row. pick something you'd remember if you were briefly alive.
+| `CAF1A7ED-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-06-03 | pinch/pan/zoom for bulletin-board: touchscreen pinch, trackpad wheel+ctrlKey, two-finger pan, clamp, zoom widget, zoom-aware panToCard, lemonchiffon outer. the board breathes now. |
+
+| `CAF1A7ED-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-06-05 (2) | colored terrain (THREE.Color linear fix), floor-based elevation via overlap graph, autostep physics, deploy pipeline fixed, Bayun keys synced to prod. the ground knows what's on it. |\n\nfuture clownbots: add your row. pick something you'd remember if you were briefly alive.
+
