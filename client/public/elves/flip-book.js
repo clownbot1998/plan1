@@ -140,6 +140,10 @@ When a remote frame id arrives that we haven't seen, ensureFrame + replayStrokes
 
 const db = {}
 
+const REEL_OVERSCAN  = 10   // frames rendered beyond each visible edge
+const MEMORY_WINDOW  = 150  // evict video pixel data beyond this distance from current
+const DECODE_CHUNK   = 16   // ImageBitmaps decoded per worker batch
+
 /*
 
 Inline worker for parallel frame decoding.
@@ -213,33 +217,34 @@ function decodeFramesBatch(frameIds) {
   })
 }
 
-// Preload all frames that have cached video — fires the worker once for the
-// whole batch, applies ImageBitmaps to their canvases, then triggers callbacks.
+// Preload all frames with cached video in parallel chunks.
+// Chunks of DECODE_CHUNK keep memory bounded for large projects.
 async function preloadAllFrames(target) {
-  const { frames, canvasW, canvasH } = $.learn()
+  const { frames } = $.learn()
   const toLoad = frames.filter(id => {
     const f = db[id]
     return f && f._hasCachedVideo && !f.hasVideo && !f._videoLoading
   })
   if (!toLoad.length) return
 
-  toLoad.forEach(id => { db[id]._videoLoading = true })
+  toLoad.forEach(id => { if (db[id]) db[id]._videoLoading = true })
 
-  const results = await decodeFramesBatch(toLoad)
-
-  results.forEach(({ frameId, bitmap }) => {
-    const f = db[frameId]
-    if (!f) return
-    f._videoLoading = false
-    if (!bitmap) return
-    f.videoCanvas.getContext('2d').drawImage(bitmap, 0, 0)
-    f.hasVideo = true
-    bitmap.close()
-  })
-
-  renderReel(target)
-  loadCurrentFrame(target)
-  target._bufferCheck?.()
+  for (let i = 0; i < toLoad.length; i += DECODE_CHUNK) {
+    const chunk = toLoad.slice(i, i + DECODE_CHUNK)
+    const results = await decodeFramesBatch(chunk)
+    results.forEach(({ frameId, bitmap }) => {
+      const f = db[frameId]
+      if (!f) return
+      f._videoLoading = false
+      if (!bitmap) return
+      f.videoCanvas.getContext('2d').drawImage(bitmap, 0, 0)
+      f.hasVideo = true
+      bitmap.close()
+    })
+    renderReel(target)
+    loadCurrentFrame(target)
+    target._bufferCheck?.()
+  }
 }
 
 function ensureFrame(id, w, h) {
@@ -614,6 +619,7 @@ $.style(`
   & .drop-overlay.active { display: flex; }
 
   /* ── FILM REEL ── */
+  & .reel-spacer { flex-shrink: 0; }
   & .film-reel {
     background: #1d2021; border-top: 1px solid #3c3836;
     display: flex; align-items: center; gap: 6px;
@@ -1171,10 +1177,11 @@ function watchSharedState(target) {
           ctx.clearRect(0, 0, state.canvasW, state.canvasH)
           ctx.drawImage(db[id].drawCanvas, 0, 0)
         }
-        reelDirty = true
+        updateReelThumb(target, id)
       }
     })
 
+    // structure changed (frames added/removed) → full reel rebuild
     if (reelDirty) renderReel(target)
   }
 
@@ -1422,7 +1429,8 @@ function gotoFrame(target, idx) {
   $.whisper({ status: `frame ${target._localCurrent + 1} / ${frames.length}` })
   loadCurrentFrame(target)
   renderOnion(target)
-  renderReel(target)
+  scrollReelToFrame(target, target._localCurrent)
+  evictDistantFrames(target)
 }
 
 function addFrame(target, copyFromIdx = null) {
@@ -1483,7 +1491,7 @@ function clearFrame(target, idx) {
   if (ctx) ctx.clearRect(0, 0, db[id].drawCanvas.width, db[id].drawCanvas.height)
   $.teach({ frameStrokes: newStrokes })
   $.whisper({ status: 'cleared frame' })
-  loadCurrentFrame(target); renderOnion(target); renderReel(target)
+  loadCurrentFrame(target); renderOnion(target); updateReelThumb(target, id)
 }
 
 function applyDims(target, w, h) {
@@ -1711,28 +1719,99 @@ function showReelMenu(target, frameDiv, idx, id) {
 
 /*
 
-Film reel — uses target._localCurrent for active highlight.
-Presence dots still driven by players[pid].frameId (correct — peer-namespaced).
+Film reel — virtual windowed render.
+
+Only the frames visible in the scroll viewport (plus REEL_OVERSCAN on each side)
+are in the DOM. Spacer divs at front and back preserve total scroll width.
+A scroll listener re-renders the window as the user scrolls.
+
+reelSlotWidth: thumbnail height is 60px, so thumb width = 60 * (canvasW/canvasH).
+Plus 4px border + 6px flex gap = slot total.
 
 */
 
+function reelSlotWidth(canvasW, canvasH) {
+  return canvasH > 0 ? Math.round(60 * canvasW / canvasH) + 10 : 70
+}
+
+// Scroll reel so that frame idx is visible. Does not rebuild DOM — the scroll
+// event (or the explicit renderReel call below) handles that.
+function scrollReelToFrame(target, idx) {
+  const reel = target.querySelector('[data-film-reel]'); if (!reel) return
+  const { canvasW, canvasH } = $.learn()
+  const slotW = reelSlotWidth(canvasW, canvasH)
+  const frameLeft  = idx * slotW
+  const frameRight = frameLeft + slotW
+  const reelW = reel.clientWidth || 400
+  if (frameLeft < reel.scrollLeft) {
+    reel.scrollLeft = frameLeft
+  } else if (frameRight > reel.scrollLeft + reelW) {
+    reel.scrollLeft = frameRight - reelW
+  }
+  // renderReel reads reel.scrollLeft synchronously after the assignment above
+  renderReel(target)
+}
+
+// Free video pixel data for frames far from current to bound memory usage.
+function evictDistantFrames(target) {
+  const { frames } = $.learn()
+  const current = target._localCurrent ?? 0
+  frames.forEach((id, idx) => {
+    if (Math.abs(idx - current) > MEMORY_WINDOW) {
+      const f = db[id]
+      if (f?.hasVideo) {
+        f.videoCanvas.getContext('2d').clearRect(0, 0, f.videoCanvas.width, f.videoCanvas.height)
+        f.hasVideo = false
+        // _hasCachedVideo stays true so it reloads from cache on demand
+      }
+    }
+  })
+}
+
 function renderReel(target) {
-  const { frames, players } = $.learn()
+  const { frames, players, canvasW, canvasH } = $.learn()
   const current = target._localCurrent ?? 0
   const reel = target.querySelector('[data-film-reel]'); if (!reel) return
-  const addBtn = reel.querySelector('[data-new-frame]')
 
-  if (target._reelObserver) target._reelObserver.disconnect()
-  target._reelObserver = new IntersectionObserver(entries => {
-    entries.forEach(e => { if (e.isIntersecting) ensureFrameVideo(e.target.dataset.reelId, target) })
-  }, { root: reel, rootMargin: '0px 200px' })
+  // Wire scroll listener once — rAF-gated to avoid per-pixel rebuilds
+  if (!reel._scrollWired) {
+    reel._scrollWired = true
+    let _raf = null
+    reel.addEventListener('scroll', () => {
+      if (_raf) return
+      _raf = requestAnimationFrame(() => { _raf = null; renderReel(target) })
+    }, { passive: true })
+  }
+
+  const slotW    = reelSlotWidth(canvasW, canvasH)
+  const reelW    = reel.clientWidth || 400
+  const scrollLeft = reel.scrollLeft
+
+  const startIdx = Math.max(0, Math.floor(scrollLeft / slotW) - REEL_OVERSCAN)
+  const endIdx   = Math.min(frames.length - 1, Math.ceil((scrollLeft + reelW) / slotW) + REEL_OVERSCAN)
+  const beforeW  = startIdx * slotW
+  const afterW   = Math.max(0, (frames.length - 1 - endIdx) * slotW)
+
+  // Detach the add button before clearing so we can re-append it
+  let addBtn = reel.querySelector('[data-new-frame]')
+  if (addBtn) addBtn.remove()
 
   reel.innerHTML = ''
 
-  frames.forEach((id, idx) => {
-    const f = ensureFrame(id, $.learn().canvasW, $.learn().canvasH)
+  if (beforeW > 0) {
+    const s = document.createElement('div'); s.className = 'reel-spacer'
+    s.style.width = beforeW + 'px'; reel.appendChild(s)
+  }
+
+  for (let idx = startIdx; idx <= endIdx && idx < frames.length; idx++) {
+    const id = frames[idx]
+    const { canvasW: w, canvasH: h } = $.learn()
+    const f = ensureFrame(id, w, h)
+
     const div = document.createElement('div')
     div.className = 'reel-frame' + (idx === current ? ' active' : '')
+    div.dataset.reelIdx = idx
+    div.dataset.reelId = id
 
     const thumb = document.createElement('canvas')
     thumb.width = f.drawCanvas.width; thumb.height = f.drawCanvas.height
@@ -1742,39 +1821,29 @@ function renderReel(target) {
     tctx.drawImage(f.drawCanvas, 0, 0)
 
     const num = document.createElement('span'); num.className = 'reel-num'; num.textContent = idx + 1
-
     const del = document.createElement('button'); del.className = 'reel-del'; del.textContent = '✕'
 
-    // player presence dots — peers on this frame (by their frameId, not our current)
     const peersHere = Object.entries(players || {}).filter(([pid, p]) => pid !== playerId && p.frameId === id)
     if (peersHere.length) {
       const dotsRow = document.createElement('div'); dotsRow.className = 'reel-player-dots'
       peersHere.forEach(([pid, p]) => {
         const dot = document.createElement('div'); dot.className = 'reel-player-dot'
-        dot.style.background = p.color || '#fabd2f'
-        dot.title = pid.slice(0, 6)
+        dot.style.background = p.color || '#fabd2f'; dot.title = pid.slice(0, 6)
         dotsRow.appendChild(dot)
       })
       div.appendChild(dotsRow)
     }
 
-    if (f.hasVideo) { const b=document.createElement('span');b.className='reel-badge';b.style.color='#83a598';b.textContent='▶';div.appendChild(b) }
+    if (f.hasVideo)  { const b=document.createElement('span');b.className='reel-badge';b.style.color='#83a598';b.textContent='▶';div.appendChild(b) }
     if (f.children) { const b=document.createElement('span');b.className='reel-badge';b.style.cssText='color:#fe8019;left:10px';b.textContent='↳';div.appendChild(b) }
 
-    div.dataset.reelIdx = idx
-    div.dataset.reelId = id
-
-    // full-area click catcher — sits above thumb/num, below del button
     const catcher = document.createElement('div')
     catcher.style.cssText = 'position:absolute;inset:0;z-index:2;'
-    catcher.dataset.reelIdx = idx
-    catcher.dataset.reelId = id
+    catcher.dataset.reelIdx = idx; catcher.dataset.reelId = id
 
     div.appendChild(thumb); div.appendChild(num); div.appendChild(catcher); div.appendChild(del)
 
-    let _pressTimer = null
-    let _dragState = null
-
+    let _pressTimer = null, _dragState = null
     const cancelPress = () => { if (_pressTimer) { clearTimeout(_pressTimer); _pressTimer = null } }
 
     catcher.addEventListener('pointerdown', e => {
@@ -1791,27 +1860,18 @@ function renderReel(target) {
       const onMove = e => {
         const dx = e.clientX - startX, dy = e.clientY - startY
         if (!moved && Math.sqrt(dx*dx + dy*dy) > 6) {
-          moved = true
-          cancelPress()
-          // start drag
+          moved = true; cancelPress()
           _dragState = startReelDrag(target, div, idx, e)
         }
         if (_dragState) updateReelDrag(_dragState, e)
       }
-
       const onUp = e => {
         catcher.removeEventListener('pointermove', onMove)
         catcher.removeEventListener('pointerup', onUp)
         catcher.removeEventListener('pointercancel', onUp)
-        if (_dragState) {
-          endReelDrag(target, _dragState, e)
-          _dragState = null
-        } else if (_pressTimer) {
-          cancelPress()
-          gotoFrame(target, idx)
-        }
+        if (_dragState) { endReelDrag(target, _dragState, e); _dragState = null }
+        else if (_pressTimer) { cancelPress(); gotoFrame(target, idx) }
       }
-
       catcher.addEventListener('pointermove', onMove)
       catcher.addEventListener('pointerup', onUp)
       catcher.addEventListener('pointercancel', onUp)
@@ -1820,13 +1880,22 @@ function renderReel(target) {
     catcher.addEventListener('contextmenu', e => e.preventDefault())
     del.addEventListener('click', e => { e.stopPropagation(); deleteFrame(target, idx) })
 
-    if (f._hasCachedVideo && !f.hasVideo) target._reelObserver.observe(div)
-    reel.appendChild(div)
-  })
+    // lazy-load video for visible frames not yet decoded
+    if (f._hasCachedVideo && !f.hasVideo && !f._videoLoading) ensureFrameVideo(id, target)
 
-  if (addBtn) reel.appendChild(addBtn)
-  const active = reel.querySelector('.active')
-  if (active) active.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+    reel.appendChild(div)
+  }
+
+  if (afterW > 0) {
+    const s = document.createElement('div'); s.className = 'reel-spacer'
+    s.style.width = afterW + 'px'; reel.appendChild(s)
+  }
+
+  if (!addBtn) {
+    addBtn = document.createElement('button')
+    addBtn.className = 'reel-add'; addBtn.dataset.newFrame = ''; addBtn.textContent = '+'
+  }
+  reel.appendChild(addBtn)
 }
 
 
@@ -2051,7 +2120,7 @@ function _applyStrokes(target, id, strokes) {
   target._drawCanvas.getContext('2d').drawImage(f.drawCanvas, 0, 0)
   if (target._activeCanvas) target._activeCanvas.getContext('2d')
     .clearRect(0, 0, target._activeCanvas.width, target._activeCanvas.height)
-  renderReel(target)
+  updateReelThumb(target, id)
 }
 
 function undoFrame(target) {
@@ -2127,7 +2196,7 @@ function attachDrawEvents(target) {
       db[frameId].drawCanvas.getContext('2d').drawImage(target._drawCanvas,0,0)
       const fs=$.learn().frameStrokes
       $.teach({frameStrokes:{...fs,[frameId]:[...(fs[frameId]||[]),[{x,y,fill:true,color:fillColor,lineWidth:0,opacity:1}]]}})
-      target._drawing=false; renderReel(target); scheduleWasSave(target.id); return
+      target._drawing=false; updateReelThumb(target, frameId); scheduleWasSave(target.id); return
     }
 
     const{thickness,opacity,color}=$.learn()
@@ -2224,7 +2293,7 @@ function attachDrawEvents(target) {
           [frameId]: [...(fs[frameId] || []), committed]
         }
       })
-      renderReel(target)
+      updateReelThumb(target, frameId)
       scheduleWasSave(target.id)
     }
     target._points=[]
@@ -2328,7 +2397,7 @@ function commitPenPath(target){
       [frameId]: [...(fspen[frameId] || []), syntheticStroke]
     }
   })
-  target._penPoints=[]; renderReel(target)
+  target._penPoints=[]; updateReelThumb(target, frameId)
 }
 
 /*
@@ -3299,7 +3368,7 @@ function captureFrame(target) {
   target._videoCanvas.getContext('2d').clearRect(0, 0, canvasW, canvasH)
   target._videoCanvas.getContext('2d').drawImage(f.videoCanvas, 0, 0)
 
-  renderReel(target)
+  updateReelThumb(target, frameId)
 }
 $.when('click','[data-zoom-in]',e=>{const r=e.target.closest(tag);if(!r)return;setZoom(r,$.learn().zoom+0.25)})
 $.when('click','[data-zoom-out]',e=>{const r=e.target.closest(tag);if(!r)return;setZoom(r,$.learn().zoom-0.25)})
