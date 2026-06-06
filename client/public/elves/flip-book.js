@@ -43,27 +43,68 @@ function wasCanvasPath(id) {
   return id?.startsWith('/') ? `${id}.flip-book.json` : null
 }
 
+// IndexedDB cache keys for WAS-backed state (distinct from frame/gallery keys)
+const wasCacheKey = id => `was-state-${id}`
+const wasAudioCacheKey = id => `was-audio-${id}`
+
+// Fingerprint for mismatch detection: frame ids + stroke count per frame
+function wasStateFingerprint(state) {
+  return state.frames.join(',') + ':' +
+    state.frames.map(id => (state.frameStrokes[id] || []).length).join(',')
+}
+
+function applyWasState(target, state) {
+  const { canvasW, canvasH } = state
+  const fhv = state.frameHasVideo || {}
+  Object.keys(fhv).forEach(frameId => {
+    const f = ensureFrame(frameId, canvasW, canvasH)
+    f._hasCachedVideo = true
+    f._wasVideoPath = `${target.id}/frame-${frameId}.png`
+  })
+  $.teach(state)
+}
+
 async function loadFromWas(target) {
   const p = wasCanvasPath(target.id)
   if (!p) return
+
+  // ── state JSON: IndexedDB first, WAS revalidates in background ───────────
+  let cachedFingerprint = null
+  try {
+    const record = await fbCache.get(wasCacheKey(target.id))
+    if (record?.data?.frames?.length && record.data.frameStrokes) {
+      cachedFingerprint = wasStateFingerprint(record.data)
+      applyWasState(target, record.data)
+    }
+  } catch { /* IndexedDB miss — fall through to WAS */ }
+
   try {
     const blob = await wasGet(p)
     if (!blob) return
-    const text = await blob.text()
-    const state = JSON.parse(text)
-    if (state?.frames?.length && state?.frameStrokes) {
-      // wire frames before $.teach so _hasCachedVideo is set before first render
-      const wasBase = target.id
-      const { canvasW, canvasH } = state
-      const fhv = state.frameHasVideo || {}
-      Object.keys(fhv).forEach(frameId => {
-        const f = ensureFrame(frameId, canvasW, canvasH)
-        f._hasCachedVideo = true
-        f._wasVideoPath = `${wasBase}/frame-${frameId}.png`
-      })
-      $.teach(state)
+    const state = JSON.parse(await blob.text())
+    if (!state?.frames?.length || !state?.frameStrokes) return
+    const fp = wasStateFingerprint(state)
+    if (fp !== cachedFingerprint) {
+      fbCache.put(wasCacheKey(target.id), state, 'json').catch(() => null)
+      applyWasState(target, state)
     }
-  } catch { /* WAS miss or offline — start fresh */ }
+  } catch { /* WAS miss or offline — cached state already applied */ }
+
+  // ── audio: IndexedDB first, WAS only on miss ──────────────────────────────
+  const ap = wasAudioPath(target.id)
+  if (!ap) return
+  try {
+    const record = await fbCache.get(wasAudioCacheKey(target.id))
+    if (record?.data) {
+      restoreAudioFromBlob(target, record.data)
+    } else {
+      const blob = await wasGet(ap).catch(() => null)
+      if (blob) {
+        restoreAudioFromBlob(target, blob)
+        fbCache.put(wasAudioCacheKey(target.id), blob, 'audio/wav').catch(() => null)
+      }
+    }
+  } catch { /* audio unavailable */ }
 }
 
 let _wasSaveTimer = null
@@ -76,10 +117,13 @@ function scheduleWasSave(id) {
       const { frames, frameStrokes, canvasW, canvasH } = $.learn()
       const frameHasVideo = {}
       frames.forEach(id => { if (db[id]?.hasVideo) frameHasVideo[id] = true })
-      const json = JSON.stringify({ frames, frameStrokes, canvasW, canvasH, frameHasVideo })
+      const state = { frames, frameStrokes, canvasW, canvasH, frameHasVideo }
+      const json = JSON.stringify(state)
       // WAS is immutable — delete existing version before re-writing
       await wasDel(p).catch(() => null)
       await wasPut(p, json, { type: 'application/json' })
+      // write-through: keep IndexedDB in sync so next load is instant
+      fbCache.put(wasCacheKey(id), state, 'json').catch(() => null)
     } catch { /* best-effort */ }
   }, 1500)
 }
@@ -95,6 +139,108 @@ When a remote frame id arrives that we haven't seen, ensureFrame + replayStrokes
 */
 
 const db = {}
+
+/*
+
+Inline worker for parallel frame decoding.
+Opens the same IDB used by @silly/cache, reads all requested frame blobs,
+decodes them with createImageBitmap (off main thread), returns ImageBitmaps
+as transferables. One worker is created lazily and reused.
+
+*/
+
+const _workerSrc = `
+const IDB_NAME = 'flip-book'
+const IDB_STORE = 'cache'
+
+let _db = null
+function openDb() {
+  if (_db) return Promise.resolve(_db)
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1)
+    req.onsuccess = e => { _db = e.target.result; resolve(_db) }
+    req.onerror = reject
+  })
+}
+
+async function getBlob(db, key) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE)
+    const req = tx.objectStore(IDB_STORE).get(key)
+    req.onsuccess = e => resolve(e.target.result?.data ?? null)
+    req.onerror = reject
+  })
+}
+
+self.onmessage = async ({ data: { batchId, frameIds } }) => {
+  const db = await openDb()
+  const results = await Promise.all(frameIds.map(async frameId => {
+    try {
+      const blob = await getBlob(db, 'frame-' + frameId)
+      if (!blob) return { frameId, bitmap: null }
+      const bitmap = await createImageBitmap(blob)
+      return { frameId, bitmap }
+    } catch {
+      return { frameId, bitmap: null }
+    }
+  }))
+  const transferables = results.map(r => r.bitmap).filter(Boolean)
+  self.postMessage({ batchId, results }, transferables)
+}
+`
+let _frameWorker = null
+let _workerBatchId = 0
+const _workerCallbacks = new Map()
+
+function getFrameWorker() {
+  if (_frameWorker) return _frameWorker
+  const blob = new Blob([_workerSrc], { type: 'text/javascript' })
+  _frameWorker = new Worker(URL.createObjectURL(blob))
+  _frameWorker.onmessage = ({ data: { batchId, results } }) => {
+    const resolve = _workerCallbacks.get(batchId)
+    if (resolve) { _workerCallbacks.delete(batchId); resolve(results) }
+  }
+  return _frameWorker
+}
+
+// Decode a batch of frame ids in parallel via the worker.
+// Returns a promise that resolves with { frameId, bitmap }[]
+function decodeFramesBatch(frameIds) {
+  return new Promise(resolve => {
+    const batchId = ++_workerBatchId
+    _workerCallbacks.set(batchId, resolve)
+    getFrameWorker().postMessage({ batchId, frameIds })
+  })
+}
+
+// Preload all frames that have cached video — fires the worker once for the
+// whole batch, applies ImageBitmaps to their canvases, then triggers callbacks.
+async function preloadAllFrames(target) {
+  const { frames, canvasW, canvasH } = $.learn()
+  const toLoad = frames.filter(id => {
+    const f = db[id]
+    return f && f._hasCachedVideo && !f.hasVideo && !f._videoLoading
+  })
+  if (!toLoad.length) return
+
+  toLoad.forEach(id => { db[id]._videoLoading = true })
+
+  const results = await decodeFramesBatch(toLoad)
+
+  results.forEach(({ frameId, bitmap }) => {
+    const f = db[frameId]
+    if (!f) return
+    f._videoLoading = false
+    if (!bitmap) return
+    f.videoCanvas.getContext('2d').drawImage(bitmap, 0, 0)
+    f.hasVideo = true
+    bitmap.close()
+  })
+
+  renderReel(target)
+  loadCurrentFrame(target)
+  target._bufferCheck?.()
+}
 
 function ensureFrame(id, w, h) {
   if (db[id]) return db[id]
@@ -170,7 +316,22 @@ const SCHEMA_VERSION = 1
 const FB_INDEX_KEY = 'index'
 const fb_key = id => `fb-${id}`
 const audio_key = id => `audio-${id}`
-const SESSION_AUDIO_KEY = 'session-audio'
+
+function wasAudioPath(id) {
+  return id?.startsWith('/') ? `${id}.flip-book.audio.wav` : null
+}
+
+async function saveAudioToWas(id, audioBuffer) {
+  const p = wasAudioPath(id)
+  if (!p) return
+  try {
+    const wav = audioBufferToWav(audioBuffer)
+    await wasDel(p).catch(() => null)
+    await wasPut(p, wav, { type: 'audio/wav' })
+    // write-through: keep IndexedDB in sync so next load is instant
+    fbCache.put(wasAudioCacheKey(id), wav, 'audio/wav').catch(() => null)
+  } catch { /* best-effort */ }
+}
 
 function audioBufferToWav(buf) {
   const ch = buf.numberOfChannels, sr = buf.sampleRate, len = buf.length
@@ -190,11 +351,6 @@ function audioBufferToWav(buf) {
   return new Blob([ab], { type: 'audio/wav' })
 }
 
-async function persistSessionAudio(target) {
-  if (!target._audioBuffer) return
-  try { await fbCache.put(SESSION_AUDIO_KEY, audioBufferToWav(target._audioBuffer), 'audio/wav') }
-  catch(e) { console.warn('audio persist failed', e) }
-}
 
 async function restoreAudioFromBlob(target, blob) {
   try {
@@ -929,12 +1085,9 @@ function boot(target) {
   watchSharedState(target)
 
   // load persisted canvas from WAS if id is a path (e.g. /circus/tent)
-  loadFromWas(target)
+  // after WAS loads, preload all frame video bitmaps in one worker batch
+  loadFromWas(target).then(() => preloadAllFrames(target))
 
-  // restore session audio (fire-and-forget — audio is a nice-to-have, not blocking)
-  fbCache.get(SESSION_AUDIO_KEY).then(record => {
-    if (record?.data) restoreAudioFromBlob(target, record.data)
-  }).catch(() => {})
 }
 
 function attachArtboardPan(target) {
@@ -2223,8 +2376,8 @@ function startPlayback(target) {
   const needed = Math.min(Math.ceil(fps * 2), frames.length)
   const ready = countReadyAhead(frames, current, needed)
 
-  // kick off aggressive background loading for all unloaded frames
-  frames.forEach(id => ensureFrameVideo(id, target))
+  // kick off parallel batch loading for all unloaded frames
+  preloadAllFrames(target)
 
   if (ready >= needed) {
     _doStartPlayback(target)
@@ -2680,7 +2833,7 @@ async function importAudio(target, file, fps) {
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
     target._audioBuffer = audioBuffer
     target._audioDuration = audioBuffer.duration
-    persistSessionAudio(target)
+    saveAudioToWas(target.id, audioBuffer)
 
     const totalFrames = Math.ceil(audioBuffer.duration * fps)
     const { canvasW, canvasH } = $.learn()
@@ -2753,7 +2906,7 @@ async function importVideo(target,file,fpsOverride){
     const arrayBuffer=await file.arrayBuffer()
     audioCtx.decodeAudioData(arrayBuffer,buf=>{
       target._audioBuffer=buf;target._audioDuration=buf.duration
-      persistSessionAudio(target)
+      saveAudioToWas(target.id, buf)
     })
   }catch(e){console.warn('video audio extraction failed',e)}
 }

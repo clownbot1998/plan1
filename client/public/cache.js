@@ -22,25 +22,11 @@ export default function cache(name) {
     const transaction = db.transaction(CACHE);
     const objectStore = transaction.objectStore(CACHE);
 
-    const value = await new Promise(function loadFromDatabase(resolve, reject) {
-      const read = objectStore.openCursor();
-
-      read.onsuccess = function(event) {
-        const cursor = event.target.result;
-
-        if (cursor) {
-          if(key === cursor.key) {
-            resolve(cursor.value);
-          }
-          cursor.continue();
-        } else {
-          resolve(null)
-        }
-      };
-      read.onerror = reject;
+    return new Promise(function loadFromDatabase(resolve, reject) {
+      const request = objectStore.get(key);
+      request.onsuccess = event => resolve(event.target.result ?? null);
+      request.onerror = reject;
     });
-
-    return value;
   }
 
   async function put(key, data, type) {
