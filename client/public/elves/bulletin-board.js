@@ -2459,7 +2459,7 @@ window.addEventListener('popstate', e => {
   }
 })
 
-// ── gamepad OS button (button 16) ─────────────────────────────────────────────
+// ── gamepad OS button (button 16) + select (button 8) ────────────────────────
 
 const _toggleCache = {}
 function toggleSpam(code, value, callback) {
@@ -2467,16 +2467,22 @@ function toggleSpam(code, value, callback) {
   _toggleCache[code] = value
 }
 
+function toggleWorldMode() {
+  const { mode } = $.learn()
+  $.teach({ mode: mode === 'os' ? 'pan' : 'os', menuOpen: false, linkSource: null })
+}
+
 function osLoop() {
   const os = checkButton(0, 16)
-  toggleSpam('os', os, () => {
-    const { mode } = $.learn()
-    $.teach({ mode: mode === 'os' ? 'pan' : 'os', menuOpen: false, linkSource: null })
-  })
+  toggleSpam('os', os, toggleWorldMode)
+  const sel = checkButton(0, 8)
+  toggleSpam('select', sel, toggleWorldMode)
   requestAnimationFrame(osLoop)
 }
 
 requestAnimationFrame(osLoop)
+
+window.addEventListener('bb:world-toggle', toggleWorldMode)
 
 // ── styles ────────────────────────────────────────────────────────────────────
 

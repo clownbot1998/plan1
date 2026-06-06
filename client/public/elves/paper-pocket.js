@@ -101,6 +101,7 @@ export const systemMenu = {
       { label: 'Typo Hero',        rom: 'typo-hero' },
       { label: 'Final Boss',       rom: 'final-boss' },
       { label: 'Paper Nautiloids', rom: 'paper-nautiloids' },
+      { label: 'Bulletin Board',   rom: 'bulletin-board' },
     ]
   },
   apps: {
@@ -1706,7 +1707,14 @@ export function resume() {
 }
 
 function selectFire(value) {
-  const { mode } = $.learn()
+  const { mode, rom } = $.learn()
+
+  if(mode === modes.game && rom === 'bulletin-board') {
+    toggleSpam('select', value, () => {
+      window.dispatchEvent(new CustomEvent('bb:world-toggle'))
+    })
+    return
+  }
 
   if(mode === modes.game) {
     toggleSpam('select', value, () => {
