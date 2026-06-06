@@ -140,9 +140,10 @@ When a remote frame id arrives that we haven't seen, ensureFrame + replayStrokes
 
 const db = {}
 
-const REEL_OVERSCAN  = 10   // frames rendered beyond each visible edge
-const MEMORY_WINDOW  = 150  // evict video pixel data beyond this distance from current
-const DECODE_CHUNK   = 16   // ImageBitmaps decoded per worker batch
+const REEL_OVERSCAN       = 10   // frames rendered beyond each visible edge
+const MEMORY_WINDOW       = 150  // evict video pixel data beyond this distance from current
+const DECODE_CHUNK        = 16   // ImageBitmaps decoded per worker batch
+const PLAYBACK_LOOKAHEAD  = 30   // frames decoded ahead of the playhead
 
 /*
 
@@ -217,11 +218,56 @@ function decodeFramesBatch(frameIds) {
   })
 }
 
-// Preload all frames with cached video in parallel chunks.
-// Chunks of DECODE_CHUNK keep memory bounded for large projects.
+// Apply a batch of decoded bitmaps to their frame canvases.
+// Falls back to ensureFrameVideo (WAS path) for IDB misses.
+function applyDecodedBatch(target, results) {
+  results.forEach(({ frameId, bitmap }) => {
+    const f = db[frameId]
+    if (!f) return
+    f._videoLoading = false
+    if (!bitmap) {
+      // IDB miss — frame may only exist in WAS; ensureFrameVideo handles that path
+      if (f._hasCachedVideo) ensureFrameVideo(frameId, target)
+      return
+    }
+    f.videoCanvas.getContext('2d').drawImage(bitmap, 0, 0)
+    f.hasVideo = true
+    bitmap.close()
+  })
+}
+
+// Sliding lookahead for playback — decodes the next PLAYBACK_LOOKAHEAD
+// unloaded frames ahead of the playhead. Self-chains while playing.
+// target._lookaheadInflight prevents concurrent batches piling up.
+function triggerPlaybackLookahead(target) {
+  if (target._lookaheadInflight) return
+  const { frames } = $.learn()
+  const current = target._localCurrent ?? 0
+  const toLoad = []
+  for (let i = 1; i <= PLAYBACK_LOOKAHEAD && toLoad.length < PLAYBACK_LOOKAHEAD; i++) {
+    const id = frames[(current + i) % frames.length]
+    const f = db[id]
+    if (f && f._hasCachedVideo && !f.hasVideo && !f._videoLoading) toLoad.push(id)
+  }
+  if (!toLoad.length) return
+  target._lookaheadInflight = true
+  toLoad.forEach(id => { db[id]._videoLoading = true })
+  decodeFramesBatch(toLoad).then(results => {
+    target._lookaheadInflight = false
+    applyDecodedBatch(target, results)
+    target._bufferCheck?.()
+    if (target._playing) triggerPlaybackLookahead(target)
+  })
+}
+
+// Background loader — fills all frame thumbnails in DECODE_CHUNK batches.
+// Starts from current frame so the playhead area satisfies _bufferCheck first.
 async function preloadAllFrames(target) {
   const { frames } = $.learn()
-  const toLoad = frames.filter(id => {
+  const current = target._localCurrent ?? 0
+  // prioritise current→end, then wrap 0→current
+  const ordered = [...frames.slice(current), ...frames.slice(0, current)]
+  const toLoad = ordered.filter(id => {
     const f = db[id]
     return f && f._hasCachedVideo && !f.hasVideo && !f._videoLoading
   })
@@ -232,15 +278,7 @@ async function preloadAllFrames(target) {
   for (let i = 0; i < toLoad.length; i += DECODE_CHUNK) {
     const chunk = toLoad.slice(i, i + DECODE_CHUNK)
     const results = await decodeFramesBatch(chunk)
-    results.forEach(({ frameId, bitmap }) => {
-      const f = db[frameId]
-      if (!f) return
-      f._videoLoading = false
-      if (!bitmap) return
-      f.videoCanvas.getContext('2d').drawImage(bitmap, 0, 0)
-      f.hasVideo = true
-      bitmap.close()
-    })
+    applyDecodedBatch(target, results)
     renderReel(target)
     loadCurrentFrame(target)
     target._bufferCheck?.()
@@ -1415,11 +1453,6 @@ function loadCurrentFrame(target) {
   } else {
     ensureFrameVideo(frameId, target)
   }
-  // prefetch neighbours
-  for (let i = 1; i <= 3; i++) {
-    const nextId = frames[(current + i) % frames.length]
-    if (nextId) ensureFrameVideo(nextId, target)
-  }
 }
 
 function gotoFrame(target, idx) {
@@ -2445,7 +2478,9 @@ function startPlayback(target) {
   const needed = Math.min(Math.ceil(fps * 2), frames.length)
   const ready = countReadyAhead(frames, current, needed)
 
-  // kick off parallel batch loading for all unloaded frames
+  // priority: decode the next PLAYBACK_LOOKAHEAD frames from current position
+  triggerPlaybackLookahead(target)
+  // background: fill all thumbnails starting from current frame outward
   preloadAllFrames(target)
 
   if (ready >= needed) {
@@ -2453,7 +2488,7 @@ function startPlayback(target) {
     return
   }
 
-  // buffer: show status, wait for enough consecutive ready frames
+  // buffer: wait for enough consecutive ready frames ahead of current
   $.teach({ playing: true })
   $.whisper({ status: `buffering… ${ready}/${needed}` })
   target._bufferCheck = () => {
@@ -2489,6 +2524,7 @@ function _doStartPlayback(target) {
     else { if (next >= frames.length) { next = frames.length - 1; stopPlayback(target); return } }
     target._localCurrent = Math.max(0, Math.min(frames.length - 1, next))
     loadCurrentFrame(target); renderOnion(target)
+    triggerPlaybackLookahead(target)
   }
   target._playing = true
   target._rafId = requestAnimationFrame(tick)
@@ -2498,6 +2534,7 @@ function stopPlayback(target) {
   $.teach({ playing: false })
   $.whisper({ status: '' })
   target._playing = false
+  target._lookaheadInflight = false
   cancelAnimationFrame(target._rafId)
   target._bufferCheck = null
   stopAudio(target)
