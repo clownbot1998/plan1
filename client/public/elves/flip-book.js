@@ -582,10 +582,16 @@ $.style(`
     -webkit-touch-callout: none;
   }
   & * { box-sizing: border-box; }
-  & .app { display: grid; grid-template-rows: 1fr auto 1rem; height: 100%; width: 100%; }
-  & .status-bar { display:flex; align-items:center; justify-content:space-between; font-family:'Recursive'; line-height:1rem; overflow:hidden; }
-  & .export-link { background:transparent; border:none; color:#504945; font-family:'Recursive'; font-size:.6rem; padding:0 .5rem; cursor:pointer; line-height:1rem; white-space:nowrap; flex-shrink:0; transition:color 80ms; }
-  & .export-link:hover { color:#d79921; }
+  & .app { display: grid; grid-template-rows: 1fr auto auto; height: 100%; width: 100%; }
+  & .status-bar { display:flex; align-items:center; justify-content:space-between; font-family:'Recursive'; overflow:hidden; }
+  & .play-btn {
+    background: transparent; border: none; color: #d79921;
+    font-family: 'Recursive'; font-size: .9rem;
+    font-variation-settings: "MONO" 1, "CASL" 0, "wght" 600, "slnt" 0, "CRSV" 0;
+    padding: .3rem .6rem; cursor: pointer; line-height: 1;
+    white-space: nowrap; flex-shrink: 0; transition: color 80ms;
+  }
+  & .play-btn:hover { color: #fabd2f; }
   & [data-status-text] { font-size:.6rem; color:#665c54; padding:0 .5rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 
   & .artboard {
@@ -701,7 +707,7 @@ $.style(`
     position: absolute; left: 0; right: 0; z-index: 5; padding: .5rem;
     display: grid; grid-template-columns: 1fr auto 1fr; gap: .5rem; pointer-events: none;
   }
-  & .fb-taskbar.-top { top: 0; }
+  & .fb-taskbar.-top { top: 0; z-index: 201; }
   & .fb-taskbar.-bottom { bottom: 0; }
   & .fb-taskbar button, & .fb-taskbar .right { pointer-events: all; }
   & .fb-taskbar .right { display: flex; justify-content: flex-end; align-items: center; }
@@ -740,24 +746,18 @@ $.style(`
   & .zoom-sep { color: #3c3836; font-size: .75rem; }
 
   /* ── COMPASS TOOLBELT — v-log pattern ── */
-  &[data-belt="true"] .artboard *, &[data-belt="true"] .taskbar {
+  &[data-belt="true"] .artboard * {
     pointer-events: none !important;
   }
-  &[data-belt="true"] .toolbelt-actions [data-menu] { pointer-events: all !important; }
-
-  & .toolbelt-actions {
-    position: absolute; bottom: 80px; right: 0; z-index: 20; padding: .5rem;
-    display: inline-block;
-    transform: translate(var(--belt-offset-x, 0px), var(--belt-offset-y, 0px));
-    pointer-events: none; touch-action: none; user-select: none;
-  }
-  & .toolbelt-actions button { pointer-events: all; }
 
   & .the-compass {
+    position: absolute; bottom: calc(80px + 1.5rem); right: 0; z-index: 200;
     display: grid;
-    grid-template-columns: repeat(6, calc(100% / 6));
-    grid-template-rows: repeat(6, calc(100% / 6));
-    aspect-ratio: 1; width: 10rem; height: 10rem; pointer-events: none;
+    grid-template-columns: repeat(6, calc(10rem / 6));
+    grid-template-rows: repeat(6, calc(10rem / 6));
+    width: 10rem; height: 10rem;
+    pointer-events: none; touch-action: none; user-select: none;
+    transform: translate(var(--belt-offset-x, 0), var(--belt-offset-y, 0));
   }
   & .the-compass button {
     position: relative; overflow: hidden; touch-action: manipulation;
@@ -1081,17 +1081,6 @@ function mount(target) {
             </div>
           </div>
         </div>
-        <div class="toolbelt-actions" data-toolbelt>
-          <div class="the-compass">
-            <button data-menu data-drag class="root"><span class="icon" data-root-icon>✏</span></button>
-            <button class="minus-7" data-tool="draw"><span class="icon">✏</span></button>
-            <button class="plus-7" data-tool="erase"><span class="icon">⬜</span></button>
-            <button class="plus-2" data-redo><span class="icon">↷</span></button>
-            <button class="plus-5" data-tool="fill"><span class="icon">⬛</span></button>
-            <button class="minus-5" data-tool="pen"><span class="icon">🖊</span></button>
-            <button class="minus-2" data-undo><span class="icon">↶</span></button>
-          </div>
-        </div>
         <div class="overlay-area" data-overlay>
           <div class="overlay-inner" data-overlay-inner></div>
           <button class="overlay-close" data-close-overlay>✕</button>
@@ -1100,9 +1089,18 @@ function mount(target) {
       <div class="film-reel" data-film-reel>
       </div>
       <div class="status-bar">
-        <button class="export-link" data-open-view="export">↓ export</button>
+        <button class="play-btn" data-darkroom-open>▶ play</button>
         <span data-status-text></span>
       </div>
+    </div>
+    <div class="the-compass" data-toolbelt>
+      <button data-menu data-drag class="root"><span class="icon" data-root-icon>✏</span></button>
+      <button class="minus-7" data-tool="draw"><span class="icon">✏</span></button>
+      <button class="plus-7" data-tool="erase"><span class="icon">⬜</span></button>
+      <button class="plus-2" data-redo><span class="icon">↷</span></button>
+      <button class="plus-5" data-tool="fill"><span class="icon">⬛</span></button>
+      <button class="minus-5" data-tool="pen"><span class="icon">🖊</span></button>
+      <button class="minus-2" data-undo><span class="icon">↶</span></button>
     </div>
     ${renderSidebarHtml()}
     <div class="darkroom" data-darkroom>
@@ -1348,6 +1346,7 @@ function watchSharedState(target) {
       loadCurrentFrame(target)
       renderOnion(target)
       reelDirty = true
+      $.whisper({ status: `frame ${target._localCurrent + 1} / ${state.frames.length}` })
     }
 
     // ── new strokes on any frame ──────────────────────────────────────────
@@ -3401,49 +3400,48 @@ function wireOverlay(inner,target){
 
 /*
 
-v-log compass toolbelt drag.
+Compass toolbelt drag — document-level listeners so pointer capture on the
+root button doesn't swallow move events (same pattern as bulletin-board).
 
 */
 
 $.when('pointerdown','[data-drag]',event=>{
   event.preventDefault()
-  $.whisper({grabStartX:event.clientX,grabStartY:event.clientY,beltGrabbed:true,beltDragged:false})
-})
-$.when('pointermove','.artboard',event=>{
   const root=event.target.closest(tag);if(!root)return
-  const{beltGrabbed,beltDragged,beltOffsetX,beltOffsetY,grabStartX,grabStartY}=$.learn()
-  if(!beltGrabbed)return
-  if(grabStartX!==undefined){const dx=Math.abs(event.clientX-grabStartX),dy=Math.abs(event.clientY-grabStartY);if((dx>5||dy>5)&&!beltDragged){event.preventDefault();$.whisper({beltOffsetX:beltOffsetX||0,beltOffsetY:beltOffsetY||0,beltDragged:true})}}
-  if(!$.learn().beltDragged)return
-  event.preventDefault()
-  if(root._lastBeltX!==undefined&&root._lastBeltY!==undefined){
-    const ab=root.querySelector('[data-artboard]')
-    const hostW=ab?ab.clientWidth:root.clientWidth
-    const hostH=ab?ab.clientHeight:root.clientHeight
+  // release implicit browser pointer capture on the button so events bubble freely
+  event.target.releasePointerCapture(event.pointerId)
+  $.whisper({beltGrabbed:true,beltDragged:false})
+
+  let lastX=event.clientX,lastY=event.clientY,moved=false
+
+  const onMove=e=>{
+    const{beltOffsetX,beltOffsetY}=$.learn()
+    const dx=e.clientX-lastX,dy=e.clientY-lastY
+    lastX=e.clientX;lastY=e.clientY
+    if(!moved&&(Math.abs(dx)>4||Math.abs(dy)>4))moved=true
+    if(!moved)return
     const compassEl=root.querySelector('.the-compass')
     const cW=compassEl?compassEl.offsetWidth:160
     const cH=compassEl?compassEl.offsetHeight:160
-    const newX=beltOffsetX+(event.clientX-root._lastBeltX)
-    const newY=beltOffsetY+(event.clientY-root._lastBeltY)
+    const filmReel=root.querySelector('[data-film-reel]')
+    const statusBar=root.querySelector('.status-bar')
+    const bottomOffset=(filmReel?filmReel.offsetHeight:80)+(statusBar?statusBar.offsetHeight:24)
     $.whisper({
-      beltOffsetX:Math.max(-(hostW-cW),Math.min(0,newX)),
-      beltOffsetY:Math.max(-(hostH-cH),Math.min(0,newY)),
+      beltDragged:true,
+      beltOffsetX:Math.max(-(root.clientWidth-cW),Math.min(0,beltOffsetX+dx)),
+      beltOffsetY:Math.max(-(root.clientHeight-bottomOffset-cH),Math.min(0,beltOffsetY+dy)),
     })
   }
-  root._lastBeltX=event.clientX;root._lastBeltY=event.clientY
-})
-$.when('pointerup','[data-drag]',event=>{
-  const root=event.target.closest(tag)
-  event.target.releasePointerCapture(event.pointerId)
-  if(!$.learn().beltDragged)$.whisper({menuOpen:!$.learn().menuOpen})
-  $.whisper({beltGrabbed:false,beltDragged:false,grabStartX:undefined,grabStartY:undefined})
-  if(root){root._lastBeltX=undefined;root._lastBeltY=undefined}
-})
-$.when('pointerup','.artboard',event=>{
-  const root=event.target.closest(tag)
-  event.target.releasePointerCapture(event.pointerId)
-  $.whisper({beltGrabbed:false,beltDragged:false,grabStartX:undefined,grabStartY:undefined})
-  if(root){root._lastBeltX=undefined;root._lastBeltY=undefined}
+
+  const onUp=()=>{
+    document.removeEventListener('pointermove',onMove)
+    document.removeEventListener('pointerup',onUp)
+    if(!moved)$.whisper({menuOpen:!$.learn().menuOpen})
+    $.whisper({beltGrabbed:false,beltDragged:false})
+  }
+
+  document.addEventListener('pointermove',onMove)
+  document.addEventListener('pointerup',onUp)
 })
 
 /*
