@@ -138,6 +138,13 @@ function vendorUrl(url) {
 
   // rewrite internal esm.sh imports recursively
   let code = readFile(diskPath)
+
+  // strip /public/vendor/ prefix from any imports that slipped in from older builds
+  // (/public/vendor/... and /vendor/... resolve to the same file on disk but are
+  //  different module URLs, breaking instanceof checks across codemirror packages)
+  code = code.replaceAll('"/public/vendor/', '"/vendor/')
+             .replaceAll("'/public/vendor/", "'/vendor/")
+
   // pairs: [string_as_it_appears_in_code, full_url_to_vendor]
   const pairs = []
 
