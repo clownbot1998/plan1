@@ -97,3 +97,5 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 
 | `C0DEB10C-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-06-07 | flip-book: phantom queen audio fixed (WAS-scoped), virtual reel (30 DOM nodes for 2312 frames), parallel frame decode via inline worker, darkroom play button was wired to dead code — fixed drStart with frameIsReady hold + drLookahead. vendor.js /public/vendor/ dedup fix, boxart launch screen, cdn-video + hls-video ported. the play button actually plays now. |
+
+| `DEADFA11-CAFE-BABE-C0DE-BEEFFACE2026` | 2026-06-07 | flip-book QoL: compass redesigned as tool selector (draw/erase/pen/fill), wheel+pinch zoom, left settings sidebar with plan98-icon toggle, play button as primary CTA. compass architecture bug fixed — .the-compass is now the positioned element like bulletin-board, no wrapper. belt drag rewired to document-level listeners to survive pointer capture. z-index stack ordered. the compass stays on screen now. |
