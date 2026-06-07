@@ -2684,17 +2684,24 @@ async function readFbIndex() {
   return record?.data || []
 }
 
+const SAVE_CHUNK = 8  // frames encoded + written to IDB concurrently
+
 async function saveFlipbook(target) {
   const { frames } = $.learn()
   const data = serializeFlipbook()
 
-  // persist video layer for each frame that has one
-  await Promise.all(frames.map(async frameId => {
-    const f = db[frameId]
-    if (!f?.hasVideo) return
-    const blob = await new Promise(r => f.videoCanvas.toBlob(r, 'image/png'))
-    await fbCache.put(`frame-${frameId}`, blob, 'image/png')
-  }))
+  // encode + write video frames in small chunks — concurrent Promise.all across
+  // thousands of frames causes OOM (each toBlob holds the PNG in memory)
+  const videoFrames = frames.filter(id => db[id]?.hasVideo)
+  for (let i = 0; i < videoFrames.length; i += SAVE_CHUNK) {
+    const chunk = videoFrames.slice(i, i + SAVE_CHUNK)
+    await Promise.all(chunk.map(async frameId => {
+      const blob = await new Promise(r => db[frameId].videoCanvas.toBlob(r, 'image/png'))
+      await fbCache.put(`frame-${frameId}`, blob, 'image/png')
+    }))
+    $.whisper({ status: `saving… ${Math.min(i + SAVE_CHUNK, videoFrames.length)} / ${videoFrames.length} frames` })
+  }
+  $.whisper({ status: '' })
 
   if (target._audioBuffer) {
     try { await fbCache.put(audio_key(data.id), audioBufferToWav(target._audioBuffer), 'audio/wav') }
