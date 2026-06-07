@@ -715,27 +715,28 @@ $.style(`
 
   & .zoom-widget {
     display: inline-flex; align-items: center; gap: 0;
-    background: rgba(29,32,33,.75); border: 1px solid #3c3836;
-    border-radius: 2px; backdrop-filter: blur(4px); overflow: hidden;
+    background: rgba(29,32,33,.85); border: 1px solid #3c3836;
+    border-radius: 4px; backdrop-filter: blur(4px); overflow: hidden;
+    box-shadow: 0 1px 6px rgba(0,0,0,.3);
   }
   & .zoom-btn {
     background: transparent; border: none; color: #a89984;
-    font-family: 'Recursive'; font-size: .8rem;
-    padding: .2rem .4rem; cursor: pointer; line-height: 1; flex-shrink: 0;
+    font-family: 'Recursive'; font-size: 1rem;
+    padding: .5rem; cursor: pointer; line-height: 1; flex-shrink: 0; min-width: 2rem; text-align: center;
     transition: all 80ms;
   }
   & .zoom-btn:hover { background: rgba(215,153,33,.15); color: #fabd2f; }
   & .zoom-label {
     background: transparent; border: none; border-left: 1px solid #3c3836;
-    color: #665c54; font-family: 'Recursive'; font-size: .6rem;
-    padding: .2rem .35rem; cursor: pointer;
+    color: #a89984; font-family: 'Recursive'; font-size: .75rem;
+    padding: .5rem .6rem; cursor: pointer;
     transition: color 80ms, border-color 80ms; white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
   & .zoom-label:hover { color: #fabd2f; border-left-color: #d79921; }
-  & [data-zoom-lbl] { min-width: 3.2em; text-align: right; }
+  & [data-zoom-lbl] { min-width: 3.2em; text-align: center; }
   & [data-dim-lbl]  { min-width: 5.5em; }
-  & .zoom-sep { color: #3c3836; font-size: .6rem; }
+  & .zoom-sep { color: #3c3836; font-size: .75rem; }
 
   /* ── COMPASS TOOLBELT — v-log pattern ── */
   &[data-belt="true"] .artboard *, &[data-belt="true"] .taskbar {
@@ -932,6 +933,11 @@ function mount(target) {
         <div class="fb-taskbar -top">
           <div class="left"><button class="corner-btn" data-open-view="settings">⚙ settings</button></div>
           <div class="center"></div>
+          <div class="right"></div>
+        </div>
+        <div class="fb-taskbar -bottom">
+          <div class="left"></div>
+          <div class="center" data-capture-slot></div>
           <div class="right">
             <div class="zoom-widget">
               <button class="zoom-btn" data-zoom-out>−</button>
@@ -941,17 +947,14 @@ function mount(target) {
             </div>
           </div>
         </div>
-        <div class="fb-taskbar -bottom">
-          <div class="center" data-capture-slot></div>
-        </div>
         <div class="toolbelt-actions" data-toolbelt>
           <div class="the-compass">
             <button data-menu data-drag class="root"><span class="icon" data-root-icon>✏</span></button>
-            <button class="minus-7" data-open-view="color"><span class="icon" data-color-icon></span></button>
-            <button class="plus-7" data-darkroom-open><span class="icon">▶</span></button>
+            <button class="minus-7" data-tool="draw"><span class="icon">✏</span></button>
+            <button class="plus-7" data-tool="erase"><span class="icon">⬜</span></button>
             <button class="plus-2" data-redo><span class="icon">↷</span></button>
-            <button class="plus-5" data-open-view="gallery"><span class="icon">⊞</span></button>
-            <button class="minus-5" data-cycle-tool><span class="icon" data-cycle-icon>🖊</span></button>
+            <button class="plus-5" data-tool="fill"><span class="icon">⬛</span></button>
+            <button class="minus-5" data-tool="pen"><span class="icon">🖊</span></button>
             <button class="minus-2" data-undo><span class="icon">↶</span></button>
           </div>
         </div>
@@ -994,15 +997,13 @@ function update(target) {
   const toolbelt = target.querySelector('[data-toolbelt]')
   if (toolbelt) toolbelt.style.cssText = `--belt-offset-x:${beltOffsetX}px;--belt-offset-y:${beltOffsetY}px;`
   const compass = target.querySelector('.the-compass')
-  if (compass) compass.dataset.open = menuOpen ? 'true' : 'false'
-  const ri = target.querySelector('[data-root-icon]'); if (ri) ri.textContent = toolIcon(tool)
-  const ci = target.querySelector('[data-cycle-icon]'); if (ci) ci.textContent = toolIcon(nextTool(tool))
-  const colorIcon = target.querySelector('[data-color-icon]')
-  if (colorIcon) {
-    colorIcon.style.cssText = color === 'transparent'
-      ? 'position:absolute;inset:20%;border-radius:50%;background:repeating-conic-gradient(#504945 0% 25%,#3c3836 0% 50%) 0 0/8px 8px;display:block;'
-      : `position:absolute;inset:20%;border-radius:50%;background:${color};display:block;`
+  if (compass) {
+    compass.dataset.open = menuOpen ? 'true' : 'false'
+    compass.querySelectorAll('[data-tool]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tool === tool)
+    })
   }
+  const ri = target.querySelector('[data-root-icon]'); if (ri) ri.textContent = toolIcon(tool)
   const slot = target.querySelector('[data-capture-slot]')
   if (slot) slot.innerHTML = videoEnabled ? '<button class="corner-btn" data-capture-frame>📷 capture</button>' : ''
   const { status } = $.learn()
@@ -1098,6 +1099,30 @@ function boot(target) {
   attachDrawEvents(target)
   attachDropEvents(target)
   attachArtboardPan(target)
+
+  target._artboard.addEventListener('wheel', e => {
+    e.preventDefault()
+    const { zoom: oldZoom, panX, panY } = $.learn()
+    if (e.ctrlKey) {
+      const rect = target._artboard.getBoundingClientRect()
+      const cx = e.clientX - rect.left
+      const cy = e.clientY - rect.top
+      const delta = -e.deltaY * (e.deltaMode === 1 ? 24 : e.deltaMode === 2 ? 400 : 1)
+      const newZoom = Math.max(0.25, Math.min(32, oldZoom * Math.exp(delta * 0.01)))
+      const anchorX = (cx - panX) / oldZoom
+      const anchorY = (cy - panY) / oldZoom
+      const newPanX = cx - anchorX * newZoom
+      const newPanY = cy - anchorY * newZoom
+      $.whisper({ zoom: newZoom, panX: newPanX, panY: newPanY })
+      applyZoomStyles(target)
+      target._artboardInner.style.transform = `translate(${newPanX}px,${newPanY}px)`
+    } else {
+      const newPanX = panX - e.deltaX
+      const newPanY = panY - e.deltaY
+      $.whisper({ panX: newPanX, panY: newPanY })
+      target._artboardInner.style.transform = `translate(${newPanX}px,${newPanY}px)`
+    }
+  }, { passive: false })
 
   // Watch for remote frame/stroke changes
   watchSharedState(target)
@@ -2182,8 +2207,35 @@ function attachDrawEvents(target) {
   target._activeCanvas.width=target._drawCanvas.width
   target._activeCanvas.height=target._drawCanvas.height
 
+  const _pointers = new Map()
+  let _pinching = false
+  let _pinchStart = {}
+
   oc.addEventListener('pointerdown', e => {
     oc.setPointerCapture(e.pointerId)
+    _pointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY })
+
+    if (_pointers.size >= 2) {
+      // cancel active draw, enter pinch
+      target._drawing = false; target._points = []
+      if (target._activeCanvas) target._activeCanvas.getContext('2d').clearRect(0, 0, target._activeCanvas.width, target._activeCanvas.height)
+      if (!_pinching) {
+        _pinching = true
+        const pts = [..._pointers.values()]
+        const dx = pts[0].clientX - pts[1].clientX, dy = pts[0].clientY - pts[1].clientY
+        const { zoom, panX, panY } = $.learn()
+        const rect = target._artboard.getBoundingClientRect()
+        _pinchStart = {
+          dist: Math.sqrt(dx*dx + dy*dy), zoom, panX, panY,
+          midX: (pts[0].clientX + pts[1].clientX) / 2 - rect.left,
+          midY: (pts[0].clientY + pts[1].clientY) / 2 - rect.top,
+        }
+      }
+      return
+    }
+
+    if (_pinching) return
+
     const { tool }=$.learn()
     if (tool==='pan'){startPan(target,e);return}
 
@@ -2215,6 +2267,24 @@ function attachDrawEvents(target) {
   })
 
   oc.addEventListener('pointermove', e => {
+    _pointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY })
+
+    if (_pinching) {
+      const pts = [..._pointers.values()]
+      if (pts.length < 2) return
+      const dx = pts[0].clientX - pts[1].clientX, dy = pts[0].clientY - pts[1].clientY
+      const dist = Math.sqrt(dx*dx + dy*dy)
+      const newZoom = Math.max(0.25, Math.min(32, _pinchStart.zoom * (dist / _pinchStart.dist)))
+      const anchorX = (_pinchStart.midX - _pinchStart.panX) / _pinchStart.zoom
+      const anchorY = (_pinchStart.midY - _pinchStart.panY) / _pinchStart.zoom
+      const newPanX = _pinchStart.midX - anchorX * newZoom
+      const newPanY = _pinchStart.midY - anchorY * newZoom
+      $.whisper({ zoom: newZoom, panX: newPanX, panY: newPanY })
+      applyZoomStyles(target)
+      target._artboardInner.style.transform = `translate(${newPanX}px,${newPanY}px)`
+      return
+    }
+
     const{tool}=$.learn()
     if (tool==='pan'){movePan(target,e);return}
     if (tool==='pen'){
@@ -2267,6 +2337,9 @@ function attachDrawEvents(target) {
   })
 
   oc.addEventListener('pointerup', e => {
+    _pointers.delete(e.pointerId)
+    if (_pointers.size < 2) _pinching = false
+
     const{tool}=$.learn()
     if (tool==='pan'){endPan(target);return}
     if (tool==='pen')return
@@ -2306,7 +2379,9 @@ function attachDrawEvents(target) {
     target._points=[]
   })
 
-  oc.addEventListener('pointercancel',()=>{
+  oc.addEventListener('pointercancel', e => {
+    _pointers.delete(e.pointerId)
+    if (_pointers.size < 2) _pinching = false
     target._drawing=false;target._points=[]
     if(target._activeCanvas)target._activeCanvas.getContext('2d').clearRect(0,0,target._activeCanvas.width,target._activeCanvas.height)
     teachPlayer({currentStroke:[],activelyDrawing:false})
@@ -3179,7 +3254,20 @@ $.when('pointermove','.artboard',event=>{
   if(grabStartX!==undefined){const dx=Math.abs(event.clientX-grabStartX),dy=Math.abs(event.clientY-grabStartY);if((dx>5||dy>5)&&!beltDragged){event.preventDefault();$.whisper({beltOffsetX:beltOffsetX||0,beltOffsetY:beltOffsetY||0,beltDragged:true})}}
   if(!$.learn().beltDragged)return
   event.preventDefault()
-  if(root._lastBeltX!==undefined&&root._lastBeltY!==undefined)$.whisper({beltOffsetX:beltOffsetX+(event.clientX-root._lastBeltX),beltOffsetY:beltOffsetY+(event.clientY-root._lastBeltY)})
+  if(root._lastBeltX!==undefined&&root._lastBeltY!==undefined){
+    const ab=root.querySelector('[data-artboard]')
+    const hostW=ab?ab.clientWidth:root.clientWidth
+    const hostH=ab?ab.clientHeight:root.clientHeight
+    const compassEl=root.querySelector('.the-compass')
+    const cW=compassEl?compassEl.offsetWidth:160
+    const cH=compassEl?compassEl.offsetHeight:160
+    const newX=beltOffsetX+(event.clientX-root._lastBeltX)
+    const newY=beltOffsetY+(event.clientY-root._lastBeltY)
+    $.whisper({
+      beltOffsetX:Math.max(-(hostW-cW),Math.min(0,newX)),
+      beltOffsetY:Math.max(-(hostH-cH),Math.min(0,newY)),
+    })
+  }
   root._lastBeltX=event.clientX;root._lastBeltY=event.clientY
 })
 $.when('pointerup','[data-drag]',event=>{
@@ -3329,7 +3417,11 @@ function captureFrame(target) {
 $.when('click','[data-zoom-in]',e=>{const r=e.target.closest(tag);if(!r)return;setZoom(r,$.learn().zoom+0.25)})
 $.when('click','[data-zoom-out]',e=>{const r=e.target.closest(tag);if(!r)return;setZoom(r,$.learn().zoom-0.25)})
 $.when('click','[data-zoom-reset]',e=>{const r=e.target.closest(tag);if(!r)return;setZoom(r,1)})
-$.when('click','[data-cycle-tool]',()=>$.whisper({tool:nextTool($.learn().tool)}))
+$.when('click','[data-tool]',event=>{
+  const btn=event.target.closest('[data-tool]')
+  if(!btn)return
+  $.whisper({tool:btn.dataset.tool})
+})
 $.when('click','[data-undo]',event=>{const r=event.target.closest(tag);if(r)undoFrame(r)})
 $.when('click','[data-redo]',event=>{const r=event.target.closest(tag);if(r)redoFrame(r)})
 $.when('click','[data-darkroom-open]',e=>{const r=e.target.closest(tag);if(r)openDarkroom(r)})
