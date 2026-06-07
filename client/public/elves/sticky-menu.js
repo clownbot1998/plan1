@@ -97,7 +97,9 @@ function audioFactory(url) {
 const playNavigateSound = audioFactory('/cdn/sillyz.computer/beat-tape-extractor/output/a.mp3')
 const playStuckSound = audioFactory('/cdn/sillyz.computer/beat-tape-extractor/output/b.mp3')
 
-const initialRoute = location.pathname.startsWith('/app/') ? location.pathname : null
+const initialRoute = location.pathname.startsWith('/app/')
+  ? location.pathname
+  : '/app/plan98-boxart'
 
 const $ = elf('sticky-menu', {
   activeTab: null,

@@ -1,4 +1,4 @@
-import elf from '@silly/elf'
+import elf from '@plan98/elf'
 
 const defaults = {
   monospace: '0',
@@ -12,7 +12,7 @@ const $ = elf('hypertext-variable')
 const variables = ['size', 'height', 'monospace', 'casual', 'weight', 'slant', 'cursive']
 
 $.draw((target) => {
-  if(!target.initialized) {
+  if (!target.initialized) {
     mount(target, variables)
     target.initialized = true
   }
@@ -26,7 +26,8 @@ $.draw((target) => {
     size,
     height
   } = $.learn()[target.id] || defaults
-  target.style= `
+
+  target.style = `
     --v-font-mono: ${monospace};
     --v-font-casl: ${casual};
     --v-font-wght: ${weight};
@@ -39,35 +40,24 @@ $.draw((target) => {
       "slnt" var(--v-font-slnt),
       "CRSV" var(--v-font-crsv);
     font-family: 'Recursive';
-    ${size ? `font-size: ${size};` : ''}
+    ${size   ? `font-size: ${size};`     : ''}
     ${height ? `line-height: ${height};` : ''}
   `
 
   return target.getAttribute('text')
-});
+})
 
-async function mount(target, values) {
+function mount(target, values) {
   requestIdleCallback(() => {
-    values.map(x => {
-      $.teach({
-        [x]: target.getAttribute(x) || defaults[x]
-      }, merge(target.id))
+    values.forEach(key => {
+      // embed id + key in payload so the reducer is sandbox-safe (no closed-over vars)
+      $.teach(
+        { _hvId: target.id, _hvKey: key, _hvVal: target.getAttribute(key) || defaults[key] },
+        (state, { _hvId, _hvKey, _hvVal }) => ({
+          ...state,
+          [_hvId]: { ...state[_hvId], [_hvKey]: _hvVal }
+        })
+      )
     })
   })
-}
-
-function merge(id) {
-  return (state, payload) => {
-    return {
-      ...state,
-      [id]: {
-        ...state[id],
-        ...payload
-      }
-    }
-  }
-}
-
-async function sleep(x) {
-  new Promise(res => setTimeout(res, x))
 }
