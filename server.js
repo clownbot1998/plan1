@@ -958,6 +958,19 @@ async function handleRequest(request) {
 
   const res = await serveDir(request, { fsRoot: DIST, quiet: true });
 
+  // serveDir can return text/plain for files whose names contain URL-encoded chars
+  // (e.g. vendor deps with ^ encoded as %5E). Override with our own MIME detection.
+  if (res.status === 200) {
+    const urlPath = decodeURIComponent(new URL(request.url).pathname)
+    const ct = getContentTypeByPath(urlPath)
+    const existing = res.headers.get('content-type') ?? ''
+    if (ct !== 'application/octet-stream' && !existing.includes(ct.split(';')[0])) {
+      const h = new Headers(res.headers)
+      h.set('content-type', ct)
+      return new Response(res.body, { status: 200, statusText: res.statusText, headers: h })
+    }
+  }
+
   if (res.status === 404) {
     // private/ filesystem fallback — serves personal assets (samples, photos, etc.) directly
     const privateRes = await serveDir(request, { fsRoot: PRIVATE, urlRoot: 'private', quiet: true });
