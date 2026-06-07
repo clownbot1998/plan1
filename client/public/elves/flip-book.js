@@ -765,6 +765,7 @@ $.style(`
     border-radius: 100%; color: #ebdbb2; border: 1px solid #d79921;
     background: #1d2021;
     pointer-events: all; cursor: pointer; padding: 0; transition: background 80ms, opacity 80ms, transform 80ms;
+    display: grid; place-content: center;
   }
   & .the-compass button:hover { background: rgba(215,153,33,.25); color: #fabd2f; }
   & .the-compass button.active { background: #d79921; color: #282828; }
@@ -777,16 +778,12 @@ $.style(`
     opacity: 1; pointer-events: all; transform: scale(1);
   }
   & .the-compass button * { pointer-events: none; }
-  & .the-compass button .icon {
-    position: absolute; inset: 0;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 1.1rem; line-height: 1; z-index: 2; pointer-events: none;
-  }
+  & .the-compass button sl-icon { font-size: 1.1rem; pointer-events: none; }
+  & .the-compass .root sl-icon { font-size: 1.3rem; }
   & .the-compass .root {
     grid-row: 3 / 5; grid-column: 3 / 5;
     background-color: #1d2021; border-width: 2px; border-color: #fabd2f; color: #fabd2f; cursor: grab;
   }
-  & .the-compass .root .icon { font-size: 1.3rem; }
   & .the-compass .plus-2  { grid-row: 3 / 5; grid-column: 5 / 7; }
   & .the-compass .minus-2 { grid-row: 3 / 5; grid-column: 1 / 3; }
   & .the-compass .minus-7 { grid-row: 1 / 3; grid-column: 2 / 4; transform: translateY(13%); }
@@ -1034,6 +1031,9 @@ function patchSidebar(target) {
   const ckt = sidebar.querySelector('[data-ck-tolerance]'); if (ckt && document.activeElement !== ckt) ckt.value = chromakeyTolerance
 }
 
+const TOOL_ICONS = { draw: 'pencil-fill', pen: 'pen-fill', erase: 'eraser-fill', fill: 'paint-bucket', pan: 'arrows-move' }
+function toolIcon(t) { return TOOL_ICONS[t] || 'pencil-fill' }
+
 $.draw(target => {
   if (target._mounted) return update(target)
   return mount(target)
@@ -1041,10 +1041,6 @@ $.draw(target => {
 
 function beforeUpdate(target) {
   target.dataset.belt = $.learn().beltGrabbed ? 'true' : 'false'
-}
-
-function toolIcon(t) {
-  return { draw: '✏', pen: '🖊', erase: '⬜', fill: '⬛', pan: '✋' }[t] || '✏'
 }
 function nextTool(t) {
   const o = [TOOLS.draw, TOOLS.pen, TOOLS.erase, TOOLS.fill, TOOLS.pan]
@@ -1095,13 +1091,13 @@ function mount(target) {
       </div>
     </div>
     <div class="the-compass" data-toolbelt>
-      <button data-menu data-drag class="root"><span class="icon" data-root-icon>✏</span></button>
-      <button class="minus-7" data-tool="draw"><span class="icon">✏</span></button>
-      <button class="plus-7" data-tool="erase"><span class="icon">⬜</span></button>
-      <button class="plus-2" data-redo><span class="icon">↷</span></button>
-      <button class="plus-5" data-tool="fill"><span class="icon">⬛</span></button>
-      <button class="minus-5" data-tool="pen"><span class="icon">🖊</span></button>
-      <button class="minus-2" data-undo><span class="icon">↶</span></button>
+      <button data-menu data-drag class="root"><sl-icon data-root-icon name="pencil-fill"></sl-icon></button>
+      <button class="minus-7" data-tool="draw"><sl-icon name="pencil-fill"></sl-icon></button>
+      <button class="plus-7" data-tool="erase"><sl-icon name="eraser-fill"></sl-icon></button>
+      <button class="plus-2" data-redo><sl-icon name="arrow-clockwise"></sl-icon></button>
+      <button class="plus-5" data-tool="fill"><sl-icon name="paint-bucket"></sl-icon></button>
+      <button class="minus-5" data-tool="pen"><sl-icon name="pen-fill"></sl-icon></button>
+      <button class="minus-2" data-undo><sl-icon name="arrow-counterclockwise"></sl-icon></button>
     </div>
     ${renderSidebarHtml()}
     <div class="darkroom" data-darkroom>
@@ -1137,7 +1133,7 @@ function update(target) {
       btn.classList.toggle('active', btn.dataset.tool === tool)
     })
   }
-  const ri = target.querySelector('[data-root-icon]'); if (ri) ri.textContent = toolIcon(tool)
+  const ri = target.querySelector('[data-root-icon]'); if (ri) ri.setAttribute('name', toolIcon(tool))
   const sidebar = target.querySelector('[data-sidebar]')
   if (sidebar) sidebar.dataset.open = sidebarOpen ? 'true' : 'false'
   patchSidebar(target)
