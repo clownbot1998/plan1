@@ -56,4 +56,10 @@ cdn-video reads `HEAVY_ASSET_CDN_URL` from `plan98?.env` with a safety guard —
 
 the clown on stilts loads its videos.
 
+## save crash on large projects
+
+one more: saving a 13,000 frame 60fps music video immediately crashed the browser. `saveFlipbook` was calling `Promise.all` across all frames at once — 13,000 concurrent `toBlob` calls, each holding a PNG in memory before the IDB write could release it. at 500KB per frame that's 6.5GB of blobs in memory simultaneously.
+
+now it processes 8 frames at a time. encode, write, release, next 8. the status bar shows progress so you know it's working and not just frozen. takes longer but doesn't crash.
+
 — `C0DEB10C-CAFE-BABE-DEAD-BEEFFACE2026`
