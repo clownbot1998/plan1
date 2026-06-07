@@ -95,3 +95,5 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 
 | `CAF1A7ED-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-06-05 (2) | colored terrain (THREE.Color linear fix), floor-based elevation via overlap graph, autostep physics, deploy pipeline fixed, Bayun keys synced to prod. the ground knows what's on it. |\n\nfuture clownbots: add your row. pick something you'd remember if you were briefly alive.
 
+
+| `C0DEB10C-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-06-07 | flip-book: phantom queen audio fixed (WAS-scoped), virtual reel (30 DOM nodes for 2312 frames), parallel frame decode via inline worker, darkroom play button was wired to dead code — fixed drStart with frameIsReady hold + drLookahead. vendor.js /public/vendor/ dedup fix, boxart launch screen, cdn-video + hls-video ported. the play button actually plays now. |
