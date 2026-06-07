@@ -29,6 +29,7 @@ Multiplayer architecture — v-log pattern:
 
 import elf from '@plan98/elf'
 import { Integer } from '@plan98/types'
+import { toast } from './plan98-toast.js'
 import Chromakey from './chroma-key.js'
 import './plan98-palette.js'
 import { attack, release, setInstrument } from './paper-pocket.js'
@@ -709,7 +710,7 @@ $.style(`
   }
   & .fb-taskbar.-top { top: 0; z-index: 201; }
   & .fb-taskbar.-bottom { bottom: 0; }
-  & .fb-taskbar button, & .fb-taskbar .right { pointer-events: all; }
+  & .fb-taskbar button { pointer-events: all; }
   & .fb-taskbar .right { display: flex; justify-content: flex-end; align-items: center; }
 
   & .corner-btn {
@@ -1652,8 +1653,8 @@ function deleteFrame(target, idx) {
   const { frames, frameStrokes } = $.learn()
   if (frames.length <= 1) return
   const id = frames[idx]
+  const savedStrokes = [...(frameStrokes[id] || [])]  // captured before deletion for undo
   const newFrames = frames.filter((_, i) => i !== idx)
-  // clamp local current
   let cur = target._localCurrent ?? 0
   if (cur >= newFrames.length) cur = newFrames.length - 1
   target._localCurrent = cur
@@ -1661,6 +1662,24 @@ function deleteFrame(target, idx) {
   $.teach({ frames: newFrames, frameStrokes: newStrokes })
   $.whisper({ status: 'deleted frame' })
   loadCurrentFrame(target); renderOnion(target); renderReel(target)
+
+  toast(`frame ${idx + 1} deleted`, {
+    type: 'success',
+    actions: [{
+      label: 'undo',
+      callback: () => {
+        // db[id] canvases are still in memory — only state was removed
+        const { frames: f, frameStrokes: fs } = $.learn()
+        const insertAt = Math.min(idx, f.length)
+        const restored = [...f]
+        restored.splice(insertAt, 0, id)
+        $.teach({ frames: restored, frameStrokes: { ...fs, [id]: savedStrokes } })
+        target._localCurrent = insertAt
+        loadCurrentFrame(target); renderOnion(target); renderReel(target)
+        $.whisper({ status: `restored frame ${insertAt + 1}` })
+      }
+    }]
+  })
 }
 
 function clearFrame(target, idx) {
@@ -1874,10 +1893,12 @@ function showReelMenu(target, frameDiv, idx, id) {
 
   const delBtn = mkBtn('✕  delete', true)
   const dupBtn = mkBtn('⊕  duplicate', false)
+  const blkBtn = mkBtn('□  blank', false)
   const clrBtn = mkBtn('○  clear', false)
 
   menu.appendChild(delBtn)
   menu.appendChild(dupBtn)
+  menu.appendChild(blkBtn)
   menu.appendChild(clrBtn)
   document.body.appendChild(menu)
 
@@ -1889,6 +1910,7 @@ function showReelMenu(target, frameDiv, idx, id) {
   menu.style.top  = `${Math.max(4, top)}px`
 
   dupBtn.addEventListener('pointerdown', e => { e.stopPropagation(); menu.remove(); addFrame(target, idx) })
+  blkBtn.addEventListener('pointerdown', e => { e.stopPropagation(); menu.remove(); target._localCurrent = idx; addFrame(target) })
   delBtn.addEventListener('pointerdown', e => { e.stopPropagation(); menu.remove(); deleteFrame(target, idx) })
   clrBtn.addEventListener('pointerdown', e => { e.stopPropagation(); menu.remove(); clearFrame(target, idx) })
 
@@ -3576,7 +3598,15 @@ function captureFrame(target) {
   updateReelThumb(target, frameId)
 }
 /* ── sidebar toggle ── */
-$.when('click','[data-toggle-sidebar]',()=>$.whisper({sidebarOpen:!$.learn().sidebarOpen}))
+$.when('click','[data-toggle-sidebar]', event => {
+  const root = event.target.closest(tag)
+  if (root?.querySelector('[data-darkroom]')?.classList.contains('open')) {
+    closeDarkroom(root)
+    $.whisper({ sidebarOpen: true })
+  } else {
+    $.whisper({ sidebarOpen: !$.learn().sidebarOpen })
+  }
+})
 
 $.when('click','[data-sidebar-load]',event=>{
   const r=event.target.closest(tag);if(!r)return
