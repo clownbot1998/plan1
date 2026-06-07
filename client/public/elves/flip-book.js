@@ -331,7 +331,7 @@ const PRESETS = [
 const thicknoids = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
 
 const TOOLS = { draw: 'draw', pen: 'pen', erase: 'erase', fill: 'fill', pan: 'pan' }
-const VIEWS = { brush: 'brush', canvas: 'canvas', settings: 'settings', export: 'export', gallery: 'gallery' }
+const VIEWS = { brush: 'brush', canvas: 'canvas', settings: 'settings', export: 'export', gallery: 'gallery', share: 'share' }
 
 const SCHEMA_VERSION = 1
 const FB_INDEX_KEY = 'index'
@@ -495,6 +495,7 @@ const $ = elf(tag, {
 
   // UI
   menuOpen:           false,
+  sidebarOpen:        false,
   view:               null,
   showOverlay:        false,
 
@@ -881,6 +882,48 @@ $.style(`
   & .import-bar-inner { height: 100%; background: #d79921; border-radius: 3px; width: 0%; }
   & .import-label { font-size: .65rem; color: #928374; }
 
+  /* ── LEFT SETTINGS SIDEBAR ── */
+  & .fb-sidebar {
+    position: absolute; top: 52px; left: 0; height: calc(100% - 52px);
+    width: 280px; z-index: 30;
+    transform: translateX(-100%);
+    transition: transform 220ms cubic-bezier(.4,0,.2,1);
+    pointer-events: none;
+    display: flex; flex-direction: column;
+  }
+  & .fb-sidebar[data-open="true"] { transform: translateX(0); pointer-events: all; }
+  & .fb-sidebar-inner {
+    flex: 1; min-height: 0;
+    background: #1d2021; border-right: 1px solid #3c3836;
+    box-shadow: 4px 0 16px rgba(0,0,0,.5);
+    overflow-y: auto; display: flex; flex-direction: column;
+  }
+  & .fb-sidebar-actions {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    border-bottom: 1px solid #3c3836; flex-shrink: 0;
+  }
+  & .fb-action-btn {
+    background: transparent; border: none; border-right: 1px solid #3c3836;
+    color: #928374; font-family: 'Recursive'; font-size: .6rem;
+    padding: .5rem .25rem; cursor: pointer; text-align: center;
+    transition: all 80ms; white-space: nowrap;
+  }
+  & .fb-action-btn:last-child { border-right: none; }
+  & .fb-action-btn:hover { background: rgba(215,153,33,.12); color: #fabd2f; }
+  & .fb-sidebar-section { padding: .5rem .6rem; border-bottom: 1px solid #3c3836; }
+  & .fb-sidebar-label {
+    font-size: .5rem; letter-spacing: .1em; text-transform: uppercase;
+    color: #665c54; margin-bottom: .35rem;
+  }
+  & .fb-palette-wrap { height: 120px; overflow: hidden; border-radius: 2px; }
+  & .fb-sidebar-toggle {
+    background: transparent; border: none; padding: 0;
+    cursor: pointer; display: block; width: 34px; height: 34px;
+    border-radius: 100%; overflow: hidden; transition: opacity 80ms; flex-shrink: 0;
+  }
+  & .fb-sidebar-toggle:hover { opacity: .75; }
+  & .fb-sidebar-toggle plan98-icon { width: 34px; height: 34px; display: block; }
+
   & .gallery-list { display:flex; flex-direction:column; gap:.4rem; }
   & .gallery-empty { font-size:.6rem; color:#504945; text-align:center; padding:1rem 0; }
   & .gallery-item { display:flex; justify-content:space-between; align-items:center; gap:.5rem; padding:.4rem .6rem; background:#3c3836; border:1px solid #504945; border-radius:2px; }
@@ -898,6 +941,97 @@ $.style(`
 Draw — afterUpdate boots once, update() is minimal.
 
 */
+
+function renderSidebarHtml() {
+  const { thickness, opacity, onion, fps, loopMode, canvasW, canvasH,
+          chromakeyEnabled, chromakeyColor, chromakeyTolerance, videoEnabled, violinMode } = $.learn()
+  return `
+    <div class="fb-sidebar" data-sidebar>
+      <div class="fb-sidebar-inner">
+        <div class="fb-sidebar-actions">
+          <button class="fb-action-btn" data-sidebar-load>load</button>
+          <button class="fb-action-btn" data-sidebar-save>save</button>
+          <button class="fb-action-btn" data-sidebar-export>export</button>
+          <button class="fb-action-btn" data-sidebar-share>share</button>
+        </div>
+        <div class="fb-sidebar-section">
+          <div class="fb-sidebar-label">stroke</div>
+          <div class="fb-palette-wrap"><plan98-palette data-color-target="stroke"></plan98-palette></div>
+        </div>
+        <div class="fb-sidebar-section">
+          <div class="fb-sidebar-label">fill</div>
+          <div class="fb-palette-wrap"><plan98-palette data-color-target="fill"></plan98-palette></div>
+        </div>
+        <div class="fb-sidebar-section">
+          <div class="fb-sidebar-label">size</div>
+          <div class="thicknoid-grid">${thicknoids.map(t=>`<button class="thicknoid-btn${t===thickness?' active':''}" data-thick="${t}">${t}</button>`).join('')}</div>
+        </div>
+        <div class="fb-sidebar-section">
+          <div class="fb-sidebar-label">opacity</div>
+          <div class="opacity-grid">${[0,.1,.2,.3,.4,.5,.6,.7,.8,.9,1].map(o=>`<button class="opacity-btn${o===opacity?' active':''}" data-opacity="${o}">${o}</button>`).join('')}</div>
+        </div>
+        <div class="fb-sidebar-section">
+          <div class="fb-sidebar-label">onion skin</div>
+          <button class="row-btn${onion?' active':''}" data-toggle-onion>${onion?'● on':'○ off'}</button>
+        </div>
+        <div class="fb-sidebar-section">
+          <div class="fb-sidebar-label">fps</div>
+          <select class="tl-select" data-fps-select>${[1,2,4,6,8,12,24,30,60].map(v=>`<option value="${v}"${v===fps?' selected':''}>${v}</option>`).join('')}</select>
+          <div class="fb-sidebar-label" style="margin-top:.4rem;">loop mode</div>
+          <select class="tl-select" data-loop-select style="margin-top:.2rem;">${['loop','pingpong','once'].map(v=>`<option value="${v}"${v===loopMode?' selected':''}>${v}</option>`).join('')}</select>
+        </div>
+        <div class="fb-sidebar-section">
+          <div class="fb-sidebar-label">canvas</div>
+          <button class="row-btn" data-open-view="canvas" data-canvas-dims>${canvasW}×${canvasH}</button>
+        </div>
+        <div class="fb-sidebar-section">
+          <div class="fb-sidebar-label">camera</div>
+          <button class="row-btn${videoEnabled?' active':''}" data-toggle-camera>${videoEnabled?'● on':'○ off'}</button>
+        </div>
+        <div class="fb-sidebar-section">
+          <div class="fb-sidebar-label">chromakey</div>
+          <button class="row-btn${chromakeyEnabled?' active':''}" data-toggle-ck>${chromakeyEnabled?'● on':'○ off'}</button>
+          <div class="ck-color-row" style="margin-top:.35rem;">
+            <div class="ck-preview" style="background:${chromakeyColor};" data-ck-preview></div>
+            <input type="color" value="${chromakeyColor}" data-ck-color>
+          </div>
+          <div class="field-row" style="margin-top:.3rem;">
+            <label>tolerance</label>
+            <input type="range" min="0" max="150" value="${chromakeyTolerance}" data-ck-tolerance>
+          </div>
+        </div>
+        <div class="fb-sidebar-section">
+          <div class="fb-sidebar-label">tiniest violin</div>
+          <button class="row-btn${violinMode?' active':''}" data-toggle-violin>${violinMode?'● on':'○ off'}</button>
+        </div>
+        <div class="fb-sidebar-section">
+          <div class="fb-sidebar-label">import</div>
+          <button class="row-btn" data-import-file>↑ import file…</button>
+          <input class="import-file-input" type="file" accept=".json,video/*,audio/*" data-file-input>
+        </div>
+      </div>
+    </div>
+  `
+}
+
+function patchSidebar(target) {
+  const sidebar = target.querySelector('[data-sidebar]')
+  if (!sidebar) return
+  const { thickness, opacity, onion, fps, loopMode, chromakeyEnabled, chromakeyColor,
+          chromakeyTolerance, videoEnabled, violinMode, canvasW, canvasH } = $.learn()
+  sidebar.querySelectorAll('[data-thick]').forEach(b => b.classList.toggle('active', Integer(b.dataset.thick) === thickness))
+  sidebar.querySelectorAll('[data-opacity]').forEach(b => b.classList.toggle('active', parseFloat(b.dataset.opacity) === opacity))
+  const ob = sidebar.querySelector('[data-toggle-onion]'); if (ob) { ob.classList.toggle('active', onion); ob.textContent = onion?'● on':'○ off' }
+  const cb = sidebar.querySelector('[data-toggle-camera]'); if (cb) { cb.classList.toggle('active', videoEnabled); cb.textContent = videoEnabled?'● on':'○ off' }
+  const ckb = sidebar.querySelector('[data-toggle-ck]'); if (ckb) { ckb.classList.toggle('active', chromakeyEnabled); ckb.textContent = chromakeyEnabled?'● on':'○ off' }
+  const vb = sidebar.querySelector('[data-toggle-violin]'); if (vb) { vb.classList.toggle('active', violinMode); vb.textContent = violinMode?'● on':'○ off' }
+  const fs = sidebar.querySelector('[data-fps-select]'); if (fs && document.activeElement !== fs) fs.value = fps
+  const ls = sidebar.querySelector('[data-loop-select]'); if (ls && document.activeElement !== ls) ls.value = loopMode
+  const cv = sidebar.querySelector('[data-canvas-dims]'); if (cv) cv.textContent = `${canvasW}×${canvasH}`
+  const ckp = sidebar.querySelector('[data-ck-preview]'); if (ckp) ckp.style.background = chromakeyColor
+  const ckc = sidebar.querySelector('[data-ck-color]'); if (ckc && document.activeElement !== ckc) ckc.value = chromakeyColor
+  const ckt = sidebar.querySelector('[data-ck-tolerance]'); if (ckt && document.activeElement !== ckt) ckt.value = chromakeyTolerance
+}
 
 $.draw(target => {
   if (target._mounted) return update(target)
@@ -931,7 +1065,7 @@ function mount(target) {
           <div class="import-bar-outer"><div class="import-bar-inner" data-import-bar></div></div>
         </div>
         <div class="fb-taskbar -top">
-          <div class="left"><button class="corner-btn" data-open-view="settings">⚙ settings</button></div>
+          <div class="left"><button class="fb-sidebar-toggle" data-toggle-sidebar><plan98-icon></plan98-icon></button></div>
           <div class="center"></div>
           <div class="right"></div>
         </div>
@@ -970,6 +1104,7 @@ function mount(target) {
         <span data-status-text></span>
       </div>
     </div>
+    ${renderSidebarHtml()}
     <div class="darkroom" data-darkroom>
       <button class="dr-close" data-darkroom-close>✕</button>
       <div class="dr-title" data-dr-title>flipbook</div>
@@ -993,7 +1128,7 @@ Reel and cursor overlays are updated imperatively when data changes.
 */
 
 function update(target) {
-  const { beltOffsetX, beltOffsetY, tool, color, menuOpen, videoEnabled } = $.learn()
+  const { beltOffsetX, beltOffsetY, tool, color, menuOpen, videoEnabled, sidebarOpen } = $.learn()
   const toolbelt = target.querySelector('[data-toolbelt]')
   if (toolbelt) toolbelt.style.cssText = `--belt-offset-x:${beltOffsetX}px;--belt-offset-y:${beltOffsetY}px;`
   const compass = target.querySelector('.the-compass')
@@ -1004,6 +1139,10 @@ function update(target) {
     })
   }
   const ri = target.querySelector('[data-root-icon]'); if (ri) ri.textContent = toolIcon(tool)
+  const sidebar = target.querySelector('[data-sidebar]')
+  if (sidebar) sidebar.dataset.open = sidebarOpen ? 'true' : 'false'
+  patchSidebar(target)
+
   const slot = target.querySelector('[data-capture-slot]')
   if (slot) slot.innerHTML = videoEnabled ? '<button class="corner-btn" data-capture-frame>📷 capture</button>' : ''
   const { status } = $.learn()
@@ -1101,6 +1240,8 @@ function boot(target) {
   attachArtboardPan(target)
 
   target._artboard.addEventListener('wheel', e => {
+    // let sidebar and film-reel scroll naturally
+    if (e.target.closest('[data-sidebar]') || e.target.closest('[data-film-reel]')) return
     e.preventDefault()
     const { zoom: oldZoom, panX, panY } = $.learn()
     if (e.ctrlKey) {
@@ -1126,6 +1267,15 @@ function boot(target) {
 
   // Watch for remote frame/stroke changes
   watchSharedState(target)
+
+  // close sidebar when clicking outside it
+  target.addEventListener('pointerdown', e => {
+    if (!$.learn().sidebarOpen) return
+    const sidebar = target.querySelector('[data-sidebar]')
+    const toggle  = target.querySelector('[data-toggle-sidebar]')
+    if (sidebar?.contains(e.target) || toggle?.contains(e.target)) return
+    $.whisper({ sidebarOpen: false })
+  })
 
   // load persisted canvas from WAS if id is a path (e.g. /circus/tent)
   // after WAS loads, preload all frame video bitmaps in one worker batch
@@ -3153,6 +3303,18 @@ function renderView(view){
     <button class="row-btn" data-gallery-save>↑ save flipbook</button>
     <button class="row-btn" style="margin-top:.4rem;" data-gallery-share>↑ share to gallery</button>
   `
+  if(view===VIEWS.share){
+    const host=document.querySelector(tag)
+    const id=host?.id
+    const url=id?.startsWith('/')
+      ?`${location.origin}/app/flip-book?id=${encodeURIComponent(id)}`
+      :`${location.origin}/app/flip-book`
+    return`
+      <div class="overlay-title">share</div>
+      <qr-code src="${url}" no-link="true" style="max-width:200px;margin:0 auto;display:block;"></qr-code>
+      <div style="font-size:.55rem;color:#665c54;word-break:break-all;padding:.35rem 0;text-align:center;">${url}</div>
+    `
+  }
   return ''
 }
 
@@ -3303,14 +3465,15 @@ $.when('click','[data-open-view]',event=>{
 $.when('input','plan98-palette',event=>{
   const{color,midi}=event.detail
   const colorTarget=event.target.dataset.colorTarget
+  const inSidebar=!!event.target.closest('.fb-sidebar')
   if(colorTarget==='fill'){
-    $.whisper({fillColor:color,showOverlay:false,view:null,colorTarget:null})
+    $.whisper({fillColor:color,...(inSidebar?{}:{showOverlay:false,view:null,colorTarget:null})})
   } else {
-    $.whisper({color,showOverlay:false,view:null,colorTarget:null})
+    $.whisper({color,...(inSidebar?{}:{showOverlay:false,view:null,colorTarget:null})})
   }
   if(midi!=null) $.whisper({lastMidi:midi})
   const root=event.target.closest(tag)
-  if(root)closeOverlay(root)
+  if(root&&!inSidebar)closeOverlay(root)
 })
 
 // pick-fill button inside brush overlay
@@ -3414,6 +3577,93 @@ function captureFrame(target) {
 
   updateReelThumb(target, frameId)
 }
+/* ── sidebar toggle ── */
+$.when('click','[data-toggle-sidebar]',()=>$.whisper({sidebarOpen:!$.learn().sidebarOpen}))
+
+$.when('click','[data-sidebar-load]',event=>{
+  const r=event.target.closest(tag);if(!r)return
+  openView(r,VIEWS.gallery)
+})
+
+$.when('click','[data-sidebar-save]',async event=>{
+  const btn=event.target.closest('[data-sidebar-save]')
+  const r=event.target.closest(tag);if(!r||!btn)return
+  const orig=btn.textContent
+  btn.disabled=true;btn.textContent='…'
+  try{await saveFlipbook(r);btn.textContent='✓'}
+  catch(e){btn.textContent='!'}
+  setTimeout(()=>{btn.disabled=false;btn.textContent=orig},1500)
+})
+
+$.when('click','[data-sidebar-export]',event=>{
+  const r=event.target.closest(tag);if(!r)return
+  openView(r,VIEWS.export)
+})
+
+$.when('click','[data-sidebar-share]',event=>{
+  const r=event.target.closest(tag);if(!r)return
+  openView(r,VIEWS.share)
+})
+
+/* ── global settings controls (sidebar + overlay) ── */
+$.when('click','[data-thick]',event=>{
+  const btn=event.target.closest('[data-thick]');if(!btn)return
+  $.whisper({thickness:Integer(btn.dataset.thick)})
+})
+
+$.when('click','[data-opacity]',event=>{
+  const btn=event.target.closest('[data-opacity]');if(!btn)return
+  $.whisper({opacity:parseFloat(btn.dataset.opacity)})
+})
+
+$.when('click','[data-toggle-onion]',event=>{
+  const r=event.target.closest(tag);if(!r)return
+  const n=!$.learn().onion
+  $.whisper({onion:n})
+  renderOnion(r)
+})
+
+$.when('change','[data-fps-select]',event=>{
+  $.teach({fps:Integer(event.target.value)})
+})
+
+$.when('change','[data-loop-select]',event=>{
+  $.teach({loopMode:event.target.value})
+})
+
+$.when('click','[data-toggle-ck]',()=>{
+  $.whisper({chromakeyEnabled:!$.learn().chromakeyEnabled})
+})
+
+$.when('input','[data-ck-color]',event=>{
+  $.whisper({chromakeyColor:event.target.value})
+})
+
+$.when('input','[data-ck-tolerance]',event=>{
+  $.whisper({chromakeyTolerance:Integer(event.target.value)})
+})
+
+$.when('click','[data-toggle-violin]',()=>{
+  const{violinMode,octaveInstruments,baseOctave}=$.learn()
+  const n=!violinMode
+  $.whisper({violinMode:n})
+  if(n)setInstrument(octaveInstruments[baseOctave])
+})
+
+$.when('click','[data-import-file]',event=>{
+  const r=event.target.closest(tag);if(!r)return
+  const container=event.target.closest('.fb-sidebar-inner,[data-overlay-inner]')
+  const fi=container?.querySelector('[data-file-input]')||r.querySelector('[data-file-input]')
+  fi?.click()
+})
+
+$.when('change','[data-file-input]',event=>{
+  const r=event.target.closest(tag);if(!r)return
+  const f=event.target.files[0];if(!f)return
+  event.target.value=''
+  importFromFile(r,f)
+})
+
 $.when('click','[data-zoom-in]',e=>{const r=e.target.closest(tag);if(!r)return;setZoom(r,$.learn().zoom+0.25)})
 $.when('click','[data-zoom-out]',e=>{const r=e.target.closest(tag);if(!r)return;setZoom(r,$.learn().zoom-0.25)})
 $.when('click','[data-zoom-reset]',e=>{const r=e.target.closest(tag);if(!r)return;setZoom(r,1)})
