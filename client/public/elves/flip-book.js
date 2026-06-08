@@ -287,7 +287,15 @@ function replayStrokes(frameId) {
   const ctx = f.drawCanvas.getContext('2d')
   ctx.clearRect(0, 0, canvasW, canvasH)
   const strokes = frameStrokes[frameId] || []
-  strokes.forEach(stroke => drawStroke(ctx, stroke))
+  const drawS = strokes.filter(s => !(s?.length === 1 && s[0].fill))
+  const fillS = strokes.filter(s => s?.length === 1 && s[0].fill)
+
+  // pass 1 — draw strokes so fills are bounded
+  drawS.forEach(s => drawStroke(ctx, s))
+  // pass 2 — fills (bounded by strokes now on canvas)
+  fillS.forEach(s => floodFill(ctx, s[0].x, s[0].y, s[0].color, canvasW, canvasH))
+  // pass 3 — redraw strokes on top: anti-aliased edges composite over fill, no gap
+  drawS.forEach(s => drawStroke(ctx, s))
 }
 
 /*
@@ -1313,8 +1321,8 @@ full state atomically (late-join burst).
 */
 
 function watchSharedState(target) {
-  // initialise ALL known frames to -1 so first pass always replays
   const _knownCounts = {}
+  const _knownArrays = {}  // track array identity — catches in-place replacements (recolor)
   $.learn().frames.forEach(id => { _knownCounts[id] = -1 })
 
   let _lastFrameStr = ''  // force frames diff on first run
@@ -1346,12 +1354,15 @@ function watchSharedState(target) {
       $.whisper({ status: `frame ${target._localCurrent + 1} / ${state.frames.length}` })
     }
 
-    // ── new strokes on any frame ──────────────────────────────────────────
+    // ── changed strokes on any frame (count OR content) ──────────────────
     state.frames.forEach(id => {
-      const sharedLen = (state.frameStrokes[id] || []).length
+      const arr = state.frameStrokes[id]
+      const sharedLen = (arr || []).length
       const knownLen  = _knownCounts[id] ?? -1
-      if (sharedLen !== knownLen) {
+      const arrChanged = arr !== _knownArrays[id]
+      if (sharedLen !== knownLen || arrChanged) {
         _knownCounts[id] = sharedLen
+        _knownArrays[id] = arr
         ensureFrame(id, state.canvasW, state.canvasH)
         replayStrokes(id)
         // only refresh draw canvas if this is the frame we're currently viewing
@@ -2176,16 +2187,35 @@ function hexToRgba(colorStr) {
   return {r,g,b,a}
 }
 
+function strokeHitTest(stroke, x, y) {
+  if (!stroke?.length || stroke.length < 2) return false
+  for (let i = 0; i < stroke.length - 1; i++) {
+    const a = stroke[i], b = stroke[i + 1]
+    const hw = ((a.lineWidth || 8) + (b.lineWidth || 8)) / 4  // avg half-width of segment
+    const dx = b.x - a.x, dy = b.y - a.y
+    const lenSq = dx * dx + dy * dy
+    const t = lenSq > 0 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / lenSq)) : 0
+    const nearX = a.x + t * dx, nearY = a.y + t * dy
+    if ((x - nearX) ** 2 + (y - nearY) ** 2 <= hw * hw) return true
+  }
+  return false
+}
+
 function floodFill(ctx, x, y, fillColor, w, h) {
   const img=ctx.getImageData(0,0,w,h),d=img.data
   const ti=(y*w+x)*4,tr=d[ti],tg=d[ti+1],tb=d[ti+2],ta=d[ti+3]
   const fc=hexToRgba(fillColor)
   if(tr===fc.r&&tg===fc.g&&tb===fc.b&&ta===fc.a)return
+  // when target is transparent: match by alpha only — catches anti-aliased edges of any color
+  // when target is opaque: standard sum-of-channels tolerance
+  const match = ta===0
+    ? pi => d[pi+3] <= 200
+    : pi => Math.abs(d[pi]-tr)+Math.abs(d[pi+1]-tg)+Math.abs(d[pi+2]-tb)+Math.abs(d[pi+3]-ta) <= 80
   const stack=[[x,y]],vis=new Uint8Array(w*h)
   while(stack.length){
     const[cx,cy]=stack.pop();if(cx<0||cx>=w||cy<0||cy>=h)continue
     const i=cy*w+cx;if(vis[i])continue;const pi=i*4
-    if(d[pi]!==tr||d[pi+1]!==tg||d[pi+2]!==tb||d[pi+3]!==ta)continue
+    if(!match(pi))continue
     vis[i]=1;d[pi]=fc.r;d[pi+1]=fc.g;d[pi+2]=fc.b;d[pi+3]=fc.a
     stack.push([cx+1,cy],[cx-1,cy],[cx,cy+1],[cx,cy-1])
   }
@@ -2306,15 +2336,11 @@ function captureUndo(target) {
 
 function _applyStrokes(target, id, strokes) {
   const { canvasW, canvasH } = $.learn()
-  // update shared frameStrokes
   const fs = $.learn().frameStrokes
   $.teach({ frameStrokes: { ...fs, [id]: strokes } })
-  // replay locally
+  // $.teach → onStateChange → replayStrokes handles the three-pass replay
+  // sync result to _drawCanvas so composite loop sees it immediately
   const f = ensureFrame(id, canvasW, canvasH)
-  const ctx = f.drawCanvas.getContext('2d')
-  ctx.clearRect(0, 0, canvasW, canvasH)
-  strokes.forEach(stroke => drawStroke(ctx, stroke))
-  // sync to _drawCanvas
   target._drawCanvas.getContext('2d').clearRect(0, 0, canvasW, canvasH)
   target._drawCanvas.getContext('2d').drawImage(f.drawCanvas, 0, 0)
   if (target._activeCanvas) target._activeCanvas.getContext('2d')
@@ -2365,7 +2391,7 @@ function getCanvasPos(target, e) {
   const { zoom }=$.learn(), rect=target._outputCanvas.getBoundingClientRect()
   const clientX=e.touches?e.touches[0].clientX:e.clientX
   const clientY=e.touches?e.touches[0].clientY:e.clientY
-  return { x:Math.floor((clientX-rect.left)/zoom), y:Math.floor((clientY-rect.top)/zoom) }
+  return { x:Math.round((clientX-rect.left)/zoom), y:Math.round((clientY-rect.top)/zoom) }
 }
 
 function attachDrawEvents(target) {
@@ -2415,14 +2441,24 @@ function attachDrawEvents(target) {
     if (tool==='fill'){
       const{fillColor,canvasW,canvasH}=$.learn()
       const current=target._localCurrent??0
-      const{frames}=$.learn()
+      const{frames,frameStrokes}=$.learn()
       const frameId=frames[current]
-      floodFill(target._drawCanvas.getContext('2d'),x,y,fillColor,canvasW,canvasH)
-      db[frameId].drawCanvas.getContext('2d').clearRect(0,0,canvasW,canvasH)
-      db[frameId].drawCanvas.getContext('2d').drawImage(target._drawCanvas,0,0)
-      const fs=$.learn().frameStrokes
-      $.teach({frameStrokes:{...fs,[frameId]:[...(fs[frameId]||[]),[{x,y,fill:true,color:fillColor,lineWidth:0,opacity:1}]]}})
-      target._drawing=false; updateReelThumb(target, frameId); scheduleWasSave(target.id); return
+      const strokes=frameStrokes[frameId]||[]
+      const drawS=strokes.filter(s=>!(s?.length===1&&s[0].fill))
+
+      // stroke recolor
+      let strokedIdx=-1
+      for(let i=0;i<drawS.length;i++){
+        if(strokeHitTest(drawS[i],x,y)){strokedIdx=strokes.indexOf(drawS[i]);break}
+      }
+
+      const newStrokes=strokedIdx>=0
+        ? strokes.map((s,i)=>i===strokedIdx?s.map(pt=>({...pt,color:fillColor,erase:false})):s)
+        : [...strokes,[{x,y,fill:true,color:fillColor,lineWidth:0,opacity:1}]]
+
+      // $.teach → onStateChange (array identity check) → replayStrokes → _drawCanvas sync
+      $.teach({frameStrokes:{...frameStrokes,[frameId]:newStrokes}})
+      target._drawing=false;updateReelThumb(target,frameId);scheduleWasSave(target.id);return
     }
 
     const{thickness,opacity,color}=$.learn()
