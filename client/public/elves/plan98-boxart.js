@@ -78,6 +78,7 @@ window.addEventListener('keydown', e => {
 $.style(`
   & {
     display: block;
+    width: 100%;
     margin: auto;
     height: 100%;
     position: relative;

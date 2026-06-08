@@ -420,6 +420,7 @@ function gameLoop(time) {
 $.style(`
   & {
     display: block;
+    width: 100%;
     height: 100%;
     overflow: hidden;
     user-select: none; /* supported by Chrome and Opera */
