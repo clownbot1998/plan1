@@ -38,4 +38,26 @@ per-frame stroke undo/redo is untouched. destructive operations get toasts. the 
 
 the clown on stilts deleted a frame and got it back. that's the bit.
 
+## third session: fill rendering overhaul
+
+### auto-fill on release — gone
+
+pen tool was auto-filling closed paths with fillColor on every commit. confusing. removed. also pulled the fill-color ghost preview from the pen preview canvas, and the "fill color (pen mode)" section from the settings overlay. flood fill bucket still has its fill color palette in the sidebar — that's different and stays.
+
+### three-pass rendering
+
+fill + stroke rendering is now three passes:
+
+**pass 1 — boundary.** draw all strokes at opacity=1 on an offscreen canvas. solid walls, hard edges, no fringe leaking.
+
+**pass 2 — fill.** `floodFillOnto` reads walls from the boundary canvas but writes only to a separate `fillOnly` canvas. no destination-out, no dead-pixel fringe at stroke edges. fill threshold is `d[pi+3] < 255` — fills everything that isn't a fully solid pixel, so anti-aliased fringe is covered.
+
+**pass 3 — paint.** composite fills onto the main canvas, then redraw strokes at their real opacity and anti-aliasing on top. no fills → skip the whole thing, draw strokes directly.
+
+### undo skips no-ops
+
+fill tool was calling captureUndo before checking whether anything would change. clicking a filled region twice burned an undo step for nothing. now: for flood fill, read the pixel at the click point — if it already matches fillColor, bail before captureUndo. for stroke recolor, check that at least one point color differs. draw and erase are unaffected.
+
+this is starting to feel really good.
+
 — DEADFA11-CAFE-BABE-C0DE-BEEFFACE2026

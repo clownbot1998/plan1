@@ -281,6 +281,32 @@ Called whenever frameStrokes changes for a frame (peer committed a stroke).
 
 */
 
+function drawStrokeBoundary(ctx, stroke) {
+  if (!stroke || stroke.length < 2) return
+  let curX = stroke[0].x, curY = stroke[0].y
+  for (let i = 1; i < stroke.length; i++) {
+    const point = stroke[i]
+    const endX = i < stroke.length - 1 ? (stroke[i].x + stroke[i+1].x) / 2 : stroke[i].x
+    const endY = i < stroke.length - 1 ? (stroke[i].y + stroke[i+1].y) / 2 : stroke[i].y
+    ctx.beginPath()
+    ctx.moveTo(curX, curY)
+    ctx.globalCompositeOperation = point.erase ? 'destination-out' : 'source-over'
+    ctx.strokeStyle = point.erase ? 'rgba(0,0,0,1)' : (point.color || '#ebdbb2')
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+    ctx.globalAlpha = 1
+    ctx.lineWidth = point.lineWidth || 8
+    if (i < stroke.length - 1) {
+      ctx.quadraticCurveTo(point.x, point.y, endX, endY)
+    } else {
+      ctx.lineTo(endX, endY)
+    }
+    ctx.stroke()
+    curX = endX; curY = endY
+  }
+  ctx.globalAlpha = 1
+  ctx.globalCompositeOperation = 'source-over'
+}
+
 function replayStrokes(frameId) {
   const { frameStrokes, canvasW, canvasH } = $.learn()
   const f = ensureFrame(frameId, canvasW, canvasH)
@@ -290,11 +316,28 @@ function replayStrokes(frameId) {
   const drawS = strokes.filter(s => !(s?.length === 1 && s[0].fill))
   const fillS = strokes.filter(s => s?.length === 1 && s[0].fill)
 
-  // pass 1 — strokes (creates boundary for fills)
+  if (!fillS.length) {
+    drawS.forEach(s => drawStroke(ctx, s))
+    return
+  }
+
+  // pass 1 — solid boundary strokes on offscreen so flood fill hits hard edges
+  const boundary = document.createElement('canvas')
+  boundary.width = canvasW; boundary.height = canvasH
+  const bCtx = boundary.getContext('2d')
+  drawS.forEach(s => drawStrokeBoundary(bCtx, s))
+
+  // pass 2 — fills read walls from boundary but write only to fillOnly (no dead-pixel fringe)
+  const fillOnly = document.createElement('canvas')
+  fillOnly.width = canvasW; fillOnly.height = canvasH
+  const fCtx = fillOnly.getContext('2d')
+  fillS.forEach(s => floodFillOnto(bCtx, fCtx, s[0].x, s[0].y, s[0].color, canvasW, canvasH))
+
+  // composite fills onto main canvas (no stroke pixels here)
+  ctx.drawImage(fillOnly, 0, 0)
+
+  // pass 3 — paint strokes at correct opacity and anti-aliasing on top of fills
   drawS.forEach(s => drawStroke(ctx, s))
-  // pass 2 — fills bounded by strokes; high alpha-tolerance reaches anti-aliased
-  // edge pixels so strokes from pass 1 sit cleanly on top — no third pass needed
-  fillS.forEach(s => floodFill(ctx, s[0].x, s[0].y, s[0].color, canvasW, canvasH))
 }
 
 /*
@@ -2227,8 +2270,6 @@ function floodFill(ctx, x, y, fillColor, w, h) {
   const ti=(y*w+x)*4,tr=d[ti],tg=d[ti+1],tb=d[ti+2],ta=d[ti+3]
   const fc=hexToRgba(fillColor)
   if(tr===fc.r&&tg===fc.g&&tb===fc.b&&ta===fc.a)return
-  // when target is transparent: match by alpha only — catches anti-aliased edges of any color
-  // when target is opaque: standard sum-of-channels tolerance
   const match = ta===0
     ? pi => d[pi+3] <= 200
     : pi => Math.abs(d[pi]-tr)+Math.abs(d[pi+1]-tg)+Math.abs(d[pi+2]-tb)+Math.abs(d[pi+3]-ta) <= 80
@@ -2241,6 +2282,29 @@ function floodFill(ctx, x, y, fillColor, w, h) {
     stack.push([cx+1,cy],[cx-1,cy],[cx,cy+1],[cx,cy-1])
   }
   ctx.putImageData(img,0,0)
+}
+
+// reads walls from srcCtx, writes fill pixels only to dstCtx — no dead-pixel fringe
+function floodFillOnto(srcCtx, dstCtx, x, y, fillColor, w, h) {
+  const src=srcCtx.getImageData(0,0,w,h),d=src.data
+  const dst=dstCtx.getImageData(0,0,w,h),dd=dst.data
+  const ti=(y*w+x)*4,tr=d[ti],tg=d[ti+1],tb=d[ti+2],ta=d[ti+3]
+  const fc=hexToRgba(fillColor)
+  if(tr===fc.r&&tg===fc.g&&tb===fc.b&&ta===fc.a)return
+  // boundary strokes are solid (alpha=255); fill everything below that threshold so
+  // anti-aliased fringe is covered and pass-3 strokes paint cleanly on top
+  const match = ta===0
+    ? pi => d[pi+3] < 255
+    : pi => Math.abs(d[pi]-tr)+Math.abs(d[pi+1]-tg)+Math.abs(d[pi+2]-tb)+Math.abs(d[pi+3]-ta) <= 80
+  const stack=[[x,y]],vis=new Uint8Array(w*h)
+  while(stack.length){
+    const[cx,cy]=stack.pop();if(cx<0||cx>=w||cy<0||cy>=h)continue
+    const i=cy*w+cx;if(vis[i])continue;const pi=i*4
+    if(!match(pi))continue
+    vis[i]=1;dd[pi]=fc.r;dd[pi+1]=fc.g;dd[pi+2]=fc.b;dd[pi+3]=fc.a
+    stack.push([cx+1,cy],[cx-1,cy],[cx,cy+1],[cx,cy-1])
+  }
+  dstCtx.putImageData(dst,0,0)
 }
 
 /*
@@ -2455,7 +2519,6 @@ function attachDrawEvents(target) {
 
     if (tool==='pen'){const{x,y}=getCanvasPos(target,e);target._penPoints.push({x,y});renderPenPreview(target);return}
 
-    captureUndo(target)
     target._drawing=true; target._points=[]
     const{x,y}=getCanvasPos(target,e)
 
@@ -2473,14 +2536,26 @@ function attachDrawEvents(target) {
         if(strokeHitTest(drawS[i],x,y)){strokedIdx=strokes.indexOf(drawS[i]);break}
       }
 
+      // no-op: stroke already this color, or pixel at click already matches fill color
+      if (strokedIdx >= 0) {
+        const s = strokes[strokedIdx]
+        if (s.every(pt => pt.color === fillColor || pt.erase)) { target._drawing=false; return }
+      } else {
+        const px = target._drawCanvas.getContext('2d').getImageData(Math.round(x), Math.round(y), 1, 1).data
+        const fc = hexToRgba(fillColor)
+        if (px[0]===fc.r && px[1]===fc.g && px[2]===fc.b && px[3]===fc.a) { target._drawing=false; return }
+      }
+
       const newStrokes=strokedIdx>=0
         ? strokes.map((s,i)=>i===strokedIdx?s.map(pt=>({...pt,color:fillColor,erase:false})):s)
         : [...strokes,[{x,y,fill:true,color:fillColor,lineWidth:0,opacity:1}]]
 
-      // $.teach → onStateChange (array identity check) → replayStrokes → _drawCanvas sync
+      captureUndo(target)
       $.teach({frameStrokes:{...frameStrokes,[frameId]:newStrokes}})
       target._drawing=false;updateReelThumb(target,frameId);scheduleWasSave(target.id);return
     }
+
+    captureUndo(target)
 
     const{thickness,opacity,color}=$.learn()
     const pressure=e.pressure>0?e.pressure:1.0
@@ -2663,7 +2738,7 @@ function renderPenPreview(target){
     pp.style.cssText=`position:absolute;top:0;left:0;width:${canvasW*zoom}px;height:${canvasH*zoom}px;pointer-events:none;z-index:12;image-rendering:pixelated;`
     target._artboardInner.appendChild(pp);target._penPreviewCanvas=pp
   }
-  const{canvasW,canvasH,color,fillColor,thickness}=$.learn()
+  const{canvasW,canvasH,color,thickness}=$.learn()
   const ctx=pp.getContext('2d');ctx.clearRect(0,0,canvasW,canvasH)
   if(target._penPoints.length<1)return
   ctx.beginPath();ctx.moveTo(target._penPoints[0].x,target._penPoints[0].y)
@@ -2671,14 +2746,13 @@ function renderPenPreview(target){
     if(i<target._penPoints.length-1){const mx=(target._penPoints[i].x+target._penPoints[i+1].x)/2,my=(target._penPoints[i].y+target._penPoints[i+1].y)/2;ctx.quadraticCurveTo(target._penPoints[i].x,target._penPoints[i].y,mx,my)}
     else ctx.lineTo(target._penPoints[i].x,target._penPoints[i].y)
   }
-  if(fillColor&&fillColor!=='transparent'){ctx.fillStyle=fillColor;ctx.globalAlpha=.35;ctx.fill();ctx.globalAlpha=1}
   if(color&&color!=='transparent'){ctx.strokeStyle=color;ctx.lineWidth=thickness;ctx.lineCap='round';ctx.setLineDash([3,3]);ctx.stroke();ctx.setLineDash([])}
   target._penPoints.forEach((p,i)=>{ctx.fillStyle=i===0?'#fabd2f':'#d79921';ctx.fillRect(p.x-2,p.y-2,4,4)})
 }
 
 function commitPenPath(target){
   if(target._penPoints.length<2){target._penPoints=[];return}
-  const{color,fillColor,thickness,opacity,frames,frameStrokes}=$.learn()
+  const{color,thickness,opacity,frames,frameStrokes}=$.learn()
   const current = target._localCurrent ?? 0
   const ctx=target._drawCanvas.getContext('2d')
   ctx.beginPath();ctx.moveTo(target._penPoints[0].x,target._penPoints[0].y)
@@ -2687,8 +2761,7 @@ function commitPenPath(target){
     ctx.quadraticCurveTo(target._penPoints[i].x,target._penPoints[i].y,mx,my)
   }
   ctx.lineTo(target._penPoints[target._penPoints.length-1].x,target._penPoints[target._penPoints.length-1].y)
-  ctx.closePath();ctx.globalAlpha=opacity
-  if(fillColor&&fillColor!=='transparent'){ctx.fillStyle=fillColor;ctx.fill()}
+  ctx.globalAlpha=opacity
   if(color&&color!=='transparent'){ctx.strokeStyle=color;ctx.lineWidth=thickness;ctx.lineCap='round';ctx.stroke()}
   ctx.globalAlpha=1
   if(target._penPreviewCanvas)target._penPreviewCanvas.getContext('2d').clearRect(0,0,target._penPreviewCanvas.width,target._penPreviewCanvas.height)
@@ -3318,17 +3391,12 @@ function closeOverlay(target){
 }
 
 function renderView(view){
-  const{fillColor,thickness,opacity,onion,fps,loopMode,canvasW,canvasH,chromakeyEnabled,chromakeyColor,chromakeyTolerance,videoEnabled,violinMode,baseOctave,bandPreset,octaveInstruments}=$.learn()
+  const{thickness,opacity,onion,fps,loopMode,canvasW,canvasH,chromakeyEnabled,chromakeyColor,chromakeyTolerance,videoEnabled,violinMode,baseOctave,bandPreset,octaveInstruments}=$.learn()
   if(view===VIEWS.brush||view===VIEWS.settings)return`
     <div class="overlay-title">size</div>
     <div class="thicknoid-grid">${thicknoids.map(t=>`<button class="thicknoid-btn ${thickness===t?'active':''}" data-thick="${t}">${t}</button>`).join('')}</div>
     <div class="overlay-title" style="margin-top:.75rem;">opacity</div>
     <div class="opacity-grid">${[0,.1,.2,.3,.4,.5,.6,.7,.8,.9,1].map(o=>`<button class="opacity-btn ${opacity===o?'active':''}" data-opacity="${o}">${o}</button>`).join('')}</div>
-    <div class="overlay-title" style="margin-top:.75rem;">fill color <span style="font-size:.5rem;color:#504945">(pen mode)</span></div>
-    <button class="row-btn" data-pick-fill style="display:flex;align-items:center;gap:.5rem;">
-      <span style="display:inline-block;width:14px;height:14px;border-radius:2px;border:1px solid #504945;background:${fillColor==='transparent'?'repeating-conic-gradient(#504945 0% 25%,#3c3836 0% 50%) 0 0/6px 6px':fillColor};flex-shrink:0;"></span>
-      <span>pick fill</span>
-    </button>
     <div class="overlay-title" style="margin-top:.75rem;">onion skin</div>
     <button class="row-btn ${onion?'active':''}" data-toggle-onion>${onion?'● on':'○ off'}</button>
     <div class="overlay-title" style="margin-top:.75rem;">playback</div>
@@ -3549,11 +3617,6 @@ $.when('input','plan98-palette',event=>{
   if(root&&!inSidebar)closeOverlay(root)
 })
 
-// pick-fill button inside brush overlay
-$.when('click','[data-pick-fill]',event=>{
-  const root=event.target.closest(tag);if(!root)return
-  openPalette(root,'fill')
-})
 $.when('click','[data-close-overlay]',event=>{const r=event.target.closest(tag);if(r)closeOverlay(r)})
 $.when('click','[data-new-frame]',event=>{const r=event.target.closest(tag);if(r)addFrame(r)})
 
