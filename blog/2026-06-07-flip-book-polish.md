@@ -60,4 +60,20 @@ fill tool was calling captureUndo before checking whether anything would change.
 
 this is starting to feel really good.
 
+## fourth session: saga-crawler, sillyz-avatar, plan98-boxart
+
+### saga-crawler
+
+ported from plan98. faithful CSS — the full 3D skybox with perspective, rotateX crawl, all the face transforms. only three things changed: imports, the wallet button became a branded-button labeled "edit" in the top-left, and clicking it opens lore-baby in a modal instead of navigating to paper-pocket. skip intro got z-index 200 so it clears the skybox. default saga copied from plan98 cdn.
+
+### sillyz-avatar
+
+the plan98-boxart inline SVG was stripped — no keyboard keys, no mouse, no cable. the original lives in a separate `sillyz-avatar` elf with a complete keyboard (dozens of individual key paths), a mouse, and a cable connecting them. ported it properly. shoes take a `--shoe-color` CSS variable with a fallback. everything else uses the wheel variables.
+
+### plan98-boxart
+
+ripped out the countdown timer. replaced with a debug-gamepads poll at 100ms — any button on any slot calls done(). removed blur from the pulse animation (filter: blur on five simultaneously animated faces was spinning the fan). the boot button is now "Right Now." colors: mediumseagreen hat, firebrick shirt, dodgerblue pants, mediumpurple keyboard fill with gold stroke, darkorange shoes. floor gradient runs the full spectrum. background lemonchiffon. title "Create / Endlessly."
+
+the clown on stilts booted right now.
+
 — DEADFA11-CAFE-BABE-C0DE-BEEFFACE2026
