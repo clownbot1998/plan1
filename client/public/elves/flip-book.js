@@ -290,12 +290,11 @@ function replayStrokes(frameId) {
   const drawS = strokes.filter(s => !(s?.length === 1 && s[0].fill))
   const fillS = strokes.filter(s => s?.length === 1 && s[0].fill)
 
-  // pass 1 — draw strokes so fills are bounded
+  // pass 1 — strokes (creates boundary for fills)
   drawS.forEach(s => drawStroke(ctx, s))
-  // pass 2 — fills (bounded by strokes now on canvas)
+  // pass 2 — fills bounded by strokes; high alpha-tolerance reaches anti-aliased
+  // edge pixels so strokes from pass 1 sit cleanly on top — no third pass needed
   fillS.forEach(s => floodFill(ctx, s[0].x, s[0].y, s[0].color, canvasW, canvasH))
-  // pass 3 — redraw strokes on top: anti-aliased edges composite over fill, no gap
-  drawS.forEach(s => drawStroke(ctx, s))
 }
 
 /*
@@ -2150,29 +2149,51 @@ function drawStroke(context, stroke) {
   }
   if (!stroke || stroke.length < 2) return
 
-  // Each segment gets its own path so lineWidth varies per point, not whole-stroke.
-  // Midpoint chaining is preserved so the curve stays smooth at segment joins.
+  const opacity = stroke[1]?.opacity ?? 1
+  const isErase = stroke[1]?.erase
+
+  // For semi-transparent non-erase strokes: render all segments at full alpha onto
+  // an offscreen canvas, then composite the whole thing at stroke opacity once.
+  // Per-segment globalAlpha causes visible dots where segments overlap at joints.
+  const useOffscreen = opacity < 1 && !isErase
+  let drawCtx = context
+  let offscreen = null
+  if (useOffscreen) {
+    offscreen = document.createElement('canvas')
+    offscreen.width = context.canvas.width
+    offscreen.height = context.canvas.height
+    drawCtx = offscreen.getContext('2d')
+  }
+
   let curX = stroke[0].x, curY = stroke[0].y
   for (let i = 1; i < stroke.length; i++) {
     const point = stroke[i]
     const endX = i < stroke.length - 1 ? (stroke[i].x + stroke[i+1].x) / 2 : stroke[i].x
     const endY = i < stroke.length - 1 ? (stroke[i].y + stroke[i+1].y) / 2 : stroke[i].y
 
-    context.beginPath()
-    context.moveTo(curX, curY)
-    context.globalCompositeOperation = point.erase ? 'destination-out' : 'source-over'
-    context.strokeStyle = point.erase ? 'rgba(0,0,0,1)' : (point.color || '#ebdbb2')
-    context.lineCap = 'round'; context.lineJoin = 'round'
-    context.globalAlpha = point.opacity ?? 1
-    context.lineWidth = point.lineWidth || 8
+    drawCtx.beginPath()
+    drawCtx.moveTo(curX, curY)
+    drawCtx.globalCompositeOperation = point.erase ? 'destination-out' : 'source-over'
+    drawCtx.strokeStyle = point.erase ? 'rgba(0,0,0,1)' : (point.color || '#ebdbb2')
+    drawCtx.lineCap = 'round'; drawCtx.lineJoin = 'round'
+    drawCtx.globalAlpha = 1
+    drawCtx.lineWidth = point.lineWidth || 8
     if (i < stroke.length - 1) {
-      context.quadraticCurveTo(point.x, point.y, endX, endY)
+      drawCtx.quadraticCurveTo(point.x, point.y, endX, endY)
     } else {
-      context.lineTo(endX, endY)
+      drawCtx.lineTo(endX, endY)
     }
-    context.stroke()
+    drawCtx.stroke()
 
     curX = endX; curY = endY
+  }
+
+  if (offscreen) {
+    context.save()
+    context.globalAlpha = opacity
+    context.globalCompositeOperation = 'source-over'
+    context.drawImage(offscreen, 0, 0)
+    context.restore()
   }
 
   context.globalAlpha = 1
