@@ -1015,36 +1015,16 @@ $.draw((target) => {
         <div class="system-container"></div>
         <div class="pause-container"></div>
         <div class="split-screen">
-          <div class="tile" data-slot="0"></div>
-          <div class="tile" data-slot="1"></div>
-          <div class="tile" data-slot="2"></div>
-          <div class="tile" data-slot="3"></div>
+          <div class="tile"></div>
         </div>
       `
     }
     requestAnimationFrame(() => {
       gamestateUplink({ elf: $.link, partyId, snapshot: $.learn() })
-      displayByMode(target, $.learn(), function multiSplit3ps() {
+      displayByMode(target, $.learn(), function hostRender() {
         const { tiles, players } = $.learn()
-        tiles.map((slot) => {
-          const tile = target.querySelector(`.tile[data-slot="${slot}"]`)
-          if(players[slot]) {
-            const player = players[slot] || newPlayer
-            renderTile(tile, slot, player)
-          } else {
-            if(tile.querySelector('qr-code')) return
-            const url = plan98.env.PLAN98_PEER
-              ?`http://${plan98.env.PLAN98_PEER}`
-              :`${window.location.origin}`
-            diffHTML.innerHTML(tile, `
-              <div class="no-player-yet" data-slot="${slot}">
-                <div class="join-code" data-slot="${slot}">
-                  <qr-code target="_blank" data-bg="transparent" src="${url}/app/couch-coop?id=${partyId}&slot=${slot}&controller=true&variation=piano"></qr-code>
-                </div>
-              </div>
-            `)
-          }
-        })
+        const tile = target.querySelector('.tile')
+        renderSharedTile(tile, players, tiles, partyId)
       })
 
       afterHostUpdate(target)
@@ -1395,6 +1375,56 @@ function renderPiano(slot, player, data={}) {
   }).join('')
 }
 
+function renderSharedTile(tile, players, tiles, partyId) {
+  const url = plan98.env.PLAN98_PEER
+    ? `http://${plan98.env.PLAN98_PEER}`
+    : window.location.origin
+  const nextSlot = tiles.find(slot => !players[slot])
+  const activeSlots = tiles.filter(slot => players[slot])
+  const refSlot = activeSlots.length > 0 ? activeSlots[0] : null
+  const refPlayer = refSlot !== null ? players[refSlot] : newPlayer
+
+  const { label } = circleInfo(refPlayer.circleIndex ?? 1)
+  const offsetIdx = noteLabels.findIndex(x => x === label) + (refPlayer.frequencyOffset ?? 0)
+  const offsetLabel = (refPlayer.frequencyOffset ?? 0) === 0
+    ? label
+    : noteLabels[mod(offsetIdx, noteLabels.length)]
+
+  diffHTML.innerHTML(tile, `
+    ${nextSlot !== undefined ? `
+      <div class="qr-corner">
+        <qr-code data-bg="transparent" src="${url}/app/couch-coop?id=${partyId}&slot=${nextSlot}&controller=true&variation=piano"></qr-code>
+      </div>
+    ` : ''}
+    <div class="perspective" data-slot="${refSlot ?? 0}">
+      <div class="skybox">
+        <div class="floor">
+          <div class="ufo-grid">${renderUFOs(refSlot ?? 0, refPlayer, { offsetLabel })}</div>
+          <div class="wave-grid">${renderEnemies(refSlot ?? 0, refPlayer, { offsetLabel })}</div>
+          <div class="piano">${renderSharedPiano(players, activeSlots)}</div>
+        </div>
+      </div>
+    </div>
+  `)
+}
+
+function renderSharedPiano(players, activeSlots) {
+  return pianoKeys.map(x => {
+    const dots = activeSlots.map(slot => {
+      const p = players[slot]
+      const { label } = circleInfo(p.circleIndex ?? 1)
+      const offsetIdx = noteLabels.findIndex(n => n === label) + (p.frequencyOffset ?? 0)
+      const playerRoot = (p.frequencyOffset ?? 0) === 0
+        ? label
+        : noteLabels[mod(offsetIdx, noteLabels.length)]
+      return x.key === playerRoot
+        ? `<div class="player-sprite" data-slot="${slot}"></div>`
+        : ''
+    }).join('')
+    return `<button class="${x.type}" data-key="${x.key}">${dots}</button>`
+  }).join('')
+}
+
 function renderSystem(state) {
   const { systemUrl, systemMenu, systemIndex, systemKey } = state
   const { list, label } = systemMenu[systemKey]
@@ -1577,10 +1607,27 @@ $.style(`
     inset: 0;
     z-index: 2;
     display: grid;
-    grid-template-rows: 1fr 1fr;
-    grid-template-columns: 1fr 1fr;
-    grid-template-areas: "first second" "third fourth";
-    gap: .5rem;
+    grid-template-rows: 1fr;
+    grid-template-columns: 1fr;
+  }
+
+  & .qr-corner {
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+    z-index: 200;
+    width: 80px;
+    height: 80px;
+    background: white;
+    border-radius: 8px;
+    padding: 4px;
+    display: grid;
+    place-items: center;
+  }
+
+  & .qr-corner qr-code {
+    width: 100%;
+    height: 100%;
   }
 
   & pre {
