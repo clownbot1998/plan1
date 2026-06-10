@@ -202,6 +202,15 @@ io.onConnection(channel => {
     }
   });
 
+  channel.on('noteAttack', ({ slot, midiNote }) => {
+    if(currentParty && parties.has(currentParty)) {
+      const party = parties.get(currentParty)
+      if (party.host) {
+        party.host.emit('noteAttack', { slot, midiNote })
+      }
+    }
+  });
+
   channel.on('linkState', ({ elf, id, data }) => {
     const room = `${elf}/${id}`
     channel.join(room);

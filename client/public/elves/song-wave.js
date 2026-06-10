@@ -20,6 +20,7 @@ const playerInstruments = {
   3: null
 }
 
+
 loadInstrument(0, defaultInstruments[0])
 loadInstrument(1, defaultInstruments[1])
 loadInstrument(2, defaultInstruments[2])
@@ -161,7 +162,7 @@ function loadInstrument(slot, instrument) {
   playerInstruments[slot] = null
   const synth = SampleLibrary.load({
     instruments: instrument,
-    baseUrl: (self.plan98.env.HEAVY_ASSET_CDN_URL || 'https://cdn.plan98.org') + "/private/tychi.1998.social/SourceCode/tonejs-instruments/samples/",
+    baseUrl: (self.plan98?.env?.HEAVY_ASSET_CDN_URL || '/private') + "/cdn/attentionandlearninglab.com/samples/",
     onload() {
       Tone.Transport.bpm.value = parseInt(getBpm())
       synth.release = .5;
@@ -627,6 +628,11 @@ function releaseAll() {
 }
 
 const rpcHandlers = {
+  noteAttack({ slot, midiNote }) {
+    const instrument = playerInstruments[slot]
+    if(instrument) instrument.synth.triggerAttackRelease(Tone.Frequency(midiNote, "midi").toNote(), '8n')
+    score(slot, midiNote)
+  },
   inputFrame(frameInputs) {
     const { players, mode } = $.learn()
 
@@ -788,20 +794,16 @@ const rpcHandlers = {
 function releaseNotes(slot, notes) {
   const instrument = playerInstruments[slot]
   if(instrument && notes.length > 0) {
-    notes.forEach(note => {
-      instrument.synth.triggerRelease(Tone.Frequency(note, "midi").toNote());
-    })
+    notes.forEach(note => instrument.synth.triggerRelease(Tone.Frequency(note, "midi").toNote()))
   }
 }
 
 function attackNotes(slot, notes) {
   const instrument = playerInstruments[slot]
-  if(instrument && notes.length > 0) {
-    notes.forEach(note => {
-      score(slot, note)
-      instrument.synth.triggerAttack(Tone.Frequency(note, "midi").toNote());
-    })
-  }
+  notes.forEach(note => {
+    score(slot, note)
+    if(instrument) instrument.synth.triggerAttack(Tone.Frequency(note, "midi").toNote())
+  })
 }
 
 function score(slot, note) {
@@ -1037,7 +1039,7 @@ $.draw((target) => {
             diffHTML.innerHTML(tile, `
               <div class="no-player-yet" data-slot="${slot}">
                 <div class="join-code" data-slot="${slot}">
-                  <qr-code target="_blank" data-bg="transparent" src="${url}/app/couch-coop?id=${partyId}&slot=${slot}&controller=true&variation=elegant"></qr-code>
+                  <qr-code target="_blank" data-bg="transparent" src="${url}/app/couch-coop?id=${partyId}&slot=${slot}&controller=true&variation=piano"></qr-code>
                 </div>
               </div>
             `)

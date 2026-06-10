@@ -707,6 +707,9 @@ async function handleRequest(request) {
       } else if (type === 'gamepadSnapshot') {
         const room = partyRooms.get(socket._partyId);
         if (room?.host?.readyState === WebSocket.OPEN) room.host.send(JSON.stringify({ type: 'gamepadUpdate', payload }));
+      } else if (type === 'noteAttack') {
+        const room = partyRooms.get(socket._partyId);
+        if (room?.host?.readyState === WebSocket.OPEN) room.host.send(JSON.stringify({ type: 'noteAttack', payload }));
       }
     };
     socket.onclose = () => {

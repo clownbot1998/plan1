@@ -3,13 +3,24 @@ import diffHTML from 'diffhtml'
 
 import { overrideButton, checkButton, checkAxis } from './debug-gamepads.js'
 
+const _circle     = ['F','C','G','D','A','E','B','Fs','Cs','Ab','Eb','Bb']
+const _circleMidi = [53, 48, 55, 50, 57, 52, 59, 54, 61, 56, 63, 58]
+const _notes      = ['C','Cs','D','Eb','E','F','Fs','G','Ab','A','Bb','B']
+function pianoRootFromSnapshot(circleIndex, frequencyOffset) {
+  const label = _circle[((circleIndex % 12) + 12) % 12]
+  if(!frequencyOffset) return label
+  const i = _notes.indexOf(label) + frequencyOffset
+  return _notes[((i % 12) + 12) % 12]
+}
+
 import geckos from '@geckos.io/client'
 
 const controllerVariations = [
   'elegant',
   'classic',
   'super',
-  'pro'
+  'pro',
+  'piano'
 ]
 
 let slotIndex
@@ -42,7 +53,9 @@ const $ = elf('couch-coop', {
   0: null,
   1: null,
   2: null,
-  3: null
+  3: null,
+  pianoRootKey: 'C',
+  pianoRootMidi: 48,
 })
 
 const config = plan98.env.PLAN98_REALTIME ?
@@ -103,6 +116,15 @@ function mount(target) {
 
       channel.on('gamestateDownload', (data) => {
         notifyGamesOfState(data)
+        const { snapshot } = data || {}
+        const player = snapshot?.players?.[slotIndex] ?? snapshot?.players?.[String(slotIndex)]
+        if(player) {
+          const { circleIndex, frequencyOffset } = player
+          const idx = ((circleIndex % 12) + 12) % 12
+          const newRootKey = pianoRootFromSnapshot(circleIndex, frequencyOffset)
+          const newRootMidi = _circleMidi[idx] + (frequencyOffset || 0)
+          $.teach({ pianoRootKey: newRootKey, pianoRootMidi: newRootMidi })
+        }
       })
 
       channel.on('error', (error) => {
@@ -134,6 +156,11 @@ function mount(target) {
         $.teach(update)
       })
 
+      channel.on('noteAttack', ({ slot, midiNote }) => {
+        const game = target.querySelector(rom)
+        notification(game, 'noteAttack', { slot, midiNote })
+      })
+
       channel.on('error', (error) => {
         console.error("Geckos Error:", error);
       })
@@ -146,11 +173,26 @@ function mount(target) {
 }
 
 
+const pianoControllerKeys = [
+  { key: 'C',  type: 'natural'    },
+  { key: 'Cs', type: 'accidental' },
+  { key: 'D',  type: 'natural'    },
+  { key: 'Eb', type: 'accidental' },
+  { key: 'E',  type: 'natural'    },
+  { key: 'F',  type: 'natural'    },
+  { key: 'Fs', type: 'accidental' },
+  { key: 'G',  type: 'natural'    },
+  { key: 'Ab', type: 'accidental' },
+  { key: 'A',  type: 'natural'    },
+  { key: 'Bb', type: 'accidental' },
+  { key: 'B',  type: 'natural'    },
+]
+
 $.draw((target) => {
   mount(target)
   const { slot, booting } = $.learn()
   const variation = target.getAttribute('variation') || 'super'
-  rom = target.getAttribute('rom') || 'player-piano'
+  rom = target.getAttribute('rom') || 'song-wave'
 
   if(booting) {
     return `
@@ -162,7 +204,7 @@ $.draw((target) => {
 
   if(slot) {
     const controller = target.querySelector('.controller')
-    if(controller) return
+    if(controller && variation !== 'piano') return
     return renderController(target, slot, variation)
   }
 
@@ -176,12 +218,10 @@ $.draw((target) => {
   `
 }, {
   afterUpdate(target) {
-    {
-      const controller = target.querySelector('.controller')
-      if(controller) {
-        const { hideTouchControls } = $.learn()
-        controller.dataset.hide = hideTouchControls
-      }
+    const { hideTouchControls } = $.learn()
+    const controller = target.querySelector('.controller')
+    if(controller) {
+      controller.dataset.hide = hideTouchControls
     }
   }
 })
@@ -206,7 +246,26 @@ $.when('click', '.touchable, [data-press]', () => {
   //newTouchTimeout()
 })
 
+function renderPianoController(target, slot) {
+  const { pianoRootKey } = $.learn()
+  return `
+    <div class="controller" data-slot="${slot}" data-variation="piano">
+      <div class="camera">
+        <${rom} data-party-id="${target.id}" data-slot="${slot}" data-solo="true"></${rom}>
+      </div>
+      <div class="piano touchable">
+        ${pianoControllerKeys.map(k => `
+          <button class="${k.type}" data-key="${k.key}">
+            ${k.key === pianoRootKey ? `<div class="player-sprite" data-slot="${slot}"></div>` : ''}
+          </button>
+        `).join('')}
+      </div>
+    </div>
+  `
+}
+
 function renderController(target, slot, variation) {
+  if(variation === 'piano') return renderPianoController(target, slot)
   return `
     <div class="controller" data-slot="${slot}" data-variation="${variation}">
       <div class="camera">
@@ -294,9 +353,18 @@ function notification(node, method, params) {
 
 $.when('pointerdown', '[data-press]', (event) => {
   $.teach({ hideTouchControls: false })
-  //newTouchTimeout()
   const { press } = event.target.dataset
   overrideButton(0, buttons[press], 1)
+})
+
+$.when('pointerdown', '[data-key]', (event) => {
+  const { key } = event.target.dataset
+  const { pianoRootKey, pianoRootMidi, slot } = $.learn()
+  if(!key || pianoRootMidi === undefined) return
+  const keyIndex  = _notes.indexOf(key)
+  const rootIndex = _notes.indexOf(pianoRootKey)
+  const offset    = ((keyIndex - rootIndex) % 12 + 12) % 12
+  channel.emit('noteAttack', { slot: parseInt(slot), midiNote: pianoRootMidi + offset })
 })
 
 $.when('pointerup', '[data-press]', (event) => {
@@ -805,6 +873,84 @@ $.style(`
     background: linear-gradient(rgba(255,255,255,.1), rgba(0,0,0,.5)), var(--gray);
     color: rgba(255,255,255,1);
   }
+
+  & .controller[data-variation="piano"] .piano {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    grid-template-areas: "C D E F G A B";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    touch-action: none;
+  }
+
+  & .controller[data-variation="piano"] .piano button {
+    position: relative;
+    border: none;
+    border-radius: 3px;
+    width: 100%;
+    aspect-ratio: 1;
+    z-index: 5;
+    opacity: .85;
+    display: grid;
+    place-items: center;
+    pointer-events: all;
+    cursor: pointer;
+  }
+
+  & .controller[data-variation="piano"] .piano button.active {
+    filter: brightness(1.5);
+    opacity: 1;
+  }
+
+  & .controller[data-variation="piano"] .piano .natural {
+    background: white;
+    border: 1px solid #888;
+    color: #555;
+  }
+
+  & .controller[data-variation="piano"] .piano .accidental {
+    background: black;
+    z-index: 6;
+    width: 50%;
+    border: 1px solid black;
+    opacity: 1;
+    color: rgba(255,255,255,.6);
+    font-size: .45rem;
+    align-self: start;
+  }
+
+  & .controller[data-variation="piano"] .piano [data-key="C"]  { grid-area: C; }
+  & .controller[data-variation="piano"] .piano [data-key="Cs"] { grid-area: D; transform: translate(-50%, 0); }
+  & .controller[data-variation="piano"] .piano [data-key="D"]  { grid-area: D; }
+  & .controller[data-variation="piano"] .piano [data-key="Eb"] { grid-area: E; transform: translate(-50%, 0); }
+  & .controller[data-variation="piano"] .piano [data-key="E"]  { grid-area: E; }
+  & .controller[data-variation="piano"] .piano [data-key="F"]  { grid-area: F; }
+  & .controller[data-variation="piano"] .piano [data-key="Fs"] { grid-area: G; transform: translate(-50%, 0); }
+  & .controller[data-variation="piano"] .piano [data-key="G"]  { grid-area: G; }
+  & .controller[data-variation="piano"] .piano [data-key="Ab"] { grid-area: A; transform: translate(-50%, 0); }
+  & .controller[data-variation="piano"] .piano [data-key="A"]  { grid-area: A; }
+  & .controller[data-variation="piano"] .piano [data-key="Bb"] { grid-area: B; transform: translate(-50%, 0); }
+  & .controller[data-variation="piano"] .piano [data-key="B"]  { grid-area: B; }
+
+  & .controller[data-variation="piano"] .piano .player-sprite {
+    position: absolute;
+    bottom: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 12px;
+    height: 12px;
+    border-radius: 100%;
+    pointer-events: none;
+    z-index: 8;
+    background: white;
+  }
+  & .controller[data-variation="piano"] .piano .player-sprite[data-slot="0"] { background: var(--green, mediumseagreen); }
+  & .controller[data-variation="piano"] .piano .player-sprite[data-slot="1"] { background: var(--red, firebrick); }
+  & .controller[data-variation="piano"] .piano .player-sprite[data-slot="2"] { background: var(--yellow, gold); }
+  & .controller[data-variation="piano"] .piano .player-sprite[data-slot="3"] { background: var(--blue, dodgerblue); }
 
 `)
 
