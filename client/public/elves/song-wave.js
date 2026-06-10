@@ -1024,7 +1024,9 @@ $.draw((target) => {
       displayByMode(target, $.learn(), function hostRender() {
         const { tiles, players } = $.learn()
         const tile = target.querySelector('.tile')
-        renderSharedTile(tile, players, tiles, partyId)
+        renderSharedTile(tile, players, tiles)
+        const nextSlot = tiles.find(slot => !players[slot])
+        updateQrCorner(target.querySelector('.split-screen'), nextSlot, partyId)
       })
 
       afterHostUpdate(target)
@@ -1375,11 +1377,26 @@ function renderPiano(slot, player, data={}) {
   }).join('')
 }
 
-function renderSharedTile(tile, players, tiles, partyId) {
-  const url = plan98.env.PLAN98_PEER
-    ? `http://${plan98.env.PLAN98_PEER}`
-    : window.location.origin
-  const nextSlot = tiles.find(slot => !players[slot])
+function updateQrCorner(container, nextSlot, partyId) {
+  const url = plan98.env.PLAN98_PEER ? `http://${plan98.env.PLAN98_PEER}` : window.location.origin
+  let corner = container.querySelector('.qr-corner')
+  if(nextSlot === undefined) {
+    if(corner) corner.remove()
+    return
+  }
+  const src = `${url}/app/couch-coop?id=${partyId}&slot=${nextSlot}&controller=true&variation=piano`
+  if(!corner) {
+    corner = document.createElement('div')
+    corner.className = 'qr-corner'
+    corner.innerHTML = `<qr-code data-bg="transparent" src="${src}"></qr-code>`
+    container.appendChild(corner)
+  } else {
+    const qr = corner.querySelector('qr-code')
+    if(qr && qr.getAttribute('src') !== src) qr.setAttribute('src', src)
+  }
+}
+
+function renderSharedTile(tile, players, tiles) {
   const activeSlots = tiles.filter(slot => players[slot])
   const refSlot = activeSlots.length > 0 ? activeSlots[0] : null
   const refPlayer = refSlot !== null ? players[refSlot] : newPlayer
@@ -1391,11 +1408,6 @@ function renderSharedTile(tile, players, tiles, partyId) {
     : noteLabels[mod(offsetIdx, noteLabels.length)]
 
   diffHTML.innerHTML(tile, `
-    ${nextSlot !== undefined ? `
-      <div class="qr-corner">
-        <qr-code data-bg="transparent" src="${url}/app/couch-coop?id=${partyId}&slot=${nextSlot}&controller=true&variation=piano"></qr-code>
-      </div>
-    ` : ''}
     <div class="perspective" data-slot="${refSlot ?? 0}">
       <div class="skybox">
         <div class="floor">
