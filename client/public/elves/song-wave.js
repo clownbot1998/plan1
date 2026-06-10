@@ -3,7 +3,7 @@ import diffHTML from 'diffhtml'
 import * as Tone from 'tone@next'
 import { SampleLibrary } from '/public/cdn/attentionandlearninglab.com/Tonejs-Instruments.js'
 import { systemMenu, getTheme } from './paper-pocket.js'
-import { gamestateUplink, gamestateDownlink } from './couch-coop.js'
+import { gamestateUplink, gamestateDownlink, getRemotePlayerList } from './couch-coop.js'
 
 // load samples / choose 4 random instruments from the list //
 const instruments = ['piano', 'bass-electric', 'bassoon', 'cello', 'clarinet', 'contrabass', 'flute', 'french-horn', 'guitar-acoustic', 'guitar-electric','guitar-nylon', 'harmonium', 'harp', 'organ', 'saxophone', 'trombone', 'trumpet', 'tuba', 'violin', 'xylophone']
@@ -1025,7 +1025,8 @@ $.draw((target) => {
         const { tiles, players } = $.learn()
         const tile = target.querySelector('.tile')
         renderSharedTile(tile, players, tiles)
-        const nextSlot = tiles.find(slot => !players[slot])
+        const remoteList = getRemotePlayerList()
+        const nextSlot = tiles.find(slot => !players[slot] && !remoteList[slot])
         updateQrCorner(target.querySelector('.split-screen'), nextSlot, partyId)
       })
 

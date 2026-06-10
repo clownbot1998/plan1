@@ -85,6 +85,10 @@ export function gamestateUplink(data) {
 
 const gamestateCallbacks = []
 
+export function getRemotePlayerList() {
+  return $.learn().remotePlayerList || []
+}
+
 export function gamestateDownlink(callback) {
   gamestateCallbacks.push(callback)
 }
@@ -149,6 +153,10 @@ function mount(target) {
       $.teach({ geckosReady: true })
 
       joinParty(target.id, 'host')
+
+      channel.on('playerList', (list) => {
+        $.teach({ remotePlayerList: list })
+      })
 
       channel.on('gamepadUpdate', ({ gamepad, slot, id }) => {
         const update = {}
