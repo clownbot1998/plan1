@@ -1245,6 +1245,7 @@ const MODE_META = {
   manage: { icon: 'pencil-square', color: 'firebrick'      },
   browse: { icon: 'people-fill',   color: 'darkorange'     },
   gallery: { icon: 'images',        color: 'mediumpurple'   },
+  share:  { icon: 'question-circle', color: 'gold', textColor: '#333' },
 }
 
 function renderCompassButtons(mode) {
@@ -1255,8 +1256,8 @@ function renderCompassButtons(mode) {
     <button class="c-browse${mode === 'browse' ? ' active' : ''}" data-mode="browse" title="team chat">
       <sl-icon name="people-fill"></sl-icon>
     </button>
-    <button class="c-qr" data-action="qr" title="share via QR">
-      <sl-icon name="qr-code"></sl-icon>
+    <button class="c-share${mode === 'share' ? ' active' : ''}" data-mode="share" title="info &amp; share">
+      <sl-icon name="question-circle"></sl-icon>
     </button>
     <button class="c-move${mode === 'pan' ? ' active' : ''}" data-mode="pan" title="move canvas">
       <sl-icon name="arrows-move"></sl-icon>
@@ -1309,6 +1310,7 @@ window.addEventListener('park:inspector', ({ detail }) => {
 window.addEventListener('park:open-card', ({ detail }) => {
   $.teach({ mode: 'pan', menuOpen: false, linkSource: null, sidebarOpen: true, sidebarCard: detail.cardId, parkInspectorId: null })
 })
+
 
 function openInBoard(cardId) {
   const { cards, zoom } = $.learn()
@@ -1373,6 +1375,28 @@ function afterUpdate(target) {
     if (osBtn) osBtn.classList.remove('active')
     if (park) park.style.display = 'none'
   }
+
+  const shareOverlay = target.querySelector('.share-overlay')
+  if (shareOverlay) {
+    const { launchHref } = $.learn()
+    if (mode === 'share' && !launchHref) {
+      shareOverlay.style.display = 'flex'
+      const url = `${location.origin}/app/bulletin-board?id=${_boardId}`
+      const safe = escapeHtml(url)
+      if (shareOverlay.dataset.renderedUrl !== url) {
+      shareOverlay.dataset.renderedUrl = url
+      shareOverlay.innerHTML = `
+        <join-cta
+          url="${safe}"
+          title="bulletin-board"
+          description="the elves need your help. the rainbow connection is down and if you don't get it back online, no one will. good luck. team up with friends to solve fact-based mysteries."
+        ></join-cta>
+      `
+      } // end renderedUrl guard
+    } else {
+      shareOverlay.style.display = 'none'
+    }
+  }
 }
 
 
@@ -1408,6 +1432,7 @@ function mount(target) {
     </div>
     <div class="card-launch" data-open="false"></div>
     <div class="camera-overlay" data-open="false"></div>
+    <div class="share-overlay" style="display:none"></div>
     <div class="park-hud" hidden></div>
     <board-call></board-call>
   `
@@ -1468,18 +1493,12 @@ function update(target) {
 
   const rootBtn = compass.querySelector('.root')
   if (rootBtn) {
-    if (launchHref) {
-      rootBtn.style.background = '#111'
-      rootBtn.dataset.closeLaunch = 'true'
-      const icon = rootBtn.querySelector('sl-icon')
-      if (icon) icon.setAttribute('name', 'x-lg')
-    } else {
-      delete rootBtn.dataset.closeLaunch
-      const md = MODE_META[mode] || MODE_META.pan
-      rootBtn.style.background = md.color
-      const icon = rootBtn.querySelector('sl-icon')
-      if (icon) icon.setAttribute('name', md.icon)
-    }
+    rootBtn.dataset.closeLaunch = launchHref ? 'true' : ''
+    const md = launchHref ? MODE_META.browse : (MODE_META[mode] || MODE_META.pan)
+    rootBtn.style.background = md.color
+    rootBtn.style.color = md.textColor || ''
+    const icon = rootBtn.querySelector('sl-icon')
+    if (icon) icon.setAttribute('name', md.icon)
   }
 
   const launchEl = target.querySelector('.card-launch')
@@ -2321,6 +2340,7 @@ $.when('click', '[data-mode]', e => {
   }
 
   if (next !== 'browse') $.teach({ mode: next, menuOpen: false, linkSource: null })
+  else $.teach({ mode: 'pan', menuOpen: false, linkSource: null })
 })
 
 // ── sidebar href field ────────────────────────────────────────────────────────
@@ -2353,12 +2373,6 @@ $.when('click', '[data-action]', e => {
   const action = btn.dataset.action
   $.teach({ menuOpen: false })
 
-  if (action === 'qr') {
-    const { focusedCard } = $.learn()
-    const base = `${location.origin}/app/bulletin-board?id=${_boardId}`
-    const url = focusedCard ? `${base}&card=${focusedCard}&sidebar=open` : base
-    showModal(`<div data-modal-close style="display:flex;align-items:center;justify-content:center;min-height:100%;padding:2rem;box-sizing:border-box;"><div style="width:240px;background:white;padding:1rem;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.2);"><qr-code src="${escapeHtml(url)}" no-link="true"></qr-code><p style="text-align:center;font-family:'Recursive',sans-serif;font-size:.65rem;word-break:break-all;margin:.5rem 0 0;color:#555;">${escapeHtml(url)}</p></div></div>`)
-  }
 })
 
 // ── gallery overlay — pick media, drop as spiral of cards ────────────────────
@@ -2369,17 +2383,11 @@ function openGallery() {
   const overlay = host.querySelector('.camera-overlay')
   if (!overlay) return
 
-  const closeBtn = document.createElement('button')
-  closeBtn.className = 'camera-close-btn'
-  closeBtn.innerHTML = '✕'
-  closeBtn.onclick = () => closeGallery()
-
   const gallery = document.createElement('plan98-gallery')
   gallery.setAttribute('mode', 'picker')
-  gallery.style.cssText = 'display:block;width:100%;max-width:640px;height:70vh;overflow:auto;border-radius:6px;background:white;'
+  gallery.style.cssText = 'display:block;width:100%;height:100%;overflow:auto;'
 
   overlay.innerHTML = ''
-  overlay.appendChild(closeBtn)
   overlay.appendChild(gallery)
   overlay.dataset.open = 'true'
 
@@ -2743,7 +2751,7 @@ $.style(`
   /* hex petals — 1 o'clock clockwise */
   & .the-compass .c-manage { grid-row: 1/3; grid-column: 4/6; background: firebrick; }
   & .the-compass .c-browse { grid-row: 3/5; grid-column: 5/7; background: darkorange; }
-  & .the-compass .c-qr     { grid-row: 5/7; grid-column: 4/6; background: gold; color: #333; }
+  & .the-compass .c-share  { grid-row: 5/7; grid-column: 4/6; background: gold; color: #333; }
   & .the-compass .c-move   { grid-row: 5/7; grid-column: 2/4; background: mediumseagreen; }
   & .the-compass .c-os     { grid-row: 3/5; grid-column: 1/3; background: dodgerblue; }
   & .the-compass .c-camera { grid-row: 1/3; grid-column: 2/4; background: mediumpurple; }
@@ -3243,6 +3251,19 @@ $.style(`
     inset: 0;
     z-index: 100;
   }
+  & .share-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 100;
+    background: #0d0d0d;
+    color: white;
+    overflow-y: auto;
+    padding: 2rem;
+    box-sizing: border-box;
+    display: flex;
+    place-content: center;
+    align-items: center;
+  }
   & .park-hud {
     position: fixed;
     bottom: 1.5rem; left: 1.5rem;
@@ -3266,32 +3287,10 @@ $.style(`
   & .camera-overlay {
     position: absolute;
     inset: 0;
-    z-index: 250;
+    z-index: 150;
     display: none;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 1rem;
-    background: rgba(0,0,0,.85);
-    backdrop-filter: blur(6px);
-    padding: 2rem;
-    box-sizing: border-box;
   }
-  & .camera-overlay[data-open="true"] { display: flex; }
-
-  & .camera-close-btn {
-    position: absolute;
-    top: .75rem; right: .75rem;
-    background: rgba(255,255,255,.15);
-    border: 1px solid rgba(255,255,255,.3);
-    color: white;
-    width: 32px; height: 32px;
-    border-radius: 50%;
-    cursor: pointer;
-    font-size: .9rem;
-    display: flex; align-items: center; justify-content: center;
-  }
-  & .camera-close-btn:hover { background: rgba(255,255,255,.25); }
+  & .camera-overlay[data-open="true"] { display: block; }
 
   & .camera-capture-btn {
     background: mediumpurple;

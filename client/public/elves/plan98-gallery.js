@@ -337,17 +337,6 @@ function renderDetailView(resource) {
         <span class="post-group">${escapeHyperText(author.group)}</span>
         <span class="post-timestamp">${new Date(record.createdAt).toLocaleDateString()}</span>
       </div>
-      <div class="detail-footer">
-        <button data-action="reply" data-cid="${cid}" data-uri="${uri}" class="footer-action">
-          0 <span>💬</span>
-        </button>
-        <button data-action="repost" data-cid="${cid}" data-uri="${uri}" class="footer-action">
-          0 <span>🔄</span>
-        </button>
-        <button data-action="like" data-cid="${cid}" data-uri="${uri}" class="footer-action">
-          0 <span>❤️</span>
-        </button>
-      </div>
     </div>
   `
 }
@@ -380,7 +369,7 @@ $.draw(target => {
       <quick-start></quick-start>
     </div>
     <div data-view="profile" class="gallery-view" hidden>
-      <button class="new-post" data-tooltip="oooops">Create</button>
+      <button class="new-post standard-button bias-generic" data-tooltip="oooops">Create</button>
       <div class="scrollable-view">
         <div class="profile-container"></div>
         <div class="gallery-grid"></div>
@@ -560,7 +549,7 @@ $.draw(target => {
         const btn = document.createElement('button')
         btn.setAttribute('data-share-selected', '')
         btn.setAttribute('type', 'button')
-        btn.className = 'share-selected-btn'
+        btn.className = 'share-selected-btn standard-button bias-generic'
         target.querySelector('.gallery-view:not([hidden])')?.appendChild(btn)
         confirmBtn = btn
       }
@@ -593,6 +582,8 @@ $.style(`
     display: block;
     overflow: hidden;
     height: 100%;
+    background: black;
+    color: white;
   }
 
   & .gallery-view {
@@ -727,13 +718,6 @@ $.style(`
     align-items: baseline;
   }
 
-  & .detail-footer {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    padding: .5rem;
-    border-top: 1px solid rgba(0,0,0,.1);
-  }
-
   & .empty-timeline {
     text-align: center;
     padding: 2rem;
@@ -758,30 +742,6 @@ $.style(`
     white-space: nowrap;
   }
 
-  & .footer-action {
-    display: inline-grid;
-    grid-template-columns: auto 1fr;
-    align-items: center;
-    justify-self: center;
-    gap: .5rem;
-    background: linear-gradient(135deg, rgba(0,0,0,.35), rgba(0,0,0,.75)), var(--root-theme, mediumseagreen);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    border: none;
-    color: rgba(0,0,0,.65);
-    opacity: .5;
-    cursor: pointer;
-  }
-
-  & .footer-action:hover,
-  & .footer-action:focus {
-    opacity: 1;
-  }
-
-  & .footer-action span {
-    font-size: .75em;
-  }
-
   & .profile {
     position: sticky;
     top: 0;
@@ -792,27 +752,7 @@ $.style(`
     position: absolute;
     right: 1rem;
     bottom: 1rem;
-    padding: .5rem 1rem;
-    border: 2px solid var(--root-theme, mediumseagreen);
-    border-radius: 100px;
-    color: rgba(255,255,255,.85);
-    display: grid;
-    place-content: center;
-    font-size: 1rem;
-    background:
-      linear-gradient(335deg, var(--root-theme, mediumseagreen), rgba(0,0,0,.15) 20%, rgba(0,0,0,.25)),
-      linear-gradient(-65deg, rgba(0,0,0,.5), rgba(255,255,255,.15)),
-      var(--root-theme, mediumseagreen);
     z-index: 5;
-    cursor: pointer;
-  }
-
-  & .new-post:hover,
-  & .new-post:focus {
-    background:
-      linear-gradient(335deg, var(--root-theme, mediumseagreen), rgba(255,255,255,.15) 20%, rgba(255,255,255,.25)),
-      linear-gradient(-65deg, rgba(0,0,0,.35), rgba(255,255,255,.35)),
-      var(--root-theme, mediumseagreen);
   }
 
   & .view-profile,
@@ -895,37 +835,6 @@ $.style(`
     flex-direction: column;
     gap: 1rem;
     overflow: auto;
-  }
-
-  & .standard-button {
-    padding: .5rem 1rem;
-    background:
-      linear-gradient(335deg, var(--root-theme, mediumseagreen), rgba(0,0,0,.15) 20%, rgba(0,0,0,.25)),
-      linear-gradient(-65deg, rgba(0,0,0,.5), rgba(255,255,255,.15)),
-      var(--root-theme, mediumseagreen);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-weight: bold;
-  }
-
-  & .standard-button:hover,
-  & .standard-button:focus {
-    background:
-      linear-gradient(335deg, var(--root-theme, mediumseagreen), rgba(255,255,255,.15) 20%, rgba(255,255,255,.25)),
-      linear-gradient(-65deg, rgba(0,0,0,.35), rgba(255,255,255,.35)),
-      var(--root-theme, mediumseagreen);
-  }
-
-  & .standard-button.-clear {
-    background: transparent;
-    color: rgba(0,0,0,.65);
-  }
-
-  & .standard-button.-clear:hover,
-  & .standard-button.-clear:focus {
-    color: rgba(0,0,0,.85);
   }
 
   & [data-view] {
@@ -1022,28 +931,8 @@ $.style(`
     bottom: 1rem;
     left: 50%;
     transform: translateX(-50%);
-    padding: .5rem 1.5rem;
-    background: linear-gradient(rgba(0,0,0,.5), rgba(0,0,0,.65)), var(--root-theme, mediumseagreen);
-    color: white;
-    border: none;
-    border-radius: 100px;
-    cursor: pointer;
-    font-size: 1rem;
-    font-weight: 600;
     z-index: 10;
-    box-shadow: 0 2px 8px rgba(0,0,0,.3);
     white-space: nowrap;
-    transition: background .15s ease, opacity .15s ease;
-  }
-
-  & .share-selected-btn:disabled {
-    opacity: .4;
-    cursor: default;
-    box-shadow: none;
-  }
-
-  & .share-selected-btn:not(:disabled):hover {
-    background: linear-gradient(rgba(0,0,0,.35), rgba(0,0,0,.5)), var(--root-theme, mediumseagreen);
   }
 `)
 
