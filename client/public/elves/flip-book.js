@@ -36,6 +36,7 @@ import { attack, release, setInstrument } from './paper-pocket.js'
 import { checkButton } from './debug-gamepads.js'
 import cache from '@silly/cache'
 import { get as wasGet, put as wasPut, del as wasDel } from './plan98-wallet.js'
+import JSZip from 'jszip'
 
 const fbCache = cache('flip-book')
 
@@ -1055,7 +1056,7 @@ function renderSidebarHtml() {
         <div class="fb-sidebar-section">
           <div class="fb-sidebar-label">import</div>
           <button class="row-btn" data-import-file>↑ import file…</button>
-          <input class="import-file-input" type="file" accept=".json,video/*,audio/*" data-file-input>
+          <input class="import-file-input" type="file" accept=".json,image/*,video/*,audio/*,.zip" multiple data-file-input>
         </div>
       </div>
     </div>
@@ -1106,7 +1107,7 @@ function mount(target) {
           <canvas class="output-canvas" data-output-canvas></canvas>
           <div class="player-canvases" data-player-canvases></div>
         </div>
-        <div class="drop-overlay" data-drop-overlay>↓ drop video to import frames</div>
+        <div class="drop-overlay" data-drop-overlay>↓ drop files to import</div>
         <div class="import-progress" data-import-progress>
           <div class="import-label" data-import-label>extracting frames…</div>
           <div class="import-bar-outer"><div class="import-bar-inner" data-import-bar></div></div>
@@ -3157,12 +3158,26 @@ File import — branches on type.
 */
 
 function importFromFile(target, file) {
-  const name = file.name.toLowerCase()
-  const isJson = file.type === 'application/json' || name.endsWith('.json')
-  const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|avi|mkv)$/.test(name)
-  const isAudio = file.type.startsWith('audio/') || /\.(mp3|wav|ogg|aac|flac|m4a)$/.test(name)
+  importFileBatch(target, [file])
+}
 
-  if (isJson) {
+function mimeFromExt(name) {
+  const ext = name.split('.').pop().toLowerCase()
+  const map = { png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', bmp:'image/bmp', avif:'image/avif', svg:'image/svg+xml', mp4:'video/mp4', webm:'video/webm', mov:'video/quicktime', mkv:'video/x-matroska', avi:'video/x-msvideo', mp3:'audio/mpeg', wav:'audio/wav', ogg:'audio/ogg', aac:'audio/aac', flac:'audio/flac', m4a:'audio/mp4' }
+  return map[ext] || 'application/octet-stream'
+}
+
+async function importFileBatch(target, files) {
+  const images = [], videos = [], audios = [], jsons = [], zips = []
+  for (const f of files) {
+    const name = f.name.toLowerCase()
+    if (f.type === 'application/json' || name.endsWith('.json')) { jsons.push(f); continue }
+    if (f.type === 'application/zip' || f.type === 'application/x-zip-compressed' || name.endsWith('.zip')) { zips.push(f); continue }
+    if (f.type.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp|bmp|avif)$/i.test(name)) { images.push(f); continue }
+    if (f.type.startsWith('video/') || /\.(mp4|webm|mov|avi|mkv)$/i.test(name)) { videos.push(f); continue }
+    if (f.type.startsWith('audio/') || /\.(mp3|wav|ogg|aac|flac|m4a)$/i.test(name)) { audios.push(f); continue }
+  }
+  for (const f of jsons) {
     const reader = new FileReader()
     reader.onload = async e => {
       try {
@@ -3171,16 +3186,120 @@ function importFromFile(target, file) {
         target._localCurrent = 0
         loadCurrentFrame(target); renderOnion(target); renderReel(target)
         closeOverlay(target)
-      } catch(err) { alert('Invalid flipbook JSON') }
+      } catch { alert('Invalid flipbook JSON') }
     }
-    reader.readAsText(file)
-    return
+    reader.readAsText(f)
   }
-  if (isVideo || isAudio) {
-    openImportWizard(target, file)
-    return
+  if (images.length > 0) await importImageBatch(target, images)
+  for (const f of videos) openImportWizard(target, f)
+  for (const f of audios) openImportWizard(target, f)
+  for (const f of zips) await importZip(target, f)
+}
+
+async function importImageAsFrame(target, source, w, h) {
+  const id = crypto.randomUUID()
+  const f = ensureFrame(id, w, h)
+  const owned = !(source instanceof ImageBitmap)
+  const bitmap = owned ? await createImageBitmap(source) : source
+  const off = document.createElement('canvas'); off.width = w; off.height = h
+  off.getContext('2d').drawImage(bitmap, 0, 0, w, h)
+  if (owned) bitmap.close()
+  f.videoCanvas.getContext('2d').drawImage(off, 0, 0)
+  f.hasVideo = true
+  const blob = await new Promise(r => off.toBlob(r, 'image/png'))
+  fbCache.put(`frame-${id}`, blob, 'image/png')
+  const _wasBase = wasCanvasPath(target.id)?.replace(/\.flip-book\.json$/, '')
+  if (_wasBase) { wasDel(`${_wasBase}/frame-${id}.png`).catch(()=>null); wasPut(`${_wasBase}/frame-${id}.png`, blob, { type:'image/png' }).catch(()=>null) }
+  return id
+}
+
+async function importImageBatch(target, sources, bitmaps) {
+  const { frames, frameStrokes, canvasW, canvasH } = $.learn()
+  const current = target._localCurrent ?? 0
+  const hasBitmaps = Array.isArray(bitmaps) && bitmaps.length === sources.length
+  const sorted = hasBitmaps
+    ? sources.map((s, i) => ({ s, b: bitmaps[i] }))
+    : [...sources].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })).map(s => ({ s, b: null }))
+
+  const firstBitmap = sorted[0].b || await createImageBitmap(sorted[0].s)
+  const iw = firstBitmap.width, ih = firstBitmap.height
+  if (!sorted[0].b) firstBitmap.close()
+
+  const replaceAll = sorted.length === 1
+    ? false
+    : confirm(`Import ${sorted.length} images?\nOK = insert after current\nCancel = replace all`) === false
+  if (iw !== canvasW || ih !== canvasH) { if (confirm(`Resize project to ${iw}×${ih}?`)) applyDims(target, iw, ih) }
+  const { canvasW: w, canvasH: h } = $.learn()
+
+  const progress = target.querySelector('[data-import-progress]'), bar = target.querySelector('[data-import-bar]'), lbl = target.querySelector('[data-import-label]')
+  if (progress) { progress.classList.add('active'); if (lbl) lbl.textContent = 'importing images…'; if (bar) bar.style.width = '0%' }
+
+  let newFrames = replaceAll ? [] : [...frames], newStrokes = replaceAll ? {} : { ...frameStrokes }
+  const decoded = hasBitmaps ? sorted.map(({b}) => b) : await Promise.all(sorted.map(({s}) => createImageBitmap(s)))
+  if (bar) bar.style.width = '50%'
+  const ids = await Promise.all(decoded.map(bitmap => importImageAsFrame(target, bitmap, w, h)))
+  decoded.forEach(b => b.close())
+
+  ids.forEach((id, i) => {
+    newStrokes[id] = []
+    const insertAt = replaceAll ? i : current + 1 + i; newFrames.splice(insertAt, 0, id)
+  })
+
+  if (progress) progress.classList.remove('active')
+  target._localCurrent = replaceAll ? 0 : current + 1
+  $.teach({ frames: newFrames, frameStrokes: newStrokes })
+  scheduleWasSave(target.id)
+  loadCurrentFrame(target); renderOnion(target); renderReel(target)
+}
+
+async function importZip(target, file) {
+  const progress = target.querySelector('[data-import-progress]'), bar = target.querySelector('[data-import-bar]'), lbl = target.querySelector('[data-import-label]')
+  if (progress) { progress.classList.add('active'); if (lbl) lbl.textContent = 'reading zip…'; if (bar) bar.style.width = '0%' }
+  try {
+    const zip = await JSZip.loadAsync(file)
+    const imageEntries = [], videoEntries = [], audioEntries = []
+    zip.forEach((path, entry) => {
+      if (entry.dir) return
+      const name = path.toLowerCase()
+      if (/\.(png|jpg|jpeg|gif|webp|bmp|avif)$/.test(name)) imageEntries.push({ path, entry })
+      else if (/\.(mp4|webm|mov|avi|mkv)$/.test(name)) videoEntries.push({ path, entry })
+      else if (/\.(mp3|wav|ogg|aac|flac|m4a)$/.test(name)) audioEntries.push({ path, entry })
+    })
+    imageEntries.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }))
+
+    let done = 0
+    const total = imageEntries.length
+    const imageBlobs = await Promise.all(imageEntries.map(async ({ path, entry }) => {
+      const blob = await entry.async('blob')
+      done++; if (bar) bar.style.width = `${Math.round((done / total) * 50)}%`
+      return new File([blob], path.split('/').pop(), { type: mimeFromExt(path.toLowerCase()) })
+    }))
+    done = 0
+    const bitmaps = await Promise.all(imageBlobs.map(async f => {
+      const bm = await createImageBitmap(f)
+      done++; if (bar) bar.style.width = `${50 + Math.round((done / total) * 50)}%`
+      return bm
+    }))
+
+    if (progress) progress.classList.remove('active')
+
+    if (imageBlobs.length > 0) await importImageBatch(target, imageBlobs, bitmaps)
+
+    const videoBlobs = await Promise.all(videoEntries.map(async ({ path, entry }) => {
+      const blob = await entry.async('blob')
+      return new File([blob], path.split('/').pop(), { type: mimeFromExt(path.toLowerCase()) })
+    }))
+    const audioBlobs = await Promise.all(audioEntries.map(async ({ path, entry }) => {
+      const blob = await entry.async('blob')
+      return new File([blob], path.split('/').pop(), { type: mimeFromExt(path.toLowerCase()) })
+    }))
+    for (const f of videoBlobs) openImportWizard(target, f)
+    for (const f of audioBlobs) openImportWizard(target, f)
+  } catch(e) {
+    console.error('zip import failed', e)
+    toast('ZIP import failed')
+    if (progress) progress.classList.remove('active')
   }
-  alert('Unsupported file type. Use .json, video/*, or audio/*.')
 }
 
 function openImportWizard(target, file) {
@@ -3259,7 +3378,7 @@ function attachDropEvents(target){
   const ab=target._artboard
   ab.addEventListener('dragover',e=>{e.preventDefault();if(e.dataTransfer.types.includes('Files'))target.querySelector('[data-drop-overlay]').classList.add('active')})
   ab.addEventListener('dragleave',e=>{if(!ab.contains(e.relatedTarget))target.querySelector('[data-drop-overlay]').classList.remove('active')})
-  ab.addEventListener('drop',async e=>{e.preventDefault();target.querySelector('[data-drop-overlay]').classList.remove('active');const f=[...e.dataTransfer.files].find(f=>f.type.startsWith('video/'));if(f)await importVideo(target,f)})
+  ab.addEventListener('drop',async e=>{e.preventDefault();target.querySelector('[data-drop-overlay]').classList.remove('active');const files=[...e.dataTransfer.files];if(files.length)importFileBatch(target,files)})
 }
 
 async function importVideo(target,file,fpsOverride){
@@ -3517,9 +3636,9 @@ function wireOverlay(inner,target){
   if(ib&&fi){
     ib.addEventListener('click',()=>fi.click())
     fi.addEventListener('change',()=>{
-      const f=fi.files[0];if(!f)return
+      const files=[...fi.files];if(!files.length)return
       fi.value=''
-      importFromFile(target,f)
+      importFileBatch(target,files)
     })
   }
 
@@ -3803,9 +3922,9 @@ $.when('click','[data-import-file]',event=>{
 
 $.when('change','[data-file-input]',event=>{
   const r=event.target.closest(tag);if(!r)return
-  const f=event.target.files[0];if(!f)return
+  const files=[...event.target.files];if(!files.length)return
   event.target.value=''
-  importFromFile(r,f)
+  importFileBatch(r,files)
 })
 
 $.when('click','[data-zoom-in]',e=>{const r=e.target.closest(tag);if(!r)return;setZoom(r,$.learn().zoom+0.25)})
