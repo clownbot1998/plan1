@@ -265,6 +265,50 @@ function renderCloudPlatforms(cards) {
   }).join('')
 }
 
+// ── cloud labels (sprites — always face camera) ───────────────────────────────
+
+function buildCloudLabels(cards) {
+  const THREE = window.AFRAME?.THREE
+  if (!THREE) return null
+  const entries = Object.entries(cards)
+  const group = new THREE.Group()
+
+  for (const [, card] of entries) {
+    const name = (card.text || '').split('\n')[0].trim()
+    if (!name) continue
+    const b = cardBounds(card)
+    const h = computeHeight(b.cx, b.cz, entries)
+    const cloudY = CLOUD + h
+
+    const canvas = document.createElement('canvas')
+    canvas.width = 512
+    canvas.height = 128
+    const ctx = canvas.getContext('2d')
+
+    ctx.font = 'bold 52px "Recursive", sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    const o = 3
+    const shadows = [['black',o,o],['cyan',-o,o],['magenta',-o,-o],['yellow',o,-o]]
+    for (const [color, dx, dy] of shadows) {
+      ctx.fillStyle = color
+      ctx.fillText(name, 256 + dx, 64 + dy, 480)
+    }
+    ctx.fillStyle = 'white'
+    ctx.fillText(name, 256, 64, 480)
+
+    const texture = new THREE.CanvasTexture(canvas)
+    const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false })
+    const sprite = new THREE.Sprite(mat)
+    sprite.scale.set(320, 80, 1)
+    sprite.position.set(b.cx, cloudY + 90, b.cz)
+    sprite.raycast = () => {}
+    group.add(sprite)
+  }
+
+  return group
+}
+
 // ── sea floor path arrows + cliff rise terminators ───────────────────────────
 
 const SEA_FLOOR_Y = CLIFF_FLOOR + 15  // true sea floor — top of gold layer, bottom of water column
@@ -792,6 +836,7 @@ $.draw(target => {
       <a-entity class="terrain-mesh"></a-entity>
       <a-entity class="tunnels"></a-entity>
       <a-entity class="cloud-platforms"></a-entity>
+      <a-entity class="cloud-labels"></a-entity>
       <a-entity class="players"></a-entity>
     </a-scene>
   `
@@ -833,6 +878,14 @@ $.draw(target => {
     const cloudEl = target.querySelector('.cloud-platforms')
     if (cloudEl) cloudEl.innerHTML = renderCloudPlatforms(cards)
     rebuildCloudColliders(cards)
+
+    const labelsEl = target.querySelector('.cloud-labels')
+    if (labelsEl) {
+      const old = labelsEl.getObject3D?.('labels')
+      if (old) old.traverse(c => { c.geometry?.dispose(); c.material?.map?.dispose(); c.material?.dispose() })
+      const lg = buildCloudLabels(cards)
+      if (lg) labelsEl.setObject3D('labels', lg)
+    }
 
     if (!target._spawned && Object.keys(cards).length > 0) {
       target._spawned = true

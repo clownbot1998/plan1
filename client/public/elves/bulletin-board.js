@@ -1584,7 +1584,7 @@ function update(target) {
       const bg = inspCard.color || 'lemonchiffon'
       parkHud.innerHTML = `
         <div class="park-hud-inner" style="background:${bg}">
-          <strong>${inspCard.name || 'untitled'}</strong>
+          ${(inspCard.text || '').split('\n')[0].trim() ? `<strong>${(inspCard.text || '').split('\n')[0].trim()}</strong>` : ''}
           <span class="park-hud-hint">press A to manage island</span>
         </div>`
     } else {
