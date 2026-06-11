@@ -218,7 +218,7 @@ $.draw((target) => {
 
   if(slot) {
     const controller = target.querySelector('.controller')
-    if(controller && variation !== 'piano') return
+    if(controller) return
     return renderController(target, slot, variation)
   }
 
@@ -232,10 +232,21 @@ $.draw((target) => {
   `
 }, {
   afterUpdate(target) {
-    const { hideTouchControls } = $.learn()
+    const { hideTouchControls, pianoRootKey, slot } = $.learn()
     const controller = target.querySelector('.controller')
-    if(controller) {
-      controller.dataset.hide = hideTouchControls
+    if(!controller) return
+    controller.dataset.hide = hideTouchControls
+    if(controller.dataset.variation !== 'piano') return
+    const piano = controller.querySelector('.piano')
+    if(!piano) return
+    const existing = piano.querySelector('.player-sprite')
+    if(existing) existing.remove()
+    const btn = piano.querySelector(`[data-key="${pianoRootKey}"]`)
+    if(btn) {
+      const sprite = document.createElement('div')
+      sprite.className = 'player-sprite'
+      sprite.dataset.slot = slot
+      btn.appendChild(sprite)
     }
   }
 })

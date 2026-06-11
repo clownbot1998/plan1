@@ -1028,7 +1028,11 @@ $.draw((target) => {
       displayByMode(target, $.learn(), function hostRender() {
         const { tiles, players } = $.learn()
         const tile = target.querySelector('.tile')
-        renderSharedTile(tile, players, tiles)
+        const renderKey = sharedRenderKey(players, tiles)
+        if(target._sharedRenderKey !== renderKey) {
+          target._sharedRenderKey = renderKey
+          renderSharedTile(tile, players, tiles)
+        }
         const remoteList = $.learn().remotePlayerList || []
         const nextSlot = tiles.find(slot => !players[slot] && !remoteList[slot])
         updateQrCorner(target.querySelector('.split-screen'), nextSlot, partyId)
@@ -1363,7 +1367,7 @@ function renderEnemies(slot, player, data={}) {
       <div class="attack-lane ${x.type} ${x.key === data.offsetLabel ?'active-lane':'' }" data-key="${x.key}">
         ${Object.keys(enemiesByType).map(id => {
           return `
-            <div class="enemy-sprite" key="${id}" data-note="${x.key}" data-slot="${slot}"></div>
+            <div class="enemy-sprite" key="${id}" data-id="${id}" data-note="${x.key}" data-slot="${slot}"></div>
           `
         }).join('')}
       </div>
@@ -1401,6 +1405,15 @@ function updateQrCorner(container, nextSlot, partyId) {
   }
 }
 
+function sharedRenderKey(players, tiles) {
+  return tiles.map(slot => {
+    const p = players[slot]
+    if(!p) return `${slot}:empty`
+    const enemyCount = Object.values(p.enemies || {}).reduce((n, e) => n + Object.keys(e).length, 0)
+    return `${slot}:${p.health}:${p.score}:${p.circleIndex}:${p.frequencyOffset}:${enemyCount}`
+  }).join('|')
+}
+
 function renderSharedTile(tile, players, tiles) {
   const activeSlots = tiles.filter(slot => players[slot])
   const refSlot = activeSlots.length > 0 ? activeSlots[0] : null
@@ -1412,7 +1425,20 @@ function renderSharedTile(tile, players, tiles) {
     ? label
     : noteLabels[mod(offsetIdx, noteLabels.length)]
 
+  const health = refPlayer.health ?? MAX_HEALTH
+  const maxHealth = refPlayer.maxHealth ?? MAX_HEALTH
+  const score = refPlayer.score ?? 0
+
   diffHTML.innerHTML(tile, `
+    <div class="shared-hud">
+      <div class="shared-health">
+        <div class="health-bar" style="--health-width: calc(${health} / ${maxHealth} * 100%)"></div>
+      </div>
+      <div class="shared-score">${score}</div>
+      <div class="shared-pips">
+        ${activeSlots.map(slot => `<div class="player-pip" data-slot="${slot}"></div>`).join('')}
+      </div>
+    </div>
     <div class="perspective" data-slot="${refSlot ?? 0}">
       <div class="skybox">
         <div class="floor">
@@ -1500,36 +1526,24 @@ function renderPause(state) {
 }
 
 $.when('animationend', '.split-screen .enemy-sprite', (event) => {
-  const { players } = $.learn()
-  const key = event.target.key
+  const { players, tiles } = $.learn()
+  const key = event.target.dataset.id
   const noteLabel = event.target.dataset.note
-  const slot = parseInt(event.target.dataset.slot)
 
-
-  if(players[slot]) {
-    const { health, enemies } = players[slot];
-
-    if(enemies[noteLabel][key]) {
-      const newEnemies = remove(enemies[noteLabel][key].id, noteLabel, enemies)
-      const nextHealth = health - 1
-
-      if(health === 0) {
-        $.teach({
-          _slot: slot,
-          enemies: newEnemies,
-          dead: true,
-        }, mergePlayer())
-      } else {
-        $.teach({
-          _slot: slot,
-          enemies: newEnemies,
-          health: nextHealth
-        }, mergePlayer())
-      }
-    }
-    return
-  }
-  console.error('player not found')
+  tiles.forEach(slot => {
+    const player = players[slot]
+    if(!player) return
+    const { health, enemies } = player
+    if(!enemies[noteLabel]?.[key]) return
+    const newEnemies = remove(enemies[noteLabel][key].id, noteLabel, enemies)
+    const nextHealth = Math.max(0, health - 1)
+    $.teach({
+      _slot: slot,
+      enemies: newEnemies,
+      health: nextHealth,
+      dead: nextHealth === 0,
+    }, mergePlayer())
+  })
 })
 
 $.when('click', '.system-overlay .menu-link', (event) => {
@@ -1627,6 +1641,55 @@ $.style(`
     grid-template-rows: 1fr;
     grid-template-columns: 1fr;
   }
+
+  & .shared-hud {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: .5rem;
+    pointer-events: none;
+  }
+
+  & .shared-health {
+    background: black;
+    border: 2px solid white;
+    width: 160px;
+    height: 12px;
+  }
+
+  & .shared-health .health-bar {
+    background: white;
+    width: var(--health-width, 100%);
+    height: 100%;
+  }
+
+  & .shared-score {
+    color: rgba(255,255,255,.65);
+    font-weight: bold;
+    font-size: 1.5rem;
+    line-height: 1;
+  }
+
+  & .shared-pips {
+    display: flex;
+    gap: 4px;
+  }
+
+  & .player-pip {
+    width: 10px;
+    height: 10px;
+    border-radius: 100%;
+    border: 1px solid rgba(255,255,255,.5);
+  }
+
+  & .player-pip[data-slot="0"] { background: var(--green, mediumseagreen); }
+  & .player-pip[data-slot="1"] { background: var(--red, firebrick); }
+  & .player-pip[data-slot="2"] { background: var(--yellow, gold); }
+  & .player-pip[data-slot="3"] { background: var(--blue, dodgerblue); }
 
   & .qr-corner {
     position: absolute;
