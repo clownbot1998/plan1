@@ -89,6 +89,11 @@ export function getRemotePlayerList() {
   return $.learn().remotePlayerList || []
 }
 
+const playerListCallbacks = []
+export function onRemotePlayerList(callback) {
+  playerListCallbacks.push(callback)
+}
+
 export function gamestateDownlink(callback) {
   gamestateCallbacks.push(callback)
 }
@@ -156,6 +161,7 @@ function mount(target) {
 
       channel.on('playerList', (list) => {
         $.teach({ remotePlayerList: list })
+        playerListCallbacks.forEach(cb => cb(list))
       })
 
       channel.on('gamepadUpdate', ({ gamepad, slot, id }) => {

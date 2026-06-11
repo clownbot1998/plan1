@@ -3,7 +3,7 @@ import diffHTML from 'diffhtml'
 import * as Tone from 'tone@next'
 import { SampleLibrary } from '/public/cdn/attentionandlearninglab.com/Tonejs-Instruments.js'
 import { systemMenu, getTheme } from './paper-pocket.js'
-import { gamestateUplink, gamestateDownlink, getRemotePlayerList } from './couch-coop.js'
+import { gamestateUplink, gamestateDownlink, onRemotePlayerList } from './couch-coop.js'
 
 // load samples / choose 4 random instruments from the list //
 const instruments = ['piano', 'bass-electric', 'bassoon', 'cello', 'clarinet', 'contrabass', 'flute', 'french-horn', 'guitar-acoustic', 'guitar-electric','guitar-nylon', 'harmonium', 'harp', 'organ', 'saxophone', 'trombone', 'trumpet', 'tuba', 'violin', 'xylophone']
@@ -902,6 +902,10 @@ function displayByMode(target, state, callback) {
   callback()
 }
 
+onRemotePlayerList((list) => {
+  $.teach({ remotePlayerList: list })
+})
+
 gamestateDownlink((data) => {
   if(!data.elf) return
   const { elf, partyId, snapshot } = data
@@ -1025,7 +1029,7 @@ $.draw((target) => {
         const { tiles, players } = $.learn()
         const tile = target.querySelector('.tile')
         renderSharedTile(tile, players, tiles)
-        const remoteList = getRemotePlayerList()
+        const remoteList = $.learn().remotePlayerList || []
         const nextSlot = tiles.find(slot => !players[slot] && !remoteList[slot])
         updateQrCorner(target.querySelector('.split-screen'), nextSlot, partyId)
       })
@@ -1389,11 +1393,11 @@ function updateQrCorner(container, nextSlot, partyId) {
   if(!corner) {
     corner = document.createElement('div')
     corner.className = 'qr-corner'
-    corner.innerHTML = `<qr-code data-bg="transparent" src="${src}"></qr-code>`
     container.appendChild(corner)
-  } else {
-    const qr = corner.querySelector('qr-code')
-    if(qr && qr.getAttribute('src') !== src) qr.setAttribute('src', src)
+  }
+  const qr = corner.querySelector('qr-code')
+  if(!qr || qr.getAttribute('src') !== src) {
+    corner.innerHTML = `<qr-code data-bg="transparent" src="${src}"></qr-code>`
   }
 }
 
