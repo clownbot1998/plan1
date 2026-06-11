@@ -761,6 +761,22 @@ const rpcHandlers = {
           notes.push(root + 4)
         }
 
+        if(gamepad.up === 1) {
+          notes.push(root + 1)   // C#
+        }
+
+        if(gamepad.ls === 1) {
+          notes.push(root + 5)   // F
+        }
+
+        if(gamepad.down === 1) {
+          notes.push(root + 7)   // G
+        }
+
+        if(gamepad.rs === 1) {
+          notes.push(root + 11)  // B
+        }
+
         const finishedNotes = activeNotes.filter(x => {
           return !notes.includes(x)
         })
@@ -1033,7 +1049,7 @@ $.draw((target) => {
             diffHTML.innerHTML(tile, `
               <div class="no-player-yet" data-slot="${slot}">
                 <div class="join-code" data-slot="${slot}">
-                  <qr-code target="_blank" data-bg="transparent" src="${url}/app/couch-coop?id=${partyId}&slot=${slot}&controller=true&variation=elegant"></qr-code>
+                  <qr-code target="_blank" data-bg="transparent" src="${url}/app/couch-coop?id=${partyId}&slot=${slot}&controller=true&variation=piano"></qr-code>
                 </div>
               </div>
             `)
