@@ -658,6 +658,7 @@ $.style(`
     background-color: #282828; z-index: 0;
   }
 
+  & .bg-layer { position: absolute; top: 0; left: 0; pointer-events: none; image-rendering: pixelated; z-index: 5; }
   & .onion-layer { position: absolute; top: 0; left: 0; pointer-events: none; image-rendering: pixelated; }
 
   & .output-canvas {
@@ -1252,8 +1253,9 @@ function boot(target) {
 
   target._drawCanvas  = document.createElement('canvas')
   target._videoCanvas = document.createElement('canvas')
-  target._drawCanvas.width  = target._videoCanvas.width  = canvasW
-  target._drawCanvas.height = target._videoCanvas.height = canvasH
+  target._bgCanvas    = document.createElement('canvas')
+  target._drawCanvas.width  = target._videoCanvas.width  = target._bgCanvas.width  = canvasW
+  target._drawCanvas.height = target._videoCanvas.height = target._bgCanvas.height = canvasH
 
   initCanvas(target, canvasW, canvasH)
 
@@ -1513,12 +1515,16 @@ function initCanvas(target, w, h) {
   if (target._activeCanvas) { target._activeCanvas.width = w; target._activeCanvas.height = h }
   if (target._penPreviewCanvas) { target._penPreviewCanvas.width = w; target._penPreviewCanvas.height = h }
 
+  target._bgCanvas.width  = w; target._bgCanvas.height = h
+  target._bgCanvas.className = 'bg-layer'
+  if (!target._bgCanvas.parentNode) target._artboardInner.insertBefore(target._bgCanvas, target._outputCanvas)
+
   target._onionCanvases.forEach(c => c.remove())
   target._onionCanvases = []
   ;[0.2, 0.4, 0.6, 0.8].forEach((op, i) => {
     const c = document.createElement('canvas')
     c.className = 'onion-layer'; c.width = w; c.height = h
-    c.style.opacity = op; c.style.zIndex = i + 1
+    c.style.opacity = op; c.style.zIndex = i + 6
     target._artboardInner.insertBefore(c, target._outputCanvas)
     target._onionCanvases.push(c)
   })
@@ -1535,6 +1541,7 @@ function applyZoomStyles(target) {
   target._outputCanvas.height = Math.round(h * zoom * dpr)
   target._outputCanvas.style.width  = px(w)
   target._outputCanvas.style.height = px(h)
+  target._bgCanvas.style.width = px(w); target._bgCanvas.style.height = px(h)
   target._onionCanvases.forEach(c => { c.style.width = px(w); c.style.height = px(h) })
   target._playerCanvasCtr.style.width  = px(w)
   target._playerCanvasCtr.style.height = px(h)
@@ -1775,7 +1782,6 @@ function renderOnion(target) {
     const fi = current - (4 - i)
     if (fi >= 0 && frames[fi]) {
       const f = ensureFrame(frames[fi], canvasW, canvasH)
-      if (f.hasVideo) ctx.drawImage(f.videoCanvas, 0, 0)
       ctx.drawImage(f.drawCanvas, 0, 0)
     }
   })
@@ -2316,6 +2322,7 @@ Composite loop — video → committed+active draw → output.
 
 function setupCompositeLoop(target) {
   const ctx = target._outputCanvas.getContext('2d')
+  const bgCtx = target._bgCanvas.getContext('2d')
   const ckCanvas = document.createElement('canvas')
   let ckCtx = null
 
@@ -2330,12 +2337,14 @@ function setupCompositeLoop(target) {
       ckCtx=ckCanvas.getContext('2d',{willReadFrequently:true})
     }
 
+    bgCtx.clearRect(0, 0, w, h)
+    bgCtx.drawImage(target._videoCanvas, 0, 0)
+
     ctx.clearRect(0, 0, w * scale, h * scale)
     ctx.save()
     ctx.scale(scale, scale)
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = 'high'
-    ctx.drawImage(target._videoCanvas,0,0)
 
     if (chromakeyEnabled) {
       if (!ckCtx) ckCtx=ckCanvas.getContext('2d',{willReadFrequently:true})
