@@ -161,6 +161,8 @@ function stripAnsi(str) {
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .split('\n').filter(l => !TMUX_STATUS.test(l)).join('\n') // drop tmux status bar lines
+    .replace(/\n{3,}/g, '\n\n')  // collapse excess blank lines
+    .trim()
 }
 
 function sendTtyResize(ws) {
