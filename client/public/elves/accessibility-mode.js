@@ -819,7 +819,8 @@ async function execute(message, options={}) {
   if(modalities[modality]) {
     const result = await modalities[modality](message)
     if(result) {
-      addMessage({ body: result, author: 'assistant' })
+      const msg = typeof result === 'object' ? result : { body: result }
+      addMessage({ ...msg, author: 'assistant' })
     }
     return
   }
