@@ -558,7 +558,7 @@ function mount(target) {
   const rom = target.getAttribute('rom')
   wasLoad().then(hadHistory => {
     if (!hadHistory) {
-      addMessage({ body: 'sillyz.computer is a creative suite for', author: 'unassigned' })
+      addMessage({ body: '${brand} is a creative suite for ${demographic} for', author: 'unassigned' })
       addMessage({ body: '<code\ntext: art\n\n<code\ntext: music\n\n<code\ntext: coding', author: 'unassigned', saga: true })
       addMessage({ body: '@ Sagas\n> I am a fragment of reality. I am not reality. You are reality.', author: 'assistant', saga: true })
     }
@@ -579,7 +579,7 @@ $.draw((target) => {
   const sagaScript = [
     ...messages.map((m, i) => {
       if (m.saga) return m.body
-      if (m.author === 'unassigned') return toQuote(m.body)
+      if (m.author === 'unassigned') return escapeHyperText(m.body)
       if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
       const prev = messages[i - 1]
       const continuingSagas = prev && prev.author === 'assistant' && !prev.saga
