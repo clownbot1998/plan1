@@ -150,10 +150,11 @@ function pushHistory(message) {
 
 function stripAnsi(str) {
   return str
-    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
-    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
-    .replace(/\x1b[=>]/g, '')
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')          // CSI: ESC [ ... letter
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '') // OSC: ESC ] ... BEL/ST
+    .replace(/\x1b[()][0-9A-Za-z]/g, '')              // char set: ESC ( B, ESC ) 0
+    .replace(/\x1b[=>MNOPQRSTUVWXYZ\\^_`{|}~]/g, '') // other 2-char ESC sequences
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '') // remaining control chars + lone ESC
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
 }
@@ -557,7 +558,7 @@ function mount(target) {
   const rom = target.getAttribute('rom')
   wasLoad().then(hadHistory => {
     if (!hadHistory) {
-      addMessage({ body: '${brand} is a creative suite for ${demographic} for', author: 'unassigned' })
+      addMessage({ body: 'sillyz.computer is a creative suite for', author: 'unassigned' })
       addMessage({ body: '<code\ntext: art\n\n<code\ntext: music\n\n<code\ntext: coding', author: 'unassigned', saga: true })
       addMessage({ body: '@ Sagas\n> I am a fragment of reality. I am not reality. You are reality.', author: 'assistant', saga: true })
     }
@@ -576,14 +577,21 @@ $.draw((target) => {
     (body || '').split('\n').map(l => l.trim() ? `> ${escapeHyperText(l)}` : '').join('\n')
 
   const sagaScript = [
-    ...messages.map(m => {
+    ...messages.map((m, i) => {
       if (m.saga) return m.body
       if (m.author === 'unassigned') return toQuote(m.body)
       if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
-      return `@ Sagas\n${toQuote(m.body)}`
+      const prev = messages[i - 1]
+      const continuingSagas = prev && prev.author === 'assistant' && !prev.saga
+      return continuingSagas ? toQuote(m.body) : `@ Sagas\n${toQuote(m.body)}`
     }),
-    thinkingFace ? `@ Sagas\n${toQuote(thinkingFace)}` : null,
-    ttyLive ? `@ Sagas\n${toQuote(ttyLive)}` : null,
+    (() => {
+      if (!thinkingFace && !ttyLive) return null
+      const text = thinkingFace || ttyLive
+      const lastMsg = messages[messages.length - 1]
+      const continuingSagas = lastMsg && lastMsg.author === 'assistant' && !lastMsg.saga
+      return continuingSagas ? toQuote(text) : `@ Sagas\n${toQuote(text)}`
+    })(),
   ].filter(Boolean).join('\n\n')
 
   const sagaHtml = sagaScript ? Saga(sagaScript) : ''
