@@ -419,6 +419,11 @@ text: js
 # quit
 
 <code
+text: clear
+
+> wipe session history
+
+<code
 text: exit
 
 <code
@@ -444,6 +449,12 @@ text: ls
 > up / down - history
 > Tab - autocomplete
 > Ctrl+C - interrupt` }),
+
+  'clear': async () => {
+    $.teach({ messages: [], history: [], historyCursor: null })
+    try { await wasDel(_wasPath) } catch {}
+    return null
+  },
 
   'pwd': function() {
     const { cwd } = $.learn()
