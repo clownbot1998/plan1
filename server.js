@@ -560,8 +560,17 @@ async function handleRequest(request) {
     const log = []
     log.push(await run('git pull 2>&1'))
     log.push(await run('./plan1.sh build 2>&1'))
-    // restart: replace current process
-    new Deno.Command('bash', { args: ['-c', `sleep 1 && kill -HUP ${Deno.pid}`], cwd: dir }).spawn()
+    // sync dist/ → PLAN1_DIST if they differ
+    const distDir = dir + '/dist'
+    const runtimeDir = Deno.env.get('PLAN1_DIST')
+    if (runtimeDir && runtimeDir !== distDir) {
+      log.push(await run(`rsync -a --delete ${distDir}/ ${runtimeDir}/`))
+    }
+    // restart via systemctl; fall back to SIGHUP
+    new Deno.Command('bash', {
+      args: ['-c', `sleep 1 && (systemctl restart plan1 2>/dev/null || kill -HUP ${Deno.pid})`],
+      cwd: dir,
+    }).spawn()
     return new Response(log.join('\n'), { headers: { 'content-type': 'text/plain' } })
   }
 

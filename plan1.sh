@@ -212,6 +212,30 @@ ENDSSH
     echo $! > "$WATCH_PID_FILE"
     echo "watching (pid $!)"
     ;;
+  setup)
+    # Install systemd service, create runtime dir, initial rsync
+    # Run this once on a fresh machine after cloning the repo.
+    RUNTIME_DIR="${2:-$HOME/srv/plan1}"
+    SERVICE_SRC="$SCRIPT_DIR/deploy/plan1.service"
+    SERVICE_DST="/etc/systemd/system/plan1.service"
+
+    echo "── installing $SERVICE_DST ──"
+    sudo cp "$SERVICE_SRC" "$SERVICE_DST"
+    sudo sed -i "s|/home/clownbot|$HOME|g" "$SERVICE_DST"
+    sudo systemctl daemon-reload
+    sudo systemctl enable plan1
+
+    echo "── building ──"
+    "$0" build
+
+    echo "── syncing dist/ → $RUNTIME_DIR/ ──"
+    mkdir -p "$RUNTIME_DIR"
+    rsync -a --delete "$DIST_DIR/" "$RUNTIME_DIR/"
+
+    echo "── starting ──"
+    sudo systemctl restart plan1
+    echo "── setup done — plan1 running ──"
+    ;;
   bootstrap)
     MEMORY_SRC="$SCRIPT_DIR/memory"
     MEMORY_DST="$HOME/.claude/projects/-home-clownbot-plan1/memory"
@@ -282,11 +306,12 @@ ENDSSH
     esac
     ;;
   *)
-    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|sync|deploy|ship|watch|test|reverse-client|bootstrap]"
+    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|sync|deploy|ship|watch|test|reverse-client|bootstrap|setup]"
     echo "  build  — generates blog pages + vendors deps into dist/"
     echo "  ship   — build, serve locally, prompt to confirm, commit + push + deploy"
     echo "  sync   — uploads dist/ bootstrap files to WAS"
-    echo "  deploy   — build + sync"
+    echo "  setup    — install systemd service + initial rsync (run once on fresh machine)"
+    echo "  deploy   — ssh pull + build + smoke test + rsync + restart on prod"
     echo "  private  — sync private/ to WAS (--pull to restore, --dry-run to preview)"
     echo "  gallery  — screenshot gallery items → private/screenshots/<id>/ then build"
     echo "  watch    — rebuilds dist/ on any change to client/"
