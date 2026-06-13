@@ -69,6 +69,7 @@ async function wasLoad() {
 let ttySocket = null
 let ttyBuffer = ''
 let ttyFlushTimer = null
+let ttyLastSent = null   // track last sent command to strip echo
 
 // vosk voice
 const VOSK_MODEL_URL = '/cdn/sillyz.computer/models/vosk-model-small-en-us-0.15.zip'
@@ -148,15 +149,18 @@ function pushHistory(message) {
   wasSave()
 }
 
+const TMUX_STATUS = /^\[\d+\] \d+:\S+ ".+" \d{2}:\d{2} \d{2}-\w{3}-\d{2}\s*$/
+
 function stripAnsi(str) {
   return str
-    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')          // CSI: ESC [ ... letter
+    .replace(/\x1b\[[0-9;?<>=!]*[a-zA-Z]/g, '')      // CSI: ESC [ ... letter (all param prefixes)
     .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '') // OSC: ESC ] ... BEL/ST
     .replace(/\x1b[()][0-9A-Za-z]/g, '')              // char set: ESC ( B, ESC ) 0
     .replace(/\x1b[=>MNOPQRSTUVWXYZ\\^_`{|}~]/g, '') // other 2-char ESC sequences
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '') // remaining control chars + lone ESC
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
+    .split('\n').filter(l => !TMUX_STATUS.test(l)).join('\n') // drop tmux status bar lines
 }
 
 function sendTtyResize(ws) {
@@ -172,8 +176,15 @@ function sendTtyResize(ws) {
 }
 
 function appendTtyOutput(text) {
-  const clean = stripAnsi(text)
+  let clean = stripAnsi(text)
   if (!clean) return
+  if (ttyLastSent) {
+    const echo = ttyLastSent + '\n'
+    if (clean.startsWith(echo)) clean = clean.slice(echo.length)
+    else if (clean.startsWith(ttyLastSent)) clean = clean.slice(ttyLastSent.length)
+    ttyLastSent = null
+  }
+  if (!clean.trim()) return
   ttyBuffer += clean
   $.teach({ ttyLive: ttyBuffer })
   clearTimeout(ttyFlushTimer)
@@ -359,6 +370,7 @@ const modalities = {
     if (!ttySocket || ttySocket.readyState !== WebSocket.OPEN) {
       return 'shell not connected'
     }
+    ttyLastSent = program
     const enc = new TextEncoder().encode(program + '\r')
     const msg = new Uint8Array(1 + enc.length)
     msg[0] = 0x30
@@ -790,6 +802,7 @@ async function execute(message, options={}) {
 
   if (modality === 'tty') {
     if (ttySocket && ttySocket.readyState === WebSocket.OPEN) {
+      ttyLastSent = message
       const enc = new TextEncoder().encode(message + '\r')
       const frame = new Uint8Array(1 + enc.length)
       frame[0] = 0x30
