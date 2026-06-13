@@ -1024,18 +1024,14 @@ $.style(`
     align-items: end;
   }
 
-  & form {
-    background: linear-gradient(335deg, rgba(0,0,0,.8), rgba(0,0,0,.9)), var(--root-theme, mediumseagreen);
-  }
-
   & .compose-btn {
     min-width: 44px;
     min-height: 44px;
     padding: 8px;
-    background: transparent;
+    background: black;
     border: none;
     cursor: pointer;
-    color: rgba(255,255,255,.5);
+    color: white;
     font-size: 1rem;
     display: flex;
     align-items: center;
@@ -1046,22 +1042,21 @@ $.style(`
   }
 
   & .mic-btn { font-size: .85rem; }
-  & .mic-btn.-active { color: #fb4934; }
   & .mic-btn.-loading { opacity: .5; }
 
-  & .send-btn { color: var(--root-theme, mediumseagreen); font-size: 1.1rem; }
-  & .send-btn:hover { color: white; }
+  & .send-btn { font-size: 1.1rem; }
 
   & form input,
   & form textarea {
     width: 100%;
     display: block;
     border: none;
+    border-top: 1px solid var(--root-theme, mediumseagreen);
     border-radius: 0;
     padding: 8px;
     font-size: 1rem;
-    background: linear-gradient(155deg, rgba(0,0,0,.7), rgba(0,0,0,.8)), var(--root-theme, mediumseagreen);
-    color: rgba(255,255,255,.75);
+    background: white;
+    color: black;
   }
 
   & form textarea {
@@ -1073,7 +1068,7 @@ $.style(`
   & input:focus {
     outline-offset: -2px;
     outline-color: transparent;
-    caret-color: var(--root-theme, mediumseagreen);
+    caret-color: black;
   }
 
   & .scroll-back {
