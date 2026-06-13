@@ -482,21 +482,21 @@ text: ls
   },
   'art': () => {
     loadPath('/app/flip-book')
-    return 'opening flip-book...'
+    return { body: 'opening flip-book...', system: true }
   },
   'music': () => {
     loadPath('/app/paper-pocket')
-    return 'opening paper-pocket...'
+    return { body: 'opening paper-pocket...', system: true }
   },
   'coding': () => {
     loadPath('/app/lore-baby')
-    return 'opening lore-baby...'
+    return { body: 'opening lore-baby...', system: true }
   },
   'clownbot': () => {
     loadPath('/app/tty-elf')
-    return 'connecting to clownbot...'
+    return { body: 'connecting to clownbot...', system: true }
   },
-  'tty': async (sessionArg) => {
+  'tty': async function(sessionArg) {
     if (ttySocket) { ttySocket.close(); ttySocket = null }
     const authCheck = await fetch('/shell/', { method: 'HEAD' })
     if (authCheck.status === 401 || authCheck.redirected && authCheck.url.includes('admin')) {
@@ -528,15 +528,15 @@ text: ls
       clearTimeout(ttyFlushTimer)
       if (ttyBuffer.trim()) flushTtyBuffer()
       $.teach({ ttyConnected: false, modality: null })
-      addMessage({ body: 'shell disconnected', author: 'assistant' })
+      addMessage({ body: 'shell disconnected', author: 'assistant', system: true })
     }
     ws.onerror = () => {
       ttySocket = null
       window.removeEventListener('resize', onResize)
       $.teach({ ttyConnected: false, modality: null })
-      addMessage({ body: 'shell unavailable - ttyd not running on this host', author: 'assistant' })
+      addMessage({ body: 'shell unavailable - ttyd not running on this host', author: 'assistant', system: true })
     }
-    return 'opening shell...'
+    return { body: 'opening shell...', system: true }
   },
   'js': () => {
     import('./js-repl.js').then((module) => {
@@ -580,16 +580,18 @@ $.draw((target) => {
     ...messages.map((m, i) => {
       if (m.saga) return m.body
       if (m.author === 'unassigned') return escapeHyperText(m.body)
+      if (m.tty || m.system) return escapeHyperText(m.body)
       if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
       const prev = messages[i - 1]
-      const continuingSagas = prev && prev.author === 'assistant' && !prev.saga
+      const continuingSagas = prev && prev.author === 'assistant' && !prev.saga && !prev.tty && !prev.system
       return continuingSagas ? toQuote(m.body) : `@ Sagas\n${toQuote(m.body)}`
     }),
     (() => {
       if (!thinkingFace && !ttyLive) return null
       const text = thinkingFace || ttyLive
+      if (ttyLive) return escapeHyperText(text)
       const lastMsg = messages[messages.length - 1]
-      const continuingSagas = lastMsg && lastMsg.author === 'assistant' && !lastMsg.saga
+      const continuingSagas = lastMsg && lastMsg.author === 'assistant' && !lastMsg.saga && !lastMsg.tty && !lastMsg.system
       return continuingSagas ? toQuote(text) : `@ Sagas\n${toQuote(text)}`
     })(),
   ].filter(Boolean).join('\n\n')
