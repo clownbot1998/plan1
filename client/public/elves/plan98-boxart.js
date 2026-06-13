@@ -1,5 +1,6 @@
 import elf from '@plan98/elf'
 import { BUTTON_CODES, checkButton } from './debug-gamepads.js'
+import { toast } from './plan98-toast.js'
 
 const $ = elf('plan98-boxart')
 
@@ -23,6 +24,12 @@ $.draw((target) => {
   const subtitle = target.getAttribute('subtitle') || 'Endlessly'
 
   if (target.innerHTML) return
+
+  toast('Accessibility mode now available!', {
+    actions: [
+      { label: 'Launch', callback: () => { self.location.href = '/app/accessibility-mode' } },
+    ]
+  })
 
   return `
     <div style="display: grid; height: 100%; position: relative;">
@@ -60,6 +67,9 @@ $.draw((target) => {
                 <button class="cta spinning-border" data-start>
                   <span>Right Now</span>
                 </button>
+                <a class="cta" href="/app/accessibility-mode">
+                  <span>Accessibility</span>
+                </a>
               </div>
             </div>
           </div>
