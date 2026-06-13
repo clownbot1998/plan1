@@ -1,5 +1,5 @@
 import { Self, Saga } from '@plan98/types'
-import IntlMessageFormat from '@formatjs/intl-messageformat'
+import IntlMessageFormat from 'intl-messageformat'
 import { showModal, hideModal } from '@plan98/modal'
 import $paperPocket, { sideEffects, systemMenu, getTheme, afterUpdateTheme } from './paper-pocket.js'
 import { get as wasGet, put as wasPut, del as wasDel, ensureSpace } from './plan98-wallet.js'
