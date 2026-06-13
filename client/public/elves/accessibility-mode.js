@@ -357,10 +357,11 @@ const modalities = {
   async js(program) {
     if(program === 'exit' || program === 'quit') {
       $.teach({ modality: null })
-    return 'Exiting JS modality.'
+      return { body: 'Exiting JS modality.', system: true }
     }
     if(imports.runJs) {
-      return JSON.stringify(await imports.runJs(program), '', 2)
+      const result = JSON.stringify(await imports.runJs(program), '', 2)
+      return { body: result, actor: 'javascript' }
     }
   },
 
@@ -596,9 +597,10 @@ $.draw((target) => {
       if (m.author === 'unassigned') return escapeHyperText(m.body)
       if (m.tty || m.system) return escapeHyperText(m.body)
       if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
+      const actor = m.actor || 'Sagas'
       const prev = messages[i - 1]
-      const continuingSagas = prev && prev.author === 'assistant' && !prev.saga && !prev.tty && !prev.system
-      return continuingSagas ? toQuote(m.body) : `@ Sagas\n${toQuote(m.body)}`
+      const continuingSagas = prev && prev.author === 'assistant' && !prev.saga && !prev.tty && !prev.system && (prev.actor || 'Sagas') === actor
+      return continuingSagas ? toQuote(m.body) : `@ ${actor}\n${toQuote(m.body)}`
     }),
     (() => {
       if (!thinkingFace && !ttyLive) return null
