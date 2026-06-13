@@ -1024,14 +1024,18 @@ $.style(`
     align-items: end;
   }
 
+  & form {
+    background: linear-gradient(335deg, rgba(0,0,0,.8), rgba(0,0,0,.9)), var(--root-theme, mediumseagreen);
+  }
+
   & .compose-btn {
     min-width: 44px;
     min-height: 44px;
     padding: 8px;
-    background: black;
+    background: transparent;
     border: none;
     cursor: pointer;
-    color: white;
+    color: rgba(255,255,255,.5);
     font-size: 1rem;
     display: flex;
     align-items: center;
@@ -1042,18 +1046,11 @@ $.style(`
   }
 
   & .mic-btn { font-size: .85rem; }
+  & .mic-btn.-active { color: #fb4934; }
   & .mic-btn.-loading { opacity: .5; }
 
-  & .send-btn { font-size: 1.1rem; }
-
-  & .tty-out {
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    font-family: 'Recursive', monospace;
-    font-variation-settings: "MONO" 1;
-    font-size: .85rem;
-    margin: 0;
-  }
+  & .send-btn { color: var(--root-theme, mediumseagreen); font-size: 1.1rem; }
+  & .send-btn:hover { color: white; }
 
   & form input,
   & form textarea {
@@ -1063,8 +1060,8 @@ $.style(`
     border-radius: 0;
     padding: 8px;
     font-size: 1rem;
-    background: white;
-    color: black;
+    background: linear-gradient(155deg, rgba(0,0,0,.7), rgba(0,0,0,.8)), var(--root-theme, mediumseagreen);
+    color: rgba(255,255,255,.75);
   }
 
   & form textarea {
@@ -1076,7 +1073,7 @@ $.style(`
   & input:focus {
     outline-offset: -2px;
     outline-color: transparent;
-    caret-color: black;
+    caret-color: var(--root-theme, mediumseagreen);
   }
 
   & .scroll-back {
