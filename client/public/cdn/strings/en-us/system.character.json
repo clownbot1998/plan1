@@ -1,0 +1,30 @@
+{
+  "shell.opening":       "opening shell...",
+  "shell.disconnected":  "shell disconnected",
+  "shell.unavailable":   "shell unavailable - ttyd not running on this host",
+  "shell.not.connected": "shell not connected",
+
+  "art.opening":         "opening flip-book...",
+  "music.opening":       "opening paper-pocket...",
+  "coding.opening":      "opening lore-baby...",
+  "clownbot.connecting": "connecting to clownbot...",
+  "palette.launching":   "launching palette...",
+
+  "js.entering":         "entering js modality",
+  "js.exiting":          "exiting js modality",
+  "luau.exiting":        "exiting luau modality",
+
+  "command.unknown":     "command not recognized",
+  "elf.not.found":       "elf not found, ask help for assistance",
+  "elf.load.failed":     "elf load failed, ask help for assistance",
+  "load.module":         "load module",
+  "load.path":           "load path",
+
+  "auth.prompt":         "passphrase:",
+  "auth.success":        "logged in",
+  "auth.aborted":        "authentication aborted",
+  "auth.locked":         "too many attempts - try again later",
+  "auth.wrong":          "wrong passphrase{remaining, select, unknown {} other { - {remaining} left}}",
+
+  "agent.exit":          "have a good one or two!"
+}

@@ -1,4 +1,5 @@
 import { Self, Saga } from '@plan98/types'
+import IntlMessageFormat from '@formatjs/intl-messageformat'
 import { showModal, hideModal } from '@plan98/modal'
 import $paperPocket, { sideEffects, systemMenu, getTheme, afterUpdateTheme } from './paper-pocket.js'
 import { get as wasGet, put as wasPut, del as wasDel, ensureSpace } from './plan98-wallet.js'
@@ -29,6 +30,27 @@ const paperPocketHelp = () => {
   ${description}
   ${options.join(' ')}
 `}).join('\n')
+}
+
+// ── i18n ─────────────────────────────────────────────────────────────────────
+
+let _strings = {}
+const _fmtCache = {}
+
+function fmt(key, vars = {}) {
+  const template = _strings[key]
+  if (!template) return key
+  if (!Object.keys(vars).length) return template
+  if (!_fmtCache[key]) _fmtCache[key] = new IntlMessageFormat(template, 'en-US')
+  return String(_fmtCache[key].format(vars))
+}
+
+async function loadStrings() {
+  const [system, sagas] = await Promise.all([
+    fetch('/cdn/strings/en-us/system.character.json').then(r => r.json()).catch(() => ({})),
+    fetch('/cdn/strings/en-us/sagas.character.json').then(r => r.json()).catch(() => ({})),
+  ])
+  _strings = { ...system, ...sagas }
 }
 
 let fileSystem = null
@@ -304,14 +326,14 @@ async function auth(passphrase, { normalMode }) {
     })
     if (res.ok) {
       normalMode()
-      return 'logged in'
+      return fmt('auth.success')
     }
     const data = await res.json().catch(() => ({}))
-    if (data.remaining === 0) { normalMode(); return 'too many attempts -try again later' }
-    return `wrong passphrase${data.remaining != null ? ` -${data.remaining} left` : ''}`
+    if (data.remaining === 0) { normalMode(); return fmt('auth.locked') }
+    return fmt('auth.wrong', { remaining: data.remaining != null ? data.remaining : 'unknown' })
   } catch {
     normalMode()
-    return 'login failed'
+    return fmt('auth.wrong', { remaining: 'unknown' })
   }
 }
 
@@ -320,7 +342,7 @@ const modalities = {
     if (program === 'exit' || program === 'quit') {
       $.teach({ modality: null })
       await agent(null)
-      return 'Have a good one or two!'
+      return { body: fmt('agent.exit'), system: true }
     }
     $.teach({ thinking: true })
     const message = await agent(program, {
@@ -335,7 +357,7 @@ const modalities = {
     const { secureEntry } = $.learn()
     if(!secureEntry && (program === 'exit' || program === 'quit')) {
       $.teach({ modality: null, secureEntry: false })
-      return 'Authentication aborted.'
+      return { body: fmt('auth.aborted'), system: true }
     }
     return await auth(program, {
       enableSecureMode,
@@ -346,7 +368,7 @@ const modalities = {
   luau(program) {
     if(kill(program)) {
       $.teach({ modality: null })
-      return 'Exiting Luau modality.'
+      return { body: fmt('luau.exiting'), system: true }
     }
     if(imports.haveLuau) {
       const logs = imports.haveLuau(program)
@@ -357,7 +379,7 @@ const modalities = {
   async js(program) {
     if(program === 'exit' || program === 'quit') {
       $.teach({ modality: null })
-      return { body: 'Exiting JS modality.', system: true }
+      return { body: fmt('js.exiting'), system: true }
     }
     if(imports.runJs) {
       const result = JSON.stringify(await imports.runJs(program), '', 2)
@@ -371,7 +393,7 @@ const modalities = {
       return
     }
     if (!ttySocket || ttySocket.readyState !== WebSocket.OPEN) {
-      return 'shell not connected'
+      return { body: fmt('shell.not.connected'), system: true }
     }
     ttyLastSent = program
     const enc = new TextEncoder().encode(program + '\r')
@@ -458,7 +480,7 @@ text: ls
 
   'pwd': function() {
     const { cwd } = $.learn()
-    return cwd || '/'
+    return { body: cwd || '/', system: true }
   },
 
   'ls': function() {
@@ -468,14 +490,14 @@ text: ls
         const rel = k.startsWith(cwd) ? k.slice(cwd.length) : null
         return rel && !rel.includes('/')
       })
-    if (!entries.length) return `${cwd || '/'}\n(empty)`
-    return entries.join('  ')
+    const body = entries.length ? entries.join('  ') : `${cwd || '/'}\n(empty)`
+    return { body, system: true }
   },
 
   'cd': function(path) {
     if (!path || path === '~') {
       $.teach({ cwd: '/' })
-      return '/'
+      return { body: '/', system: true }
     }
     const { cwd } = $.learn()
     let next
@@ -489,12 +511,12 @@ text: ls
       next = ((cwd || '/').replace(/\/$/, '') + '/' + path)
     }
     $.teach({ cwd: next })
-    return next
+    return { body: next, system: true }
   },
 
   'admin': () => {
     $.teach({ modality: 'auth', secureEntry: true })
-    return 'passphrase:'
+    return { body: fmt('auth.prompt'), system: true }
   },
   'agent': async () => {
     $.teach({ modality: 'agent' })
@@ -504,23 +526,23 @@ text: ls
   },
   'color': () => {
     loadModule('<plan98-palette')
-    return 'launching palette...'
+    return { body: fmt('palette.launching'), system: true }
   },
   'art': () => {
     loadPath('/app/flip-book')
-    return { body: 'opening flip-book...', system: true }
+    return { body: fmt('art.opening'), system: true }
   },
   'music': () => {
     loadPath('/app/paper-pocket')
-    return { body: 'opening paper-pocket...', system: true }
+    return { body: fmt('music.opening'), system: true }
   },
   'coding': () => {
     loadPath('/app/lore-baby')
-    return { body: 'opening lore-baby...', system: true }
+    return { body: fmt('coding.opening'), system: true }
   },
   'clownbot': () => {
     loadPath('/app/tty-elf')
-    return { body: 'connecting to clownbot...', system: true }
+    return { body: fmt('clownbot.connecting'), system: true }
   },
   'tty': async function(sessionArg) {
     if (ttySocket) { ttySocket.close(); ttySocket = null }
@@ -554,22 +576,22 @@ text: ls
       clearTimeout(ttyFlushTimer)
       if (ttyBuffer.trim()) flushTtyBuffer()
       $.teach({ ttyConnected: false, modality: null })
-      addMessage({ body: 'shell disconnected', author: 'assistant', system: true })
+      addMessage({ body: fmt('shell.disconnected'), author: 'assistant', system: true })
     }
     ws.onerror = () => {
       ttySocket = null
       window.removeEventListener('resize', onResize)
       $.teach({ ttyConnected: false, modality: null })
-      addMessage({ body: 'shell unavailable - ttyd not running on this host', author: 'assistant', system: true })
+      addMessage({ body: fmt('shell.unavailable'), author: 'assistant', system: true })
     }
-    return { body: 'opening shell...', system: true }
+    return { body: fmt('shell.opening'), system: true }
   },
   'js': () => {
     import('./js-repl.js').then((module) => {
       imports.runJs = module.runJs
       $.teach({ modality: 'js' })
     }).catch(e => console.error(e))
-    return `Entering JS modality. Type 'exit' to leave.`
+    return { body: fmt('js.entering'), system: true }
   },
 }
 
@@ -582,11 +604,11 @@ function mount(target) {
   const message = target.getAttribute('message')
   const src = target.getAttribute('src')
   const rom = target.getAttribute('rom')
-  wasLoad().then(hadHistory => {
+  loadStrings().then(() => wasLoad()).then(hadHistory => {
     if (!hadHistory) {
       addMessage({ body: '${brand} is a creative suite for ${demographic} for', author: 'unassigned' })
       addMessage({ body: '<code\ntext: art\n\n<code\ntext: music\n\n<code\ntext: coding', author: 'unassigned', saga: true })
-      addMessage({ body: '@ Sagas\n> I am a fragment of reality. I am not reality. You are reality.', author: 'assistant', saga: true })
+      addMessage({ body: `@ Sagas\n> ${fmt('sagas.intro')}`, author: 'assistant', saga: true })
     }
     if(command) execute(command)
     else if(src) execute(src, { suppressBack: true })
@@ -802,13 +824,13 @@ async function execute(message, options={}) {
   $.teach({ historyCursor: null, messageHeight: null, messageText: '', messageDraft: '' })
 
   if(message.startsWith('<')) {
-    addMessage({ body: 'load module', author: 'assistant' })
+    addMessage({ body: fmt('load.module'), author: 'assistant', system: true })
     loadModule(message, options)
     return
   }
 
   if(message.startsWith('/')) {
-    addMessage({ body: 'load path', author: 'assistant' })
+    addMessage({ body: fmt('load.path'), author: 'assistant', system: true })
     loadPath(message, options)
     return
   }
@@ -851,8 +873,7 @@ async function execute(message, options={}) {
     }
     return
   } else {
-    const body = 'Command not recognized. Ask for `help` if needed.'
-    addMessage({ body, author: 'assistant' })
+    addMessage({ body: fmt('command.unknown'), author: 'assistant', system: true })
   }
 }
 
@@ -890,7 +911,7 @@ export async function loadModule(message, options = {}) {
   const url = `/public/elves/${elf}.js`
   const exists = (await fetch(url, { method: 'HEAD' })).ok
   if(!exists && !elements.includes(elf)) {
-    addMessage({ body: 'ELF not found, ask "help" for assistance', author: 'assistant' })
+    addMessage({ body: fmt('elf.not.found'), author: 'assistant', system: true })
     return
   }
 
@@ -960,7 +981,7 @@ export async function loadModule(message, options = {}) {
     $.teach({ popped: true })
   } catch(e) {
     console.error(e)
-    addMessage({ body: 'ELF load failed, ask "help" for assistance', author: 'assistant' })
+    addMessage({ body: fmt('elf.load.failed'), author: 'assistant', system: true })
   }
 }
 
@@ -1199,7 +1220,7 @@ function isLastLine(textarea) {
 function interrupt() {
   normalMode()
   $.teach({ secureEntry: false, messageHeight: null, messageText: '', messageDraft: '' })
-  addMessage({ body: 'Girl, interrupted.', author: 'assistant' })
+  addMessage({ body: fmt('sagas.interrupted'), author: 'assistant' })
 }
 
 const hotkeys = {}
