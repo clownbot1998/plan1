@@ -1018,6 +1018,10 @@ $.style(`
     vertical-align: middle;
   }
 
+  & form {
+    padding: 0 0.5rem 0.5rem;
+  }
+
   & .compose-row {
     display: grid;
     grid-template-columns: auto 1fr auto;
