@@ -1018,10 +1018,6 @@ $.style(`
     vertical-align: middle;
   }
 
-  & form {
-    padding: 0 0.5rem 0.5rem;
-  }
-
   & .compose-row {
     display: grid;
     grid-template-columns: auto 1fr auto;
@@ -1054,13 +1050,14 @@ $.style(`
   & form textarea {
     width: 100%;
     display: block;
-    border: none;
-    border-top: 1px solid var(--root-theme, mediumseagreen);
+    border: 1px solid var(--root-theme, mediumseagreen);
     border-radius: 0;
     padding: 8px;
+    margin: 0 1px 1px;
     font-size: 1rem;
     background: white;
     color: black;
+    box-sizing: border-box;
   }
 
   & form textarea {
