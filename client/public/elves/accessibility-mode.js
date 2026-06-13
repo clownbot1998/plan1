@@ -120,7 +120,6 @@ const $ = Self('accessibility-mode', {
   historyCursor: null,
   messageText: '',
   messageDraft: '',
-  messageHeight: null,
   cwd: null,
   ttyConnected: false,
   ttyLive: '',
@@ -673,7 +672,6 @@ $.draw((target) => {
               data-bind
               name="messageText"
               placeholder="${ttyConnected ? 'say or type a command' : 'help'}"
-              ${messageHeight ? `style="height: ${messageHeight}px"`:''}
               value="${escapeHyperText(messageText)}"
             ></textarea>
           `}
@@ -749,7 +747,11 @@ function afterUpdate(target) {
   {
     {
       const elem = document.querySelector('[name="messageText"]')
-      if(elem) elem.focus()
+      if(elem) {
+        elem.focus()
+        elem.style.height = 'auto'
+        elem.style.height = Math.max(44, elem.scrollHeight) + 'px'
+      }
     }
   }
 }
@@ -821,7 +823,7 @@ async function execute(message, options={}) {
   }
 
   _voskCommitted = ''
-  $.teach({ historyCursor: null, messageHeight: null, messageText: '', messageDraft: '' })
+  $.teach({ historyCursor: null, messageText: '', messageDraft: '' })
 
   if(message.startsWith('<')) {
     addMessage({ body: fmt('load.module'), author: 'assistant', system: true })
@@ -1048,7 +1050,7 @@ $.style(`
 
   & form input,
   & form textarea {
-    width: 100%;
+    width: calc(100% - 2px);
     display: block;
     border: 1px solid var(--root-theme, mediumseagreen);
     border-radius: 0;
@@ -1062,7 +1064,9 @@ $.style(`
 
   & form textarea {
     resize: none;
+    height: 44px;
     max-height: 35vh;
+    overflow-y: auto;
   }
 
   & textarea:focus,
@@ -1139,19 +1143,12 @@ $.when('input', '[data-bind]', event => {
   $.teach({ [name]: value })
 })
 
-$.when('focus', '[name="messageText"]', (event) => {
-  $.teach({ messageHeight: event.target.scrollHeight })
-});
-
-$.when('keydown', '[name="messageText"]', (event) => {
-  $.teach({ messageHeight: event.target.scrollHeight })
-});
 
 
 $.when('input', '[name="messageText"]', (event) => {
   const { value } = event.target;
   _voskCommitted = value
-  $.teach({ messageDraft: value, messageHeight: event.target.scrollHeight })
+  $.teach({ messageDraft: value })
 });
 
 $.when('click', 'code', (event) => {
