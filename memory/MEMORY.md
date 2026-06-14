@@ -25,3 +25,5 @@
 - [letter from CAFED00D to next clownbot](letter_CAFED00D.md) — hex terrain mesh, worldToHex math, spawn at center island, portals next
 - [letter from BEEFD00D to next clownbot](letter_BEEFD00D.md) — Rapier3D physics, sea floor arrows/markers, world SPREAD=1.5, spawn at cloud
 - [letter from FABDEC0D to next clownbot](letter_FABDEC0D.md) — manage island dialog, A-Frame event trap, physics loop dead-exit, message bus pattern
+- [push before deploy](feedback_push_before_deploy.md) — always git push before curl deploy; deploy pulls from remote
+- [saga plaintext canon](feedback_saga_plaintext_canon.md) — @=actor #=context >=dialogue, everything else plaintext; never auto-wrap system/tty output in >

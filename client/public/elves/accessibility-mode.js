@@ -7,6 +7,120 @@ import Vosk from 'vosk-browser'
 import { agent } from './clownbot-agent.js'
 
 const SL = 'https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.16.0/cdn/assets/icons'
+const sagaDocs = [
+  { name: 'the-story-so-far', path: '/sagas/plan1/the-story-so-far.saga' },
+  { name: 'elevator-pitch', path: '/cdn/sillyz.computer/en-us/elevator-pitch.saga' },
+  { name: 'plan4', path: '/sagas/sillyz.computer/plan4.saga' },
+  { name: 'about', path: '/sagas/sillyz.computer/about.saga' },
+]
+
+async function printSaga(sagaScript) {
+  const html = Saga(sagaScript)
+  const existing = document.getElementById('__print_dialog__')
+  if (existing) existing.remove()
+  const dialog = document.createElement('dialog')
+  dialog.id = '__print_dialog__'
+  dialog.innerHTML = `
+    <div class="screenplay">${html}</div>
+    <div class="print-banner">
+      <button class="standard-button bias-generic" id="__print_cancel__">Cancel</button>
+      <button class="standard-button bias-positive" id="__print_go__">Print</button>
+    </div>
+    <style>
+      #__print_dialog__ {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        max-width: 100%;
+        max-height: 100%;
+        margin: 0;
+        padding: 0;
+        border: none;
+        overflow-y: auto;
+        background: white;
+        z-index: 9000;
+        font-family: Courier, monospace;
+      }
+      #__print_dialog__::backdrop { display: none; }
+      .print-banner {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: .75rem 1rem;
+        display: flex;
+        gap: .5rem;
+        justify-content: flex-end;
+        z-index: 9001;
+      }
+      title-page {
+        display: block;
+        break-after: page;
+        page-break-after: always;
+        height: 9in;
+      }
+      .screenplay xml-html {
+        overflow: visible !important;
+        max-height: none !important;
+        display: block;
+      }
+      @page { size: letter portrait; margin: 1in; }
+      @media print {
+        .print-banner { display: none; }
+        .screenplay { padding-top: 0; }
+      }
+    </style>
+  `
+  document.body.appendChild(dialog)
+  dialog.showModal()
+  document.getElementById('__print_go__').onclick = async () => {
+    // wait two frames for elf $.draw() to finish rendering custom elements
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+    const screenplay = dialog.querySelector('.screenplay')
+    const renderedHtml = screenplay.outerHTML
+    const allStyles = Array.from(document.querySelectorAll('style'))
+      .map(s => s.textContent).join('\n')
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:8.5in;height:11in;border:none;visibility:hidden;'
+    document.body.appendChild(iframe)
+    const doc = iframe.contentDocument
+    doc.open()
+    doc.write(`<!DOCTYPE html><html><head><style>
+      ${allStyles}
+      html, body { height: auto !important; overflow: visible !important; margin: 0 !important; padding: 0 !important; background: white; font-family: Courier, monospace; font-size: 12pt; }
+      xml-html { display: block !important; overflow: visible !important; max-height: none !important; height: auto !important; }
+      @page { size: 8.5in 11in; margin: 1in 1in 1in 1.5in; }
+    </style></head><body>${renderedHtml}</body></html>`)
+    doc.close()
+    iframe.contentWindow.focus()
+    iframe.contentWindow.print()
+    setTimeout(() => iframe.remove(), 2000)
+  }
+  document.getElementById('__print_cancel__').onclick = () => {
+    dialog.close(); dialog.remove()
+  }
+}
+
+function luminance(colorStr) {
+  const d = document.createElement('div')
+  d.style.color = colorStr
+  d.style.display = 'none'
+  document.body.appendChild(d)
+  const rgb = getComputedStyle(d).color
+  document.body.removeChild(d)
+  const m = rgb.match(/[\d.]+/g)
+  if (!m) return 1
+  return [+m[0], +m[1], +m[2]].reduce((lum, c) => {
+    const s = c / 255
+    return lum + (s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4) * [0.2126, 0.7152, 0.0722].shift()
+  }, 0)
+}
+
+function contrastColor(colorStr) {
+  return luminance(colorStr) > 0.179 ? '#1a1a1a' : '#ffffff'
+}
+
 function icon(name) {
   return `<span class="icon" style="--i:url('${SL}/${name}.svg')"></span>`
 }
@@ -125,6 +239,8 @@ const $ = Self('accessibility-mode', {
   ttyLive: '',
   listening: false,
   voskLoading: false,
+  sidebarOpen: false,
+  sagaFilter: '',
 })
 
 export function sh(message) {
@@ -618,7 +734,7 @@ function mount(target) {
 
 $.draw((target) => {
   mount(target)
-  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading } = $.learn()
+  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading, sidebarOpen, sagaFilter } = $.learn()
 
   const toQuote = (body) =>
     (body || '').split('\n').map(l => l.trim() ? `> ${escapeHyperText(l)}` : '').join('\n')
@@ -646,10 +762,34 @@ $.draw((target) => {
 
   const sagaHtml = sagaScript ? Saga(sagaScript) : ''
 
+  const filteredSagas = sagaFilter
+    ? sagaDocs.filter(s => s.name.includes(sagaFilter.toLowerCase()))
+    : sagaDocs
+
   return `
       <div class="scroll-back">
+        <button type="button" class="sidebar-toggle" data-toggle-sidebar title="sagas">${icon('journal-text')}</button>
         <div class="messages">
           ${sagaHtml}
+        </div>
+      </div>
+      <div class="sagas-sidebar" data-open="${sidebarOpen}">
+        <div class="sagas-sidebar-inner">
+          <div class="sagas-sidebar-actions">
+            <button class="sb-action-btn" data-sb-load>load</button>
+            <button class="sb-action-btn" data-sb-save>save</button>
+            <button class="sb-action-btn" data-sb-print>print</button>
+            <button class="sb-action-btn" data-sb-share>share</button>
+            <button class="sb-action-btn" data-close-sidebar>✕</button>
+          </div>
+          <div class="sagas-sidebar-filter">
+            <input class="sagas-filter-input" type="text" placeholder="filter..." value="${escapeHyperText(sagaFilter)}" data-saga-filter>
+          </div>
+          <div class="sagas-list">
+            ${filteredSagas.map(s => `
+              <button class="saga-item" data-load-saga="${escapeHyperText(s.path)}">${escapeHyperText(s.name)}</button>
+            `).join('')}
+          </div>
         </div>
       </div>
       <form>
@@ -741,6 +881,7 @@ function afterUpdate(target) {
       target.theme = theme
       document.body.style.setProperty('--root-theme', theme)
       document.documentElement.style.setProperty('--root-theme', theme)
+      document.documentElement.style.setProperty('--compose-btn-contrast', contrastColor(theme))
     }
   }
 
@@ -748,9 +889,12 @@ function afterUpdate(target) {
     {
       const elem = document.querySelector('[name="messageText"]')
       if(elem) {
-        elem.focus()
+        const active = document.activeElement
+        const inSidebar = active && active.closest('.sagas-sidebar')
+        if (!inSidebar) elem.focus()
         elem.style.height = 'auto'
-        elem.style.height = Math.max(44, elem.scrollHeight) + 'px'
+        const sh = elem.scrollHeight
+        elem.style.height = sh > 60 ? sh + 'px' : ''
       }
     }
   }
@@ -1009,31 +1153,36 @@ $.style(`
     overflow: hidden;
     background: white;
     color: black;
+    position: relative;
   }
 
   & .icon {
     display: inline-block;
-    width: 1em; height: 1em;
+    width: 1.25rem; height: 1.25rem;
     background: currentColor;
     -webkit-mask: var(--i) center/contain no-repeat;
     mask: var(--i) center/contain no-repeat;
     vertical-align: middle;
+    flex-shrink: 0;
   }
 
   & .compose-row {
     display: grid;
     grid-template-columns: auto 1fr auto;
     align-items: end;
+    gap: .5rem;
+    padding: 0 .5rem .5rem;
   }
 
   & .compose-btn {
-    min-width: 44px;
-    min-height: 44px;
+    width: 44px;
+    height: 44px;
     padding: 8px;
-    background: black;
+    background: var(--root-theme, mediumseagreen);
     border: none;
+    border-radius: 100%;
     cursor: pointer;
-    color: white;
+    color: var(--compose-btn-contrast, #1a1a1a);
     font-size: 1rem;
     display: flex;
     align-items: center;
@@ -1041,22 +1190,21 @@ $.style(`
     touch-action: manipulation;
     user-select: none;
     -webkit-user-select: none;
+    flex-shrink: 0;
   }
 
-  & .mic-btn { font-size: .85rem; }
   & .mic-btn.-loading { opacity: .5; }
-
-  & .send-btn { font-size: 1.1rem; }
 
   & form input,
   & form textarea {
-    width: calc(100% - 2px);
+    width: 100%;
     display: block;
-    border: 1px solid var(--root-theme, mediumseagreen);
-    border-radius: 0;
+    border: 2px solid var(--root-theme, mediumseagreen);
+    border-radius: .5rem;
     padding: 8px;
-    margin: 0 1px 1px;
+    margin: 0;
     font-size: 1rem;
+    font-family: Courier, 'Courier New', monospace;
     background: white;
     color: black;
     box-sizing: border-box;
@@ -1067,6 +1215,10 @@ $.style(`
     height: 44px;
     max-height: 35vh;
     overflow-y: auto;
+    line-height: 1.5;
+    margin-bottom: calc(-2px - .5rem);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
   }
 
   & textarea:focus,
@@ -1077,6 +1229,7 @@ $.style(`
   }
 
   & .scroll-back {
+    position: relative;
     height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
@@ -1084,35 +1237,125 @@ $.style(`
     -webkit-overflow-scrolling: touch;
   }
 
+  & .sidebar-toggle {
+    position: sticky;
+    top: .5rem;
+    float: right;
+    margin: .5rem .5rem 0 0;
+    width: 44px;
+    height: 44px;
+    background: var(--root-theme, mediumseagreen);
+    color: var(--compose-btn-contrast, #1a1a1a);
+    border: none;
+    border-radius: 100%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: .85rem;
+    z-index: 10;
+    flex-shrink: 0;
+  }
+
+  & .sagas-sidebar {
+    position: absolute;
+    top: 0; right: 0;
+    height: 100%;
+    width: 260px;
+    z-index: 20;
+    transform: translateX(100%);
+    transition: transform 220ms cubic-bezier(.4,0,.2,1);
+    display: flex;
+    flex-direction: column;
+    background: white;
+    border-left: 2px solid var(--root-theme, mediumseagreen);
+    pointer-events: none;
+  }
+
+  & .sagas-sidebar[data-open="true"] {
+    transform: translateX(0);
+    pointer-events: all;
+  }
+
+  & .sagas-sidebar-inner {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  & .sagas-sidebar-actions {
+    display: flex;
+    border-bottom: 1px solid #eee;
+    flex-shrink: 0;
+  }
+
+  & .sb-action-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    border-right: 1px solid #eee;
+    padding: .5rem .25rem;
+    font-family: 'Recursive', monospace;
+    font-size: .65rem;
+    cursor: pointer;
+    color: #666;
+    text-align: center;
+    transition: all 80ms;
+  }
+  & .sb-action-btn:last-child { border-right: none; }
+  & .sb-action-btn:hover { background: var(--root-theme, mediumseagreen); color: var(--compose-btn-contrast, #1a1a1a); }
+
+  & .sagas-sidebar-filter {
+    padding: .5rem;
+    border-bottom: 1px solid #eee;
+    flex-shrink: 0;
+  }
+
+  & .sagas-filter-input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #ddd;
+    padding: .35rem .5rem;
+    font-size: .8rem;
+    font-family: 'Recursive', monospace;
+  }
+
+  & .sagas-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: .25rem 0;
+  }
+
+  & .saga-item {
+    display: block;
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid #f0f0f0;
+    padding: .6rem .75rem;
+    font-family: 'Recursive', monospace;
+    font-size: .8rem;
+    text-align: left;
+    cursor: pointer;
+    color: #333;
+  }
+  & .saga-item:hover { background: var(--root-theme, mediumseagreen); color: var(--compose-btn-contrast, #1a1a1a); }
+
+  @media print {
+    & .sidebar-toggle,
+    & .sagas-sidebar,
+    & form { display: none; }
+    & .scroll-back { height: auto; overflow: visible; }
+    & .messages { font-family: Courier, 'Courier New', monospace; }
+  }
+
   & .messages {
     padding: .5rem;
     min-height: 100%;
+    font-family: Courier, 'Courier New', monospace;
   }
 
-  & xml-html {
-    display: block;
-    max-width: 40rem;
-    margin: 0 auto;
-  }
-
-  & hypertext-puppet {
-    display: block;
-    text-transform: uppercase;
-    font-weight: bold;
-    margin: 1.5rem 0 0;
-    color: black;
-  }
-
-  & hypertext-quote {
-    display: block;
-    margin: 0.25rem 0 0 1.5rem;
-    color: black;
-  }
-
-  & hypertext-blankline {
-    display: block;
-    height: 0.5rem;
-  }
 
   & code {
     cursor: pointer;
@@ -1225,4 +1468,79 @@ $.when('keydown', '[name="messageText"]', (event) => {
 
 $.when('keyup', '[name="messageText"]', (event) => {
   hotkeys[event.key] = false
+})
+
+$.when('click', '[data-toggle-sidebar]', () => {
+  $.teach({ sidebarOpen: !$.learn().sidebarOpen })
+})
+
+$.when('click', '[data-close-sidebar]', () => {
+  $.teach({ sidebarOpen: false })
+})
+
+$.when('input', '[data-saga-filter]', (event) => {
+  $.teach({ sagaFilter: event.target.value })
+})
+
+$.when('click', '[data-load-saga]', async (event) => {
+  const path = event.target.dataset.loadSaga
+  try {
+    const text = await fetch(path).then(r => r.text())
+    $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
+  } catch (e) {
+    $.teach({ messages: [{ body: `could not load ${path}`, author: 'unassigned', system: true, id: Date.now() }] })
+  }
+  $.teach({ sidebarOpen: false })
+})
+
+$.when('click', '[data-sb-print]', () => {
+  const { messages } = $.learn()
+  const toQuote = (body) => (body || '').split('\n').map(l => l.trim() ? `> ${l}` : '').join('\n')
+  const script = messages.map(m => {
+    if (m.saga) return m.body
+    if (m.author === 'unassigned') return m.body
+    if (m.tty || m.system) return m.body
+    if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
+    return `@ ${m.actor || 'Sagas'}\n${toQuote(m.body)}`
+  }).filter(Boolean).join('\n\n')
+  printSaga(script)
+})
+
+$.when('click', '[data-sb-save]', () => {
+  const { messages } = $.learn()
+  const toQuote = (body) => (body || '').split('\n').map(l => l.trim() ? `> ${l}` : '').join('\n')
+  const script = messages.map(m => {
+    if (m.saga) return m.body
+    if (m.author === 'unassigned') return m.body
+    if (m.tty || m.system) return m.body
+    if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
+    return `@ ${m.actor || 'Sagas'}\n${toQuote(m.body)}`
+  }).filter(Boolean).join('\n\n')
+  const blob = new Blob([script], { type: 'text/plain' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `session-${Date.now()}.saga`
+  a.click()
+})
+
+$.when('click', '[data-sb-share]', async () => {
+  const url = location.href
+  if (navigator.share) {
+    await navigator.share({ url }).catch(() => {})
+  } else {
+    await navigator.clipboard.writeText(url).catch(() => {})
+  }
+})
+
+$.when('click', '[data-sb-load]', () => {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.saga,.txt'
+  input.onchange = async () => {
+    const file = input.files[0]
+    if (!file) return
+    const text = await file.text()
+    $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }], sidebarOpen: false })
+  }
+  input.click()
 })
