@@ -171,26 +171,59 @@ let fileSystem = null
 
 // ── WAS persistence ───────────────────────────────────────────────────────────
 
-const _shellSessionId = new URLSearchParams(location.search).get('id') || 'default'
-const _wasPath = `/accessibility-mode/${_shellSessionId}.json`
+let _shellSessionId = new URLSearchParams(location.search).get('id') || 'default'
+let _wasJsonPath = `/accessibility-mode/${_shellSessionId}.json`
+let _wasSagaPath = `/accessibility-mode/${_shellSessionId}.saga`
 
-let _wasSaveTimer = null
+function newSession() {
+  _shellSessionId = crypto.randomUUID()
+  _wasJsonPath = `/accessibility-mode/${_shellSessionId}.json`
+  _wasSagaPath = `/accessibility-mode/${_shellSessionId}.saga`
+  window.history.replaceState(null, '', `?id=${_shellSessionId}`)
+}
+const _wasManifestPath = `/accessibility-mode/index.json`
+
+function messagesToSaga(messages) {
+  const toQuote = (body) => (body || '').split('\n').map(l => l.trim() ? `> ${l}` : '').join('\n')
+  return messages.map(m => {
+    if (m.saga) return m.body
+    if (m.author === 'unassigned') return m.body
+    if (m.tty || m.system) return m.body
+    if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
+    return `@ ${m.actor || 'Sagas'}\n${toQuote(m.body)}`
+  }).filter(Boolean).join('\n\n')
+}
+
+async function updateManifest(meta = {}) {
+  const existing = await wasGet(_wasManifestPath)
+    .then(b => b.text()).then(t => JSON.parse(t)).catch(() => ({ sessions: [] }))
+  const sessions = existing.sessions || []
+  const idx = sessions.findIndex(s => s.id === _shellSessionId)
+  const now = Date.now()
+  if (idx === -1) sessions.unshift({ id: _shellSessionId, created: now, updated: now, ...meta })
+  else { sessions[idx] = { ...sessions[idx], updated: now, ...meta }; sessions.sort((a, b) => b.updated - a.updated) }
+  await wasPut(_wasManifestPath, JSON.stringify({ sessions }), { type: 'application/json' })
+}
+
+async function removeFromManifest(id) {
+  const existing = await wasGet(_wasManifestPath)
+    .then(b => b.text()).then(t => JSON.parse(t)).catch(() => ({ sessions: [] }))
+  const sessions = (existing.sessions || []).filter(s => s.id !== id)
+  await wasPut(_wasManifestPath, JSON.stringify({ sessions }), { type: 'application/json' })
+}
+
 function wasSave() {
-  clearTimeout(_wasSaveTimer)
-  _wasSaveTimer = setTimeout(async () => {
-    const { messages, history } = $.learn()
-    const json = JSON.stringify({ messages, history })
-    try {
-      await wasDel(_wasPath).catch(() => null)
-      await wasPut(_wasPath, json, { type: 'application/json' })
-    } catch {}
-  }, 1500)
+  const { messages, history } = $.learn()
+  if (!messages.length) return
+  wasPut(_wasJsonPath, JSON.stringify({ messages, history }), { type: 'application/json' }).catch(() => null)
+  wasPut(_wasSagaPath, messagesToSaga(messages), { type: 'text/plain' }).catch(() => null)
+  updateManifest().catch(() => null)
 }
 
 async function wasLoad() {
   await ensureSpace().catch(() => null)
   try {
-    const blob = await wasGet(_wasPath)
+    const blob = await wasGet(_wasJsonPath)
     if (!blob) return false
     const data = JSON.parse(await blob.text())
     if (data?.messages?.length) {
@@ -241,6 +274,9 @@ const $ = Self('accessibility-mode', {
   voskLoading: false,
   sidebarOpen: false,
   sagaFilter: '',
+  sessions: [],
+  exportOpen: false,
+  metaSession: null,
 })
 
 export function sh(message) {
@@ -588,8 +624,11 @@ text: ls
 > Ctrl+C - interrupt` }),
 
   'clear': async () => {
+    const id = _shellSessionId
     $.teach({ messages: [], history: [], historyCursor: null })
-    try { await wasDel(_wasPath) } catch {}
+    wasDel(_wasJsonPath).catch(() => null)
+    wasDel(_wasSagaPath).catch(() => null)
+    removeFromManifest(id).catch(() => null)
     return null
   },
 
@@ -734,7 +773,7 @@ function mount(target) {
 
 $.draw((target) => {
   mount(target)
-  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading, sidebarOpen, sagaFilter } = $.learn()
+  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading, sidebarOpen, sagaFilter, sessions, exportOpen, metaSession } = $.learn()
 
   const toQuote = (body) =>
     (body || '').split('\n').map(l => l.trim() ? `> ${escapeHyperText(l)}` : '').join('\n')
@@ -762,9 +801,13 @@ $.draw((target) => {
 
   const sagaHtml = sagaScript ? Saga(sagaScript) : ''
 
+  const allSagas = [
+    ...sagaDocs,
+    ...sessions.map(s => ({ name: s.id, path: `/accessibility-mode/${s.id}.saga` }))
+  ]
   const filteredSagas = sagaFilter
-    ? sagaDocs.filter(s => s.name.includes(sagaFilter.toLowerCase()))
-    : sagaDocs
+    ? allSagas.filter(s => s.name.includes(sagaFilter.toLowerCase()))
+    : allSagas
 
   return `
       <div class="scroll-back">
@@ -776,17 +819,41 @@ $.draw((target) => {
       <div class="sagas-sidebar" data-open="${sidebarOpen}">
         <div class="sagas-sidebar-inner">
           <div class="sagas-sidebar-actions">
-            <button class="sb-action-btn" data-sb-load>load</button>
-            <button class="sb-action-btn" data-sb-save>save</button>
-            <button class="sb-action-btn" data-sb-print>print</button>
-            <button class="sb-action-btn" data-sb-share>share</button>
+            <button class="sb-action-btn" data-sb-new>New</button>
+            <button class="sb-action-btn" data-sb-load>Import</button>
+            <div class="sb-export-wrap">
+              <button class="sb-action-btn${exportOpen ? ' -active' : ''}" data-sb-export-toggle>Export</button>
+              ${exportOpen ? `
+                <div class="sb-export-menu">
+                  <button class="sb-action-btn" data-sb-print>Print</button>
+                  <button class="sb-action-btn" data-sb-save>Download</button>
+                </div>
+              ` : ''}
+            </div>
+            <button class="sb-action-btn" data-sb-share>Share</button>
             <button class="sb-action-btn" data-close-sidebar>✕</button>
           </div>
           <div class="sagas-sidebar-filter">
             <input class="sagas-filter-input" type="text" placeholder="filter..." value="${escapeHyperText(sagaFilter)}" data-saga-filter>
           </div>
           <div class="sagas-list">
-            ${filteredSagas.map(s => `
+            ${sessions.length ? `
+              <div class="sagas-list-label">saved</div>
+              ${(sagaFilter
+                ? sessions.filter(s => (s.title || s.id).toLowerCase().includes(sagaFilter.toLowerCase()))
+                : sessions
+              ).map(s => `
+                <div class="saga-item -session">
+                  <button class="saga-item-load" data-load-saga="/accessibility-mode/${escapeHyperText(s.id)}.saga">${escapeHyperText(s.title || s.id.slice(0, 8))}</button>
+                  <button class="saga-item-meta" data-meta-session="${escapeHyperText(s.id)}">ⓘ</button>
+                </div>
+              `).join('')}
+              <div class="sagas-list-label">sagas</div>
+            ` : ''}
+            ${(sagaFilter
+              ? sagaDocs.filter(s => s.name.includes(sagaFilter.toLowerCase()))
+              : sagaDocs
+            ).map(s => `
               <button class="saga-item" data-load-saga="${escapeHyperText(s.path)}">${escapeHyperText(s.name)}</button>
             `).join('')}
           </div>
@@ -818,6 +885,34 @@ $.draw((target) => {
           <button type="submit" class="compose-btn send-btn">${icon('send')}</button>
         </div>
       </form>
+      ${metaSession ? (() => {
+        const s = sessions.find(x => x.id === metaSession) || { id: metaSession }
+        const fmt = ts => ts ? new Date(ts).toLocaleString() : '—'
+        return `
+          <div class="meta-overlay" data-close-meta>
+            <div class="meta-modal" data-stop-close>
+              <div class="meta-modal-title">Session</div>
+              <label class="field">
+                <input class="standard-input" type="text" name="metaTitle" placeholder="untitled" value="${escapeHyperText(s.title || '')}">
+                <span class="label">Title</span>
+              </label>
+              <label class="field">
+                <input class="standard-input" type="text" disabled value="${fmt(s.created)}">
+                <span class="label">Created</span>
+              </label>
+              <label class="field">
+                <input class="standard-input" type="text" disabled value="${fmt(s.updated)}">
+                <span class="label">Last saved</span>
+              </label>
+              <div class="meta-modal-actions">
+                <button class="standard-button bias-positive" data-meta-save>Save</button>
+                <button class="standard-button bias-negative" data-meta-delete="${escapeHyperText(s.id)}">Delete</button>
+                <button class="standard-button" data-close-meta>Cancel</button>
+              </div>
+            </div>
+          </div>
+        `
+      })() : ''}
   `
 }, {
   beforeUpdate,
@@ -1304,7 +1399,112 @@ $.style(`
     transition: all 80ms;
   }
   & .sb-action-btn:last-child { border-right: none; }
-  & .sb-action-btn:hover { background: var(--root-theme, mediumseagreen); color: var(--compose-btn-contrast, #1a1a1a); }
+  & .sb-action-btn:hover,
+  & .sb-action-btn.-active { background: var(--root-theme, mediumseagreen); color: var(--compose-btn-contrast, #1a1a1a); }
+
+  & .sb-export-wrap {
+    flex: 1;
+    position: relative;
+    border-right: 1px solid #eee;
+    display: flex;
+    flex-direction: column;
+  }
+  & .sb-export-wrap .sb-action-btn {
+    border-right: none;
+    flex: 1;
+  }
+  & .sb-export-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #eee;
+    border-top: none;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+  }
+  & .sb-export-menu .sb-action-btn {
+    border-right: none;
+    border-bottom: 1px solid #eee;
+    flex: unset;
+  }
+  & .sb-export-menu .sb-action-btn:last-child { border-bottom: none; }
+
+  & .sagas-list-label {
+    padding: .25rem .75rem;
+    font-size: .6rem;
+    font-family: Courier, monospace;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  & .saga-item.-session {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  & .saga-item-load {
+    flex: 1;
+    background: transparent;
+    border: none;
+    padding: .6rem .5rem .6rem .75rem;
+    font-family: Courier, monospace;
+    font-size: .75rem;
+    text-align: left;
+    cursor: pointer;
+    color: #333;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  & .saga-item-load:hover { background: var(--root-theme, mediumseagreen); color: var(--compose-btn-contrast, #1a1a1a); }
+  & .saga-item-meta {
+    background: transparent;
+    border: none;
+    border-left: 1px solid #f0f0f0;
+    padding: .4rem .6rem;
+    font-size: .75rem;
+    cursor: pointer;
+    color: #aaa;
+    flex-shrink: 0;
+  }
+  & .saga-item-meta:hover { color: var(--root-theme, mediumseagreen); }
+
+  & .meta-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  & .meta-modal {
+    background: white;
+    border-radius: .5rem;
+    padding: 1.5rem;
+    width: min(320px, 90%);
+    box-shadow: 0 4px 24px rgba(0,0,0,.2);
+    font-family: Courier, monospace;
+  }
+  & .meta-modal-title {
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: #aaa;
+    margin-bottom: 1rem;
+  }
+  & .meta-modal-actions {
+    display: flex;
+    gap: .5rem;
+    margin-top: 1rem;
+  }
+  & .meta-modal-actions .standard-button { flex: 1; font-size: .8rem; }
 
   & .sagas-sidebar-filter {
     padding: .5rem;
@@ -1470,27 +1670,49 @@ $.when('keyup', '[name="messageText"]', (event) => {
   hotkeys[event.key] = false
 })
 
-$.when('click', '[data-toggle-sidebar]', () => {
-  $.teach({ sidebarOpen: !$.learn().sidebarOpen })
+$.when('click', '[data-toggle-sidebar]', async () => {
+  const opening = !$.learn().sidebarOpen
+  $.teach({ sidebarOpen: opening })
+  if (opening) {
+    const manifest = await wasGet(_wasManifestPath)
+      .then(b => b.text()).then(t => JSON.parse(t)).catch(() => ({ sessions: [] }))
+    $.teach({ sessions: manifest.sessions || [] })
+  }
 })
 
 $.when('click', '[data-close-sidebar]', () => {
-  $.teach({ sidebarOpen: false })
+  $.teach({ sidebarOpen: false, exportOpen: false })
 })
 
 $.when('input', '[data-saga-filter]', (event) => {
   $.teach({ sagaFilter: event.target.value })
 })
 
+$.when('click', '[data-sb-new]', () => {
+  newSession()
+  $.teach({ messages: [], history: [], historyCursor: null, sidebarOpen: false, exportOpen: false })
+})
+
+$.when('click', '[data-sb-export-toggle]', () => {
+  $.teach({ exportOpen: !$.learn().exportOpen })
+})
+
 $.when('click', '[data-load-saga]', async (event) => {
   const path = event.target.dataset.loadSaga
   try {
-    const text = await fetch(path).then(r => r.text())
+    let text
+    if (path.startsWith('/accessibility-mode/')) {
+      const blob = await wasGet(path)
+      text = blob ? await blob.text() : null
+    } else {
+      text = await fetch(path).then(r => r.text())
+    }
+    if (!text) throw new Error('empty')
     $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
-  } catch (e) {
+  } catch {
     $.teach({ messages: [{ body: `could not load ${path}`, author: 'unassigned', system: true, id: Date.now() }] })
   }
-  $.teach({ sidebarOpen: false })
+  $.teach({ sidebarOpen: false, exportOpen: false })
 })
 
 $.when('click', '[data-sb-print]', () => {
@@ -1543,4 +1765,44 @@ $.when('click', '[data-sb-load]', () => {
     $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }], sidebarOpen: false })
   }
   input.click()
+})
+
+$.when('click', '[data-meta-session]', (event) => {
+  $.teach({ metaSession: event.target.dataset.metaSession, sidebarOpen: false })
+})
+
+$.when('click', '[data-close-meta]', () => {
+  $.teach({ metaSession: null })
+})
+
+$.when('click', '[data-stop-close]', (event) => {
+  event.stopPropagation()
+})
+
+$.when('click', '[data-meta-save]', async () => {
+  const title = document.querySelector('[name="metaTitle"]')?.value?.trim() || ''
+  const { metaSession: id } = $.learn()
+  const savedId = _shellSessionId
+  const savedJson = _wasJsonPath
+  const savedSaga = _wasSagaPath
+  _shellSessionId = id
+  _wasJsonPath = `/accessibility-mode/${id}.json`
+  _wasSagaPath = `/accessibility-mode/${id}.saga`
+  await updateManifest({ title }).catch(() => null)
+  _shellSessionId = savedId
+  _wasJsonPath = savedJson
+  _wasSagaPath = savedSaga
+  const sessions = await wasGet(_wasManifestPath)
+    .then(b => b.text()).then(t => JSON.parse(t).sessions || []).catch(() => [])
+  $.teach({ metaSession: null, sessions })
+})
+
+$.when('click', '[data-meta-delete]', async (event) => {
+  const id = event.target.dataset.metaDelete
+  await removeFromManifest(id).catch(() => null)
+  wasDel(`/accessibility-mode/${id}.json`).catch(() => null)
+  wasDel(`/accessibility-mode/${id}.saga`).catch(() => null)
+  const sessions = await wasGet(_wasManifestPath)
+    .then(b => b.text()).then(t => JSON.parse(t).sessions || []).catch(() => [])
+  $.teach({ metaSession: null, sessions })
 })

@@ -10,6 +10,14 @@ RELAY_PID_FILE="$SCRIPT_DIR/.relay.pid"
 PORT=${PLAN1_PORT:-1998}
 
 case "$CMD" in
+  start)
+    [ "$(id -u)" = "0" ] && echo "error: do not run start as root" && exit 1
+    echo "── building ──"
+    "$0" build
+    echo "── starting WAS ──"
+    docker compose -f "$SCRIPT_DIR/docker-compose.local.yml" up -d
+    "$0" serve
+    ;;
   serve)
     [ "$(id -u)" = "0" ] && echo "error: do not run serve as root" && exit 1
     if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
@@ -44,6 +52,7 @@ case "$CMD" in
       echo "not running"
     fi
     fuser -k ${PORT}/tcp 2>/dev/null || true
+    docker compose -f "$SCRIPT_DIR/docker-compose.local.yml" down 2>/dev/null || true
     ;;
   restart)
     OLD_PID=$(cat "$PID_FILE" 2>/dev/null)
@@ -306,7 +315,8 @@ ENDSSH
     esac
     ;;
   *)
-    echo "Usage: ./plan1.sh [serve|stop|restart|open|status|lint|build|sync|deploy|ship|watch|test|reverse-client|bootstrap|setup]"
+    echo "Usage: ./plan1.sh [start|serve|stop|restart|open|status|lint|build|sync|deploy|ship|watch|test|reverse-client|bootstrap|setup]"
+    echo "  start  — docker up WAS + serve (the one command)"
     echo "  build  — generates blog pages + vendors deps into dist/"
     echo "  ship   — build, serve locally, prompt to confirm, commit + push + deploy"
     echo "  sync   — uploads dist/ bootstrap files to WAS"

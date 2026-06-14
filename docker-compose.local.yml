@@ -1,0 +1,31 @@
+name: plan1-local
+
+# Runs WAS on localhost:1088. That's it.
+# Run plan1 natively: ./plan1.sh serve
+#
+# docker compose -f docker-compose.local.yml up
+
+services:
+  was:
+    image: node:22-bookworm-slim
+    container_name: plan1-was
+    working_dir: /app
+    restart: unless-stopped
+    environment:
+      PORT: "1088"
+      CORS_ALLOW_ALL_ORIGINS: "TRUE"
+    ports:
+      - "1088:1088"
+    volumes:
+      - was-data:/app/db
+    command: >
+      sh -c "
+        apt-get update -qq && apt-get install -y -qq curl python3 make g++ &&
+        curl -sL https://github.com/did-coop/wallet-attached-storage-server/archive/main.tar.gz | tar xz --strip-components=1 &&
+        npm install --silent &&
+        npm rebuild better-sqlite3 &&
+        npm run dev
+      "
+
+volumes:
+  was-data:
