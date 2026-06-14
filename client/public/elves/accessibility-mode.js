@@ -541,7 +541,7 @@ text: music
 <code
 text: coding
 
-> lore-baby storytelling
+> js-repl
 
 <code
 text: clownbot
@@ -652,7 +652,7 @@ text: ls
     return { body: fmt('music.opening'), system: true }
   },
   'coding': () => {
-    loadPath('/app/lore-baby')
+    loadPath('/app/js-repl')
     return { body: fmt('coding.opening'), system: true }
   },
   'clownbot': () => {

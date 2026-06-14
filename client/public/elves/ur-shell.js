@@ -406,7 +406,7 @@ const commands = {
 \`art\` — flip-book animation
 \`color\` — color and sound palette
 \`music\` — paper-pocket sequencer
-\`coding\` — lore-baby storytelling
+\`coding\` — js-repl
 \`clownbot\` — open terminal session
 \`js\` — quickjs repl
 \`exit\` / \`quit\` — close current modal
@@ -485,8 +485,8 @@ Type \`<elf-name>\` to load a custom element.
     return 'opening paper-pocket...'
   },
   'coding': () => {
-    loadPath('/app/lore-baby')
-    return 'opening lore-baby...'
+    loadPath('/app/js-repl')
+    return 'opening js-repl...'
   },
   'clownbot': () => {
     loadPath('/app/tty-elf')

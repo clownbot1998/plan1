@@ -186,7 +186,8 @@ export async function runJs(program) {
 
 async function run() {
   const { input } = $.learn()
-  const output = JSON.stringify(await runJs(input), '', 2)
+  const result = await runJs(input)
+  const output = typeof result === 'string' ? result : JSON.stringify(result, null, 2)
   $.teach({ output })
 }
 
@@ -201,7 +202,7 @@ function render(target) {
     <div class="action-bar">
       <button style="float: right; margin-left: 1rem;" data-run class="standard-button">Run</button>
       <button style="float: right;" data-edit class="standard-button -outlined hide-full">Edit</button>
-      <div class="title">Elf Tunnel A</div>
+      <div class="title">JavaScript</div>
     </div>
     <div class="input ${output?'invisible':'visible'}">
       <textarea
