@@ -928,7 +928,7 @@ $.draw((target) => {
                 </div>
               `).join('')}
             ` : ''}
-            <div class="sagas-list-label">cards <a class="sagas-open-board" href="/app/bulletin-board" target="_blank">open board ↗</a></div>
+            <div class="sagas-list-label">cards <a class="sagas-open-board" href="/app/bulletin-board?id=${escapeHyperText(_shellSessionId)}" target="_blank">open board ↗</a></div>
             ${boardCards.length ? (sagaFilter
               ? boardCards.filter(c => c.label.toLowerCase().includes(sagaFilter.toLowerCase()))
               : boardCards

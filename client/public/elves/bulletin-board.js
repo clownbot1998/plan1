@@ -768,6 +768,16 @@ function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsO
   const accessibilityUrl = `${location.origin}/app/accessibility-mode?id=${id}`
   return `
     <div class="sidebar-section">
+      <button class="section-toggle" data-toggle-section="sagas">
+        <sl-icon name="${sagasOpen ? 'chevron-down' : 'chevron-right'}" class="section-chevron"></sl-icon>
+        <span>Sagas</span>
+      </button>
+      <div class="section-body${sagasOpen ? '' : ' section-collapsed'}">
+        <div class="saga-preview" data-saga-card="${id}"><span class="saga-preview-loading">loading…</span></div>
+        <a class="open-accessibility-link" href="${accessibilityUrl}" target="_blank">open accessibility ↗</a>
+      </div>
+    </div>
+    <div class="sidebar-section">
       <button class="section-toggle" data-toggle-section="inspector">
         <sl-icon name="${inspectorOpen ? 'chevron-down' : 'chevron-right'}" class="section-chevron"></sl-icon>
         <span>Inspector</span>
@@ -783,16 +793,6 @@ function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsO
       </button>
       <div class="section-body${attachmentsOpen ? '' : ' section-collapsed'}">
         ${renderAttachments(id, card)}
-      </div>
-    </div>
-    <div class="sidebar-section">
-      <button class="section-toggle" data-toggle-section="sagas">
-        <sl-icon name="${sagasOpen ? 'chevron-down' : 'chevron-right'}" class="section-chevron"></sl-icon>
-        <span>Sagas</span>
-      </button>
-      <div class="section-body${sagasOpen ? '' : ' section-collapsed'}">
-        <div class="saga-preview" data-saga-card="${id}"><span class="saga-preview-loading">loading…</span></div>
-        <a class="open-accessibility-link" href="${accessibilityUrl}" target="_blank">open accessibility ↗</a>
       </div>
     </div>
     <div class="sidebar-section">
@@ -1467,6 +1467,7 @@ function mount(target) {
   target.addEventListener('wheel', e => {
     const { mode, zoom, panX, panY } = $.learn()
     if (mode !== 'pan' && mode !== 'manage') return
+    if (e.target.closest('.card-sidebar')) return
     e.preventDefault()
     if (e.ctrlKey) {
       const rect = target.getBoundingClientRect()
