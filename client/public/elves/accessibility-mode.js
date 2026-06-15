@@ -246,6 +246,19 @@ async function wasFlush() {
   wasFlush()
 }
 
+async function loadBoardCards() {
+  try {
+    const blob = await wasGet('/bulletin-board/default.json')
+    if (!blob) return
+    const data = JSON.parse(await blob.text())
+    const boardCards = Object.entries(data.cards || {}).map(([id, c]) => ({
+      id,
+      label: (c.text || '').trim().split('\n')[0].slice(0, 40) || id.slice(0, 8),
+    }))
+    $.teach({ boardCards })
+  } catch {}
+}
+
 async function wasLoad() {
   await ensureSpace().catch(() => null)
   try {
@@ -803,6 +816,7 @@ function mount(target) {
     else if(rom) execute('<'+rom, { suppressBack: true })
     else if(message) sh(message)
   })
+  loadBoardCards()
 }
 
 $.draw((target) => {
@@ -914,15 +928,13 @@ $.draw((target) => {
                 </div>
               `).join('')}
             ` : ''}
-            ${boardCards.length ? `
-              <div class="sagas-list-label">boards</div>
-              ${(sagaFilter
-                ? boardCards.filter(c => c.label.toLowerCase().includes(sagaFilter.toLowerCase()))
-                : boardCards
-              ).map(c => `
-                <button class="saga-item" data-switch-session="${escapeHyperText(c.id)}">${escapeHyperText(c.label)}</button>
-              `).join('')}
-            ` : ''}
+            <div class="sagas-list-label">cards <a class="sagas-open-board" href="/app/bulletin-board" target="_blank">open board ↗</a></div>
+            ${boardCards.length ? (sagaFilter
+              ? boardCards.filter(c => c.label.toLowerCase().includes(sagaFilter.toLowerCase()))
+              : boardCards
+            ).map(c => `
+              <button class="saga-item" data-switch-session="${escapeHyperText(c.id)}">${escapeHyperText(c.label)}</button>
+            `).join('') : `<div class="sagas-list-empty">no cards yet</div>`}
             <div class="sagas-list-label">sagas</div>
             ${(sagaFilter
               ? sagaDocs.filter(s => s.name.includes(sagaFilter.toLowerCase()))
@@ -1478,6 +1490,23 @@ $.style(`
   }
   & .sb-export-menu .sb-action-btn:last-child { border-bottom: none; }
 
+  & .sagas-open-board {
+    float: right;
+    font-size: .6rem;
+    color: var(--root-theme, mediumseagreen);
+    text-decoration: none;
+    text-transform: none;
+    letter-spacing: 0;
+    padding-right: .25rem;
+  }
+  & .sagas-open-board:hover { text-decoration: underline; }
+  & .sagas-list-empty {
+    padding: .5rem .75rem;
+    font-size: .7rem;
+    font-family: Courier, monospace;
+    color: #ccc;
+    font-style: italic;
+  }
   & .sagas-list-label {
     padding: .25rem .75rem;
     font-size: .6rem;
@@ -1737,15 +1766,10 @@ $.when('click', '[data-toggle-sidebar]', async () => {
   const opening = !$.learn().sidebarOpen
   $.teach({ sidebarOpen: opening })
   if (opening) {
-    const [manifest, board] = await Promise.all([
-      wasGet(_wasManifestPath).then(b => b.text()).then(t => JSON.parse(t)).catch(() => ({ sessions: [] })),
-      wasGet('/bulletin-board/default.json').then(b => b.text()).then(t => JSON.parse(t)).catch(() => ({ cards: {} })),
-    ])
-    const boardCards = Object.entries(board.cards || {}).map(([id, c]) => ({
-      id,
-      label: (c.text || '').trim().split('\n')[0].slice(0, 40) || id.slice(0, 8),
-    }))
-    $.teach({ sessions: manifest.sessions || [], boardCards })
+    const manifest = await wasGet(_wasManifestPath)
+      .then(b => b.text()).then(t => JSON.parse(t)).catch(() => ({ sessions: [] }))
+    $.teach({ sessions: manifest.sessions || [] })
+    loadBoardCards()
   }
 })
 

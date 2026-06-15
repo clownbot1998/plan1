@@ -145,6 +145,7 @@ const $ = Self(tag, {
   inspectorOpen: true,
   attachmentsOpen: true,
   logsOpen: true,
+  sagasOpen: true,
   ops: [],
   _rejectedOps: [],
   edgeTypes: { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
@@ -761,9 +762,10 @@ function renderAttachments(cardId, card) {
   `
 }
 
-function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops = []) {
+function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, sagasOpen, ops = []) {
   const card = cards[id]
   if (!card) return '<p class="sidebar-empty">Card not found.</p>'
+  const accessibilityUrl = `${location.origin}/app/accessibility-mode?id=${id}`
   return `
     <div class="sidebar-section">
       <button class="section-toggle" data-toggle-section="inspector">
@@ -781,6 +783,16 @@ function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsO
       </button>
       <div class="section-body${attachmentsOpen ? '' : ' section-collapsed'}">
         ${renderAttachments(id, card)}
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <button class="section-toggle" data-toggle-section="sagas">
+        <sl-icon name="${sagasOpen ? 'chevron-down' : 'chevron-right'}" class="section-chevron"></sl-icon>
+        <span>Sagas</span>
+      </button>
+      <div class="section-body${sagasOpen ? '' : ' section-collapsed'}">
+        <div class="saga-preview" data-saga-card="${id}"><span class="saga-preview-loading">loading…</span></div>
+        <a class="open-accessibility-link" href="${accessibilityUrl}" target="_blank">open accessibility ↗</a>
       </div>
     </div>
     <div class="sidebar-section">
@@ -832,6 +844,19 @@ async function loadFbThumb(canvas, wasPath) {
     })
     ctx.restore()
   } catch {}
+}
+
+async function loadSagaInto(sidebarEl, cardId) {
+  const el = sidebarEl.querySelector(`[data-saga-card="${cardId}"]`)
+  if (!el) return
+  try {
+    const blob = await wasGet(`/accessibility-mode/${cardId}.saga`)
+    if (!blob) { el.innerHTML = '<span class="saga-preview-empty">no saga yet</span>'; return }
+    const text = await blob.text()
+    el.innerHTML = `<pre class="saga-preview-text">${escapeHtml(text)}</pre>`
+  } catch {
+    el.innerHTML = '<span class="saga-preview-empty">no saga yet</span>'
+  }
 }
 
 function queueThumbLoad(sidebarEl) {
@@ -1472,7 +1497,7 @@ function update(target) {
   const { panX, panY, zoom, cards, mode, menuOpen, beltOffsetX, beltOffsetY,
           focusedCard, linkSource, isDrawing, createStartX, createStartY, createX, createY,
           sidebarOpen, sidebarCard, grabbing, edgeTypes, launchHref, players,
-          inspectorOpen, attachmentsOpen, logsOpen, ops, _rejectedOps } = $.learn()
+          inspectorOpen, attachmentsOpen, logsOpen, sagasOpen, ops, _rejectedOps } = $.learn()
 
   const workspace = target.querySelector('.workspace')
   workspace.style.setProperty('--pan-x', panX + 'px')
@@ -1562,14 +1587,14 @@ function update(target) {
     const linkTypeSig = Object.entries(card?.links || {}).map(([k, v]) => `${k}:${v.typeId}`).join(',')
       + '|' + Object.keys(card?.backlinks || {}).join(',')
     const attachSig = Object.keys(card?.attachments || {}).join(',')
-    const sectionSig = `${inspectorOpen}|${attachmentsOpen}|${logsOpen}`
+    const sectionSig = `${inspectorOpen}|${attachmentsOpen}|${logsOpen}|${sagasOpen}`
     const cardSwitched = sidebarBody.dataset.card !== sidebarCard
       || sidebarBody.dataset.etSig !== etSig
       || sidebarBody.dataset.linkTypeSig !== linkTypeSig
       || sidebarBody.dataset.attachSig !== attachSig
       || sidebarBody.dataset.sectionSig !== sectionSig
     if (cardSwitched) {
-      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops)
+      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, sagasOpen, ops)
       sidebarBody.dataset.card = sidebarCard
       sidebarBody.dataset.etSig = etSig
       sidebarBody.dataset.linkTypeSig = linkTypeSig
@@ -1577,6 +1602,7 @@ function update(target) {
       sidebarBody.dataset.sectionSig = sectionSig
       queueThumbLoad(sidebarBody)
       attachThumbHoldListeners(sidebarBody)
+      if (sagasOpen) loadSagaInto(sidebarBody, sidebarCard)
     } else {
       // Patch live stats without destroying plan98-palette or editor focus
       if (card) {
@@ -1958,6 +1984,14 @@ $.when('click', '[data-toggle-section]', e => {
   if (section === 'inspector') $.teach({ inspectorOpen: !$.learn().inspectorOpen })
   else if (section === 'attachments') $.teach({ attachmentsOpen: !$.learn().attachmentsOpen })
   else if (section === 'logs') $.teach({ logsOpen: !$.learn().logsOpen })
+  else if (section === 'sagas') {
+    const { sagasOpen, sidebarCard } = $.learn()
+    $.teach({ sagasOpen: !sagasOpen })
+    if (!sagasOpen) {
+      const sidebarBody = document.querySelector('.sidebar-body')
+      if (sidebarBody) loadSagaInto(sidebarBody, sidebarCard)
+    }
+  }
 })
 
 $.when('change', '.op-check', e => {
@@ -2915,6 +2949,35 @@ $.style(`
     font-style: italic;
     font-size: .8rem;
   }
+
+  & .saga-preview {
+    padding: .5rem;
+    min-height: 2rem;
+  }
+  & .saga-preview-text {
+    font-family: Courier, monospace;
+    font-size: .7rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    color: rgba(0,0,0,.75);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  & .saga-preview-loading,
+  & .saga-preview-empty {
+    font-size: .75rem;
+    color: rgba(0,0,0,.3);
+    font-style: italic;
+  }
+  & .open-accessibility-link {
+    display: block;
+    padding: .4rem .75rem .6rem;
+    font-size: .75rem;
+    color: dodgerblue;
+    text-decoration: none;
+  }
+  & .open-accessibility-link:hover { text-decoration: underline; }
 
   & .sidebar-date {
     width: 100%;
