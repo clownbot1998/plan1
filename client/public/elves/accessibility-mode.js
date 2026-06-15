@@ -1792,7 +1792,7 @@ $.when('click', '[data-close-sidebar]', () => {
 document.addEventListener('pointerdown', e => {
   if (!e.target.closest('[data-sagas-resizer]')) return
   const sidebar = e.target.closest('.sagas-sidebar')
-  const host = e.target.closest(tag)
+  const host = e.target.closest('accessibility-mode')
   if (!sidebar || !host) return
   e.preventDefault()
   function onMove(ev) {
