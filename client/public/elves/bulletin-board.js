@@ -853,7 +853,7 @@ async function loadSagaInto(sidebarEl, cardId) {
     const blob = await wasGet(`/accessibility-mode/${cardId}.saga`)
     if (!blob) { el.innerHTML = '<span class="saga-preview-empty">no saga yet</span>'; return }
     const text = await blob.text()
-    el.innerHTML = `<pre class="saga-preview-text">${escapeHtml(text)}</pre>`
+    el.innerHTML = `<div class="saga-preview-text">${escapeHtml(text)}</div>`
   } catch {
     el.innerHTML = '<span class="saga-preview-empty">no saga yet</span>'
   }
@@ -2956,14 +2956,13 @@ $.style(`
     min-height: 2rem;
   }
   & .saga-preview-text {
-    font-family: Courier, monospace;
-    font-size: .7rem;
+    font-family: 'Recursive', sans-serif;
+    font-size: .8rem;
     white-space: pre-wrap;
     word-break: break-word;
     margin: 0;
-    color: rgba(0,0,0,.75);
-    max-height: 200px;
-    overflow-y: auto;
+    color: #1a1a1a;
+    line-height: 1.6;
   }
   & .saga-preview-loading,
   & .saga-preview-empty {
