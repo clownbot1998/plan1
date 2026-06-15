@@ -212,12 +212,28 @@ async function removeFromManifest(id) {
   await wasPut(_wasManifestPath, JSON.stringify({ sessions }), { type: 'application/json' })
 }
 
+let _wasPending = null
+let _wasFlushing = false
+
 function wasSave() {
   const { messages, history } = $.learn()
   if (!messages.length) return
-  wasPut(_wasJsonPath, JSON.stringify({ messages, history }), { type: 'application/json' }).catch(() => null)
-  wasPut(_wasSagaPath, messagesToSaga(messages), { type: 'text/plain' }).catch(() => null)
-  updateManifest().catch(() => null)
+  _wasPending = { messages, history }
+  wasFlush()
+}
+
+async function wasFlush() {
+  if (_wasFlushing || !_wasPending) return
+  _wasFlushing = true
+  const { messages, history } = _wasPending
+  _wasPending = null
+  try {
+    await wasPut(_wasJsonPath, JSON.stringify({ messages, history }), { type: 'application/json' })
+    await wasPut(_wasSagaPath, messagesToSaga(messages), { type: 'text/plain' })
+    await updateManifest()
+  } catch {}
+  _wasFlushing = false
+  wasFlush()
 }
 
 async function wasLoad() {
@@ -226,8 +242,10 @@ async function wasLoad() {
     const blob = await wasGet(_wasJsonPath)
     if (!blob) return false
     const data = JSON.parse(await blob.text())
-    if (data?.messages?.length) {
-      $.teach({ messages: data.messages, history: data.history || [] })
+    const msgs = data?.messages || []
+    const hasRealHistory = msgs.some(m => m.author === 'human')
+    if (hasRealHistory) {
+      $.teach({ messages: msgs, history: data.history || [] })
       return true
     }
   } catch {}
@@ -751,6 +769,15 @@ text: ls
 
 
 
+function showPreroll() {
+  const now = Date.now()
+  $.teach({ messages: [
+    { body: '${brand} is a creative suite for ${demographic} for', author: 'unassigned', id: now },
+    { body: '<code\ntext: art\n\n<code\ntext: music\n\n<code\ntext: coding', author: 'unassigned', saga: true, id: now + 1 },
+    { body: `@ Sagas\n> ${fmt('sagas.intro')}`, author: 'assistant', saga: true, id: now + 2 },
+  ]})
+}
+
 function mount(target) {
   if(target.mounted) return
   target.mounted = true
@@ -759,11 +786,7 @@ function mount(target) {
   const src = target.getAttribute('src')
   const rom = target.getAttribute('rom')
   loadStrings().then(() => wasLoad()).then(hadHistory => {
-    if (!hadHistory) {
-      addMessage({ body: '${brand} is a creative suite for ${demographic} for', author: 'unassigned' })
-      addMessage({ body: '<code\ntext: art\n\n<code\ntext: music\n\n<code\ntext: coding', author: 'unassigned', saga: true })
-      addMessage({ body: `@ Sagas\n> ${fmt('sagas.intro')}`, author: 'assistant', saga: true })
-    }
+    if (!hadHistory) showPreroll()
     if(command) execute(command)
     else if(src) execute(src, { suppressBack: true })
     else if(rom) execute('<'+rom, { suppressBack: true })
@@ -1690,7 +1713,8 @@ $.when('input', '[data-saga-filter]', (event) => {
 
 $.when('click', '[data-sb-new]', () => {
   newSession()
-  $.teach({ messages: [], history: [], historyCursor: null, sidebarOpen: false, exportOpen: false })
+  $.teach({ history: [], historyCursor: null, sidebarOpen: false, exportOpen: false })
+  showPreroll()
 })
 
 $.when('click', '[data-sb-export-toggle]', () => {
