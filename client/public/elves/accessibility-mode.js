@@ -832,6 +832,37 @@ $.draw((target) => {
     ? allSagas.filter(s => s.name.includes(sagaFilter.toLowerCase()))
     : allSagas
 
+  if (metaSession) {
+    const s = sessions.find(x => x.id === metaSession) || { id: metaSession }
+    const fmtTs = ts => ts ? new Date(ts).toLocaleString() : '—'
+    return `
+      <div class="meta-screen">
+        <div class="meta-screen-header">
+          <button class="meta-back-btn" data-close-meta>${icon('arrow-left')} Back</button>
+          <span class="meta-screen-title">Session</span>
+        </div>
+        <div class="meta-screen-body">
+          <label class="field">
+            <span class="label">Title</span>
+            <input class="standard-input" type="text" name="metaTitle" placeholder="untitled" value="${escapeHyperText(s.title || '')}">
+          </label>
+          <label class="field">
+            <span class="label">Created</span>
+            <input class="standard-input" type="text" disabled value="${fmtTs(s.created)}">
+          </label>
+          <label class="field">
+            <span class="label">Last saved</span>
+            <input class="standard-input" type="text" disabled value="${fmtTs(s.updated)}">
+          </label>
+          <div class="meta-screen-actions">
+            <button class="standard-button bias-positive" data-meta-save>Save</button>
+            <button class="standard-button bias-negative" data-meta-delete="${escapeHyperText(s.id)}">Delete</button>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
   return `
       <div class="scroll-back">
         <button type="button" class="sidebar-toggle" data-toggle-sidebar title="sagas">${icon('journal-text')}</button>
@@ -908,34 +939,6 @@ $.draw((target) => {
           <button type="submit" class="compose-btn send-btn">${icon('send')}</button>
         </div>
       </form>
-      ${metaSession ? (() => {
-        const s = sessions.find(x => x.id === metaSession) || { id: metaSession }
-        const fmt = ts => ts ? new Date(ts).toLocaleString() : '—'
-        return `
-          <div class="meta-overlay" data-close-meta>
-            <div class="meta-modal" data-stop-close>
-              <div class="meta-modal-title">Session</div>
-              <label class="field">
-                <input class="standard-input" type="text" name="metaTitle" placeholder="untitled" value="${escapeHyperText(s.title || '')}">
-                <span class="label">Title</span>
-              </label>
-              <label class="field">
-                <input class="standard-input" type="text" disabled value="${fmt(s.created)}">
-                <span class="label">Created</span>
-              </label>
-              <label class="field">
-                <input class="standard-input" type="text" disabled value="${fmt(s.updated)}">
-                <span class="label">Last saved</span>
-              </label>
-              <div class="meta-modal-actions">
-                <button class="standard-button bias-positive" data-meta-save>Save</button>
-                <button class="standard-button bias-negative" data-meta-delete="${escapeHyperText(s.id)}">Delete</button>
-                <button class="standard-button" data-close-meta>Cancel</button>
-              </div>
-            </div>
-          </div>
-        `
-      })() : ''}
   `
 }, {
   beforeUpdate,
@@ -1498,36 +1501,53 @@ $.style(`
   }
   & .saga-item-meta:hover { color: var(--root-theme, mediumseagreen); }
 
-  & .meta-overlay {
-    position: absolute;
-    inset: 0;
-    background: rgba(0,0,0,.45);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 100;
-  }
-  & .meta-modal {
+  & .meta-screen {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    height: 100%;
+    overflow: hidden;
     background: white;
-    border-radius: .5rem;
-    padding: 1.5rem;
-    width: min(320px, 90%);
-    box-shadow: 0 4px 24px rgba(0,0,0,.2);
     font-family: Courier, monospace;
   }
-  & .meta-modal-title {
+  & .meta-screen-header {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: .75rem 1rem;
+    border-bottom: 2px solid var(--root-theme, mediumseagreen);
+    flex-shrink: 0;
+  }
+  & .meta-back-btn {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--root-theme, mediumseagreen);
+    font-family: Courier, monospace;
+    font-size: .9rem;
+    padding: .35rem .5rem;
+    border-radius: .25rem;
+  }
+  & .meta-back-btn:hover { background: rgba(0,0,0,.05); }
+  & .meta-screen-title {
     font-size: .7rem;
     text-transform: uppercase;
     letter-spacing: .1em;
     color: #aaa;
-    margin-bottom: 1rem;
   }
-  & .meta-modal-actions {
+  & .meta-screen-body {
+    overflow-y: auto;
+    padding: 1.5rem 1rem;
+    max-width: 480px;
+  }
+  & .meta-screen-actions {
     display: flex;
     gap: .5rem;
-    margin-top: 1rem;
+    margin-top: 1.5rem;
   }
-  & .meta-modal-actions .standard-button { flex: 1; font-size: .8rem; }
+  & .meta-screen-actions .standard-button { flex: 1; }
 
   & .sagas-sidebar-filter {
     padding: .5rem;
