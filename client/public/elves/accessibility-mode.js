@@ -896,6 +896,7 @@ $.draw((target) => {
         </div>
       </div>
       <div class="sagas-sidebar" data-open="${sidebarOpen}">
+        <div class="sagas-sidebar-resizer" data-sagas-resizer></div>
         <div class="sagas-sidebar-inner">
           <div class="sagas-sidebar-actions">
             <button class="sb-action-btn" data-sb-new>New</button>
@@ -1419,7 +1420,7 @@ $.style(`
     transform: translateX(100%);
     transition: transform 220ms cubic-bezier(.4,0,.2,1);
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     background: white;
     border-left: 2px solid var(--root-theme, mediumseagreen);
     pointer-events: none;
@@ -1430,7 +1431,18 @@ $.style(`
     pointer-events: all;
   }
 
+  & .sagas-sidebar-resizer {
+    width: 6px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    background: transparent;
+    transition: background .15s;
+  }
+  & .sagas-sidebar-resizer:hover { background: var(--root-theme, mediumseagreen); opacity: .4; }
+
   & .sagas-sidebar-inner {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -1776,6 +1788,24 @@ $.when('click', '[data-toggle-sidebar]', async () => {
 $.when('click', '[data-close-sidebar]', () => {
   $.teach({ sidebarOpen: false, exportOpen: false })
 })
+
+document.addEventListener('pointerdown', e => {
+  if (!e.target.closest('[data-sagas-resizer]')) return
+  const sidebar = e.target.closest('.sagas-sidebar')
+  const host = e.target.closest(tag)
+  if (!sidebar || !host) return
+  e.preventDefault()
+  function onMove(ev) {
+    const rect = host.getBoundingClientRect()
+    sidebar.style.width = Math.max(200, rect.right - ev.clientX) + 'px'
+  }
+  function onUp() {
+    document.removeEventListener('pointermove', onMove)
+    document.removeEventListener('pointerup', onUp)
+  }
+  document.addEventListener('pointermove', onMove)
+  document.addEventListener('pointerup', onUp)
+}, { capture: true })
 
 $.when('click', '[data-switch-session]', (event) => {
   switchSession(event.target.dataset.switchSession)
