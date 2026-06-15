@@ -181,6 +181,16 @@ function newSession() {
   _wasSagaPath = `/accessibility-mode/${_shellSessionId}.saga`
   window.history.replaceState(null, '', `?id=${_shellSessionId}`)
 }
+
+async function switchSession(id) {
+  _shellSessionId = id
+  _wasJsonPath = `/accessibility-mode/${id}.json`
+  _wasSagaPath = `/accessibility-mode/${id}.saga`
+  window.history.replaceState(null, '', `?id=${id}`)
+  $.teach({ history: [], historyCursor: null, sidebarOpen: false, exportOpen: false })
+  const hadHistory = await wasLoad()
+  if (!hadHistory) showPreroll()
+}
 const _wasManifestPath = `/accessibility-mode/index.json`
 
 function messagesToSaga(messages) {
@@ -293,6 +303,7 @@ const $ = Self('accessibility-mode', {
   sidebarOpen: false,
   sagaFilter: '',
   sessions: [],
+  boardCards: [],
   exportOpen: false,
   metaSession: null,
 })
@@ -796,7 +807,7 @@ function mount(target) {
 
 $.draw((target) => {
   mount(target)
-  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading, sidebarOpen, sagaFilter, sessions, exportOpen, metaSession } = $.learn()
+  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading, sidebarOpen, sagaFilter, sessions, boardCards, exportOpen, metaSession } = $.learn()
 
   const toQuote = (body) =>
     (body || '').split('\n').map(l => l.trim() ? `> ${escapeHyperText(l)}` : '').join('\n')
@@ -898,12 +909,21 @@ $.draw((target) => {
                 : sessions
               ).map(s => `
                 <div class="saga-item -session">
-                  <button class="saga-item-load" data-load-saga="/accessibility-mode/${escapeHyperText(s.id)}.saga">${escapeHyperText(s.title || s.id.slice(0, 8))}</button>
+                  <button class="saga-item-load" data-switch-session="${escapeHyperText(s.id)}">${escapeHyperText(s.title || s.id.slice(0, 8))}</button>
                   <button class="saga-item-meta" data-meta-session="${escapeHyperText(s.id)}">ⓘ</button>
                 </div>
               `).join('')}
-              <div class="sagas-list-label">sagas</div>
             ` : ''}
+            ${boardCards.length ? `
+              <div class="sagas-list-label">boards</div>
+              ${(sagaFilter
+                ? boardCards.filter(c => c.label.toLowerCase().includes(sagaFilter.toLowerCase()))
+                : boardCards
+              ).map(c => `
+                <button class="saga-item" data-switch-session="${escapeHyperText(c.id)}">${escapeHyperText(c.label)}</button>
+              `).join('')}
+            ` : ''}
+            <div class="sagas-list-label">sagas</div>
             ${(sagaFilter
               ? sagaDocs.filter(s => s.name.includes(sagaFilter.toLowerCase()))
               : sagaDocs
@@ -1717,14 +1737,24 @@ $.when('click', '[data-toggle-sidebar]', async () => {
   const opening = !$.learn().sidebarOpen
   $.teach({ sidebarOpen: opening })
   if (opening) {
-    const manifest = await wasGet(_wasManifestPath)
-      .then(b => b.text()).then(t => JSON.parse(t)).catch(() => ({ sessions: [] }))
-    $.teach({ sessions: manifest.sessions || [] })
+    const [manifest, board] = await Promise.all([
+      wasGet(_wasManifestPath).then(b => b.text()).then(t => JSON.parse(t)).catch(() => ({ sessions: [] })),
+      wasGet('/bulletin-board/default.json').then(b => b.text()).then(t => JSON.parse(t)).catch(() => ({ cards: {} })),
+    ])
+    const boardCards = Object.entries(board.cards || {}).map(([id, c]) => ({
+      id,
+      label: (c.text || '').trim().split('\n')[0].slice(0, 40) || id.slice(0, 8),
+    }))
+    $.teach({ sessions: manifest.sessions || [], boardCards })
   }
 })
 
 $.when('click', '[data-close-sidebar]', () => {
   $.teach({ sidebarOpen: false, exportOpen: false })
+})
+
+$.when('click', '[data-switch-session]', (event) => {
+  switchSession(event.target.dataset.switchSession)
 })
 
 $.when('input', '[data-saga-filter]', (event) => {
