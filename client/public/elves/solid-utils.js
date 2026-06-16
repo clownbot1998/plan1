@@ -6,15 +6,16 @@ const $ = Self('solid-utils', {})
 
 // ── Bayun encrypt / decrypt ───────────────────────────────────────────────────
 
-export async function encryptLiteral(plainText) {
+export async function encryptLiteral(plainText, groupId) {
   const sessionId = getSessionId()
   if (!bayunCore || !sessionId) return String(plainText)
   try {
     const ct = await bayunCore.lockText({
       sessionId,
       text: String(plainText),
-      encryptionPolicy: BayunCore.EncryptionPolicy.MEMBER,
-      keyGenerationPolicy: BayunCore.KeyGenerationPolicy.DEFAULT,
+      encryptionPolicy:  groupId ? BayunCore.EncryptionPolicy.GROUP  : BayunCore.EncryptionPolicy.MEMBER,
+      keyGenerationPolicy: groupId ? BayunCore.KeyGenerationPolicy.GROUP : BayunCore.KeyGenerationPolicy.DEFAULT,
+      ...(groupId ? { groupId } : {}),
     })
     return ct ? `${ENC_PREFIX}${ct}` : String(plainText)
   } catch { return String(plainText) }
@@ -61,23 +62,23 @@ export async function boardToTurtle(boardId, cards, edgeTypes) {
   const now = new Date().toISOString()
   const cardEntries = Object.entries(cards)
 
-  // encrypt card text in parallel
+  // encrypt card text — use card's groupId if present, else MEMBER
   const encContents = await Promise.all(
-    cardEntries.map(([, c]) => encryptLiteral(c.text || ''))
+    cardEntries.map(([, c]) => encryptLiteral(c.text || '', c.groupId))
   )
 
-  // encrypt edge type names
+  // encrypt edge type names (MEMBER — structural, not group-scoped)
   const encTypeNames = {}
   await Promise.all(Object.entries(edgeTypes).map(async ([tid, et]) => {
     encTypeNames[tid] = await encryptLiteral(et.label || et.name || tid)
   }))
 
-  // encrypt attachment records
+  // encrypt attachment records using same group as their card
   const encAttachRecords = {}
-  for (const [, card] of cardEntries) {
+  for (const [cardId, card] of cardEntries) {
     for (const [aid, att] of Object.entries(card.attachments || {})) {
       const raw = att.record ? JSON.stringify(att.record) : ''
-      encAttachRecords[aid] = raw ? await encryptLiteral(raw) : ''
+      encAttachRecords[aid] = raw ? await encryptLiteral(raw, card.groupId) : ''
     }
   }
 
@@ -112,7 +113,8 @@ export async function boardToTurtle(boardId, cards, edgeTypes) {
     out.push(`   bb:height ${Math.round(c.h || 120)}^^xsd:integer ;`)
     out.push(`   bb:color "${ttlStr(c.color || 'lemonchiffon')}" ;`)
     if (c.createdAt) out.push(`   dcterms:created "${ttlStr(c.createdAt)}"^^xsd:dateTime ;`)
-    if (c.saga) out.push(`   bb:saga "${ttlStr(c.saga)}" ;`)
+    if (c.saga)    out.push(`   bb:saga "${ttlStr(c.saga)}" ;`)
+    if (c.groupId) out.push(`   bb:groupId "${ttlStr(c.groupId)}" ;`)
     out.push(`   bb:placeholder "true" .`)  // sentinel to close the block cleanly
     out.push('')
   })
@@ -230,14 +232,16 @@ export async function turtleToBoard(ttlString) {
       w:         c.width ?? 200,
       h:         c.height ?? 120,
       color:     c.color || 'lemonchiffon',
-      createdAt: c.created || null,
-      saga:      c.saga || null,
+      createdAt: c.created  || null,
+      saga:      c.saga    || null,
+      groupId:   c.groupId || null,
       links:     {},
       backlinks: {},
       attachments: {},
     }
     if (!decCards[id].createdAt) delete decCards[id].createdAt
-    if (!decCards[id].saga) delete decCards[id].saga
+    if (!decCards[id].saga)     delete decCards[id].saga
+    if (!decCards[id].groupId)  delete decCards[id].groupId
   }))
 
   // decrypt edge types
