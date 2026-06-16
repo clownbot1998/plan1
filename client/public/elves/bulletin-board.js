@@ -226,14 +226,28 @@ function boardUrl(id) {
   return `/braid/bulletin-board/${id || 'default'}`
 }
 
-function wasPath(id) {
+function wasJsonPath(id) {
   return `/bulletin-board/${id || 'default'}.json`
+}
+
+function wasTtlPath(id) {
+  return `/bulletin-board/${id || 'default'}.ttl`
 }
 
 async function wasLoad() {
   await ensureSpace().catch(() => null)
+  // TTL is canonical — fall back to JSON for boards not yet migrated
   try {
-    const blob = await wasGet(wasPath(_boardId))
+    const blob = await wasGet(wasTtlPath(_boardId))
+    if (blob) {
+      const { turtleToBoard } = await import('./solid-utils.js')
+      const { cards, edgeTypes } = await turtleToBoard(await blob.text())
+      $.teach({ cards, edgeTypes })
+      return
+    }
+  } catch {}
+  try {
+    const blob = await wasGet(wasJsonPath(_boardId))
     if (!blob) return
     const data = JSON.parse(await blob.text())
     if (data?.cards) {
@@ -250,28 +264,14 @@ function wasSave() {
   clearTimeout(_wasSaveTimer)
   _wasSaveTimer = setTimeout(async () => {
     const { cards, edgeTypes } = $.learn()
-    const path = wasPath(_boardId)
-    const json = JSON.stringify({ cards, edgeTypes })
-    try {
-      await wasDel(path).catch(() => null)
-      await wasPut(path, json, { type: 'application/json' })
-    } catch {}
-    wasttlSave(cards, edgeTypes)
-  }, 1500)
-}
-
-let _wasttlTimer = null
-function wasttlSave(cards, edgeTypes) {
-  clearTimeout(_wasttlTimer)
-  _wasttlTimer = setTimeout(async () => {
     try {
       const { boardToTurtle } = await import('./solid-utils.js')
       const ttl = await boardToTurtle(_boardId || 'default', cards, edgeTypes)
-      const path = `/bulletin-board/${_boardId || 'default'}.ttl`
+      const path = wasTtlPath(_boardId)
       await wasDel(path).catch(() => null)
       await wasPut(path, ttl, { type: 'text/turtle' })
     } catch {}
-  }, 500)
+  }, 1500)
 }
 
 // ── op log ────────────────────────────────────────────────────────────────────

@@ -2,7 +2,6 @@ import { Self } from '@plan98/types'
 import { bayunCore, BayunCore, getSessionId } from './cyber-security.js'
 
 const ENC_PREFIX = 'bayun:'
-
 const $ = Self('solid-utils', {})
 
 // ── Bayun encrypt / decrypt ───────────────────────────────────────────────────
@@ -33,7 +32,7 @@ export async function decryptLiteral(text) {
   } catch { return text }
 }
 
-// ── TTL serializer ────────────────────────────────────────────────────────────
+// ── TTL helpers ───────────────────────────────────────────────────────────────
 
 function ttlStr(s) {
   return String(s)
@@ -44,23 +43,43 @@ function ttlStr(s) {
     .replace(/\t/g, '\\t')
 }
 
+function parseTtlStr(s) {
+  return s
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\')
+}
+
+// ── boardToTurtle — complete serialization ────────────────────────────────────
+// Encrypted fields: bb:content (card text), bb:typeName (edge label),
+//                   bb:record (attachment data)
+// Plain fields: all structural refs, coords, colors, dates, IDs
+
 export async function boardToTurtle(boardId, cards, edgeTypes) {
   const now = new Date().toISOString()
   const cardEntries = Object.entries(cards)
 
+  // encrypt card text in parallel
   const encContents = await Promise.all(
     cardEntries.map(([, c]) => encryptLiteral(c.text || ''))
   )
 
-  const usedTypeIds = [...new Set(
-    cardEntries.flatMap(([, c]) =>
-      Object.values(c.links || {}).map(l => l.typeId).filter(Boolean)
-    )
-  )]
-  const encLabels = {}
-  await Promise.all(usedTypeIds.map(async (tid) => {
-    encLabels[tid] = await encryptLiteral(edgeTypes[tid]?.label || tid)
+  // encrypt edge type names
+  const encTypeNames = {}
+  await Promise.all(Object.entries(edgeTypes).map(async ([tid, et]) => {
+    encTypeNames[tid] = await encryptLiteral(et.label || et.name || tid)
   }))
+
+  // encrypt attachment records
+  const encAttachRecords = {}
+  for (const [, card] of cardEntries) {
+    for (const [aid, att] of Object.entries(card.attachments || {})) {
+      const raw = att.record ? JSON.stringify(att.record) : ''
+      encAttachRecords[aid] = raw ? await encryptLiteral(raw) : ''
+    }
+  }
 
   const out = [
     '@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .',
@@ -74,6 +93,16 @@ export async function boardToTurtle(boardId, cards, edgeTypes) {
     '',
   ]
 
+  // edge type nodes
+  for (const [tid, et] of Object.entries(edgeTypes)) {
+    out.push(`<#et-${tid}> a bb:EdgeType ;`)
+    out.push(`   bb:typeId "${ttlStr(tid)}" ;`)
+    out.push(`   bb:typeName "${ttlStr(encTypeNames[tid])}" ;`)
+    out.push(`   bb:typeColor "${ttlStr(et.color || '#888888')}" .`)
+    out.push('')
+  }
+
+  // card nodes
   cardEntries.forEach(([id, c], i) => {
     out.push(`<#${id}> a bb:Card ;`)
     out.push(`   bb:content "${ttlStr(encContents[i])}" ;`)
@@ -81,21 +110,42 @@ export async function boardToTurtle(boardId, cards, edgeTypes) {
     out.push(`   bb:y ${Math.round(c.y || 0)}^^xsd:integer ;`)
     out.push(`   bb:width ${Math.round(c.w || 200)}^^xsd:integer ;`)
     out.push(`   bb:height ${Math.round(c.h || 120)}^^xsd:integer ;`)
-    out.push(`   bb:color "${ttlStr(c.color || 'lemonchiffon')}" .`)
+    out.push(`   bb:color "${ttlStr(c.color || 'lemonchiffon')}" ;`)
+    if (c.createdAt) out.push(`   dcterms:created "${ttlStr(c.createdAt)}"^^xsd:dateTime ;`)
+    if (c.saga) out.push(`   bb:saga "${ttlStr(c.saga)}" ;`)
+    out.push(`   bb:placeholder "true" .`)  // sentinel to close the block cleanly
     out.push('')
   })
 
-  for (const [srcId, card] of cardEntries) {
-    for (const [tgtId, link] of Object.entries(card.links || {})) {
-      const et = edgeTypes[link.typeId]
-      const linkId = `link-${srcId.slice(0, 8)}-${tgtId.slice(0, 8)}`
-      out.push(`<#${linkId}> a ht:TypedLink ;`)
-      out.push(`   ht:source <#${srcId}> ;`)
-      out.push(`   ht:target <#${tgtId}> ;`)
-      out.push(`   ht:linkLabel "${ttlStr(encLabels[link.typeId] || link.typeId || 'link')}" ;`)
-      out.push(`   ht:linkColor "${ttlStr(et?.color || '#888888')}" .`)
+  // attachment nodes (separate subjects, back-reference cardId)
+  for (const [cardId, card] of cardEntries) {
+    for (const [aid, att] of Object.entries(card.attachments || {})) {
+      out.push(`<#att-${aid}> a bb:Attachment ;`)
+      out.push(`   bb:attachId "${ttlStr(aid)}" ;`)
+      out.push(`   bb:cardId "${ttlStr(cardId)}" ;`)
+      out.push(`   bb:attachType "${ttlStr(att.type || '')}" ;`)
+      if (att.fbId) out.push(`   bb:fbId "${ttlStr(att.fbId)}" ;`)
+      if (encAttachRecords[aid]) out.push(`   bb:record "${ttlStr(encAttachRecords[aid])}" ;`)
+      if (att.createdAt) out.push(`   dcterms:created "${ttlStr(att.createdAt)}"^^xsd:dateTime ;`)
+      out.push(`   bb:placeholder "true" .`)
       out.push('')
-      out.push(`<#${srcId}> ht:linksTo <#${tgtId}> .`)
+    }
+  }
+
+  // link nodes (UUID linkId as subject)
+  for (const [srcId, card] of cardEntries) {
+    for (const [linkId, link] of Object.entries(card.links || {})) {
+      out.push(`<#${linkId}> a ht:TypedLink ;`)
+      out.push(`   bb:linkId "${ttlStr(linkId)}" ;`)
+      out.push(`   ht:source <#${srcId}> ;`)
+      out.push(`   ht:target <#${link.to}> ;`)
+      if (link.fromDir) out.push(`   ht:fromDir "${ttlStr(link.fromDir)}" ;`)
+      if (link.toDir)   out.push(`   ht:toDir "${ttlStr(link.toDir)}" ;`)
+      if (link.typeId)  out.push(`   bb:typeId "${ttlStr(link.typeId)}" ;`)
+      out.push(`   bb:placeholder "true" .`)
+      out.push('')
+      // direct traversal arc (graph stays traversable without decryption)
+      out.push(`<#${srcId}> ht:linksTo <#${link.to}> .`)
       out.push('')
     }
   }
@@ -103,72 +153,135 @@ export async function boardToTurtle(boardId, cards, edgeTypes) {
   return out.join('\n')
 }
 
+// ── turtleToBoard — complete deserialization ──────────────────────────────────
+// Returns { cards, edgeTypes }
+
 export async function turtleToBoard(ttlString) {
   const lines = ttlString.split('\n')
-  const cards = {}
-  const links = []
 
-  let subject = null, block = {}
+  const rawCards = {}
+  const rawEdgeTypes = {}
+  const rawAttachments = []
+  const rawLinks = []
+
+  let subject = null, type = null, block = {}
+
   function flush() {
-    if (!subject) return
-    if (block.type === 'card') {
-      cards[subject] = {
-        text: '', x: 0, y: 0, w: 200, h: 120,
-        color: 'lemonchiffon',
-        links: {}, backlinks: {}, attachments: {},
-        ...block,
-      }
-    } else if (block.type === 'link') {
-      links.push(block)
-    }
-    block = {}; subject = null
+    if (!subject || !type) { block = {}; subject = null; type = null; return }
+    if (type === 'card')       rawCards[subject] = { ...block }
+    else if (type === 'et')    rawEdgeTypes[block.typeId] = { ...block }
+    else if (type === 'att')   rawAttachments.push({ ...block })
+    else if (type === 'link')  rawLinks.push({ ...block })
+    block = {}; subject = null; type = null
   }
 
   for (const raw of lines) {
     const line = raw.trim()
-    if (!line || line.startsWith('@')) continue
+    if (!line || line.startsWith('@') || line.startsWith('#')) continue
 
+    // new subject
     const subjMatch = line.match(/^<#([^>]+)>\s+a\s+(\S+)/)
     if (subjMatch) {
       flush()
       subject = subjMatch[1]
-      const typeToken = subjMatch[2].replace(/\s*;.*$/, '')
-      block.type = typeToken.includes('Card') ? 'card' : typeToken.includes('TypedLink') ? 'link' : typeToken
+      const typeToken = subjMatch[2].replace(/[;.].*$/, '').trim()
+      if (typeToken === 'bb:Card')        type = 'card'
+      else if (typeToken === 'bb:EdgeType')  type = 'et'
+      else if (typeToken === 'bb:Attachment') type = 'att'
+      else if (typeToken === 'ht:TypedLink')  type = 'link'
+      else { subject = null }
       continue
     }
 
     if (!subject) continue
 
-    const propMatch = line.match(/^\s*(bb:|ht:|dcterms:)(\S+)\s+"((?:[^"\\]|\\.)*)"\s*[.;]/)
-    if (propMatch) {
-      const key = propMatch[2]
-      const val = propMatch[3].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\')
-      block[key] = val
+    // string literal  bb:foo "value" [.;]
+    const strMatch = line.match(/^\s*(?:bb:|ht:|dcterms:)(\S+)\s+"((?:[^"\\]|\\.)*)"/)
+    if (strMatch) {
+      block[strMatch[1]] = parseTtlStr(strMatch[2])
       continue
     }
-    const intMatch = line.match(/^\s*(bb:|ht:)(\S+)\s+(-?\d+)\^\^xsd:integer/)
-    if (intMatch) { block[intMatch[2]] = parseInt(intMatch[3]); continue }
 
-    const linkMatch = line.match(/^\s*(ht:source|ht:target)\s+<#([^>]+)>/)
-    if (linkMatch) { block[linkMatch[1].replace('ht:', '')] = linkMatch[2]; continue }
+    // integer  bb:foo 123^^xsd:integer
+    const intMatch = line.match(/^\s*(?:bb:|ht:)(\S+)\s+(-?\d+)\^\^xsd:integer/)
+    if (intMatch) {
+      block[intMatch[1]] = parseInt(intMatch[2])
+      continue
+    }
+
+    // IRI ref  ht:source <#cardId>
+    const iriMatch = line.match(/^\s*(?:bb:|ht:|dcterms:)(\S+)\s+<#([^>]+)>/)
+    if (iriMatch) {
+      block[iriMatch[1]] = iriMatch[2]
+      continue
+    }
 
     if (line.endsWith('.')) flush()
   }
   flush()
 
-  await Promise.all(Object.values(cards).map(async (c) => {
-    c.text = await decryptLiteral(c.content || '')
-    delete c.content
+  // decrypt card content
+  const decCards = {}
+  await Promise.all(Object.entries(rawCards).map(async ([id, c]) => {
+    decCards[id] = {
+      text:      await decryptLiteral(c.content || ''),
+      x:         c.x ?? 0,
+      y:         c.y ?? 0,
+      w:         c.width ?? 200,
+      h:         c.height ?? 120,
+      color:     c.color || 'lemonchiffon',
+      createdAt: c.created || null,
+      saga:      c.saga || null,
+      links:     {},
+      backlinks: {},
+      attachments: {},
+    }
+    if (!decCards[id].createdAt) delete decCards[id].createdAt
+    if (!decCards[id].saga) delete decCards[id].saga
   }))
 
-  for (const l of links) {
-    if (l.source && l.target && cards[l.source]) {
-      const label = await decryptLiteral(l.linkLabel || '')
-      cards[l.source].links[l.target] = { label, color: l.linkColor }
+  // decrypt edge types
+  const decEdgeTypes = {}
+  await Promise.all(Object.entries(rawEdgeTypes).map(async ([tid, et]) => {
+    decEdgeTypes[tid] = {
+      name:  await decryptLiteral(et.typeName || tid),
+      label: await decryptLiteral(et.typeName || tid),
+      color: et.typeColor || '#888888',
     }
+  }))
+
+  // decrypt and attach attachments to their cards
+  await Promise.all(rawAttachments.map(async (att) => {
+    const card = decCards[att.cardId]
+    if (!card) return
+    const aid = att.attachId
+    const rec = att.record ? await decryptLiteral(att.record) : null
+    card.attachments[aid] = {
+      type:      att.attachType || '',
+      createdAt: att.created || null,
+      ...(att.fbId ? { fbId: att.fbId } : {}),
+      ...(rec ? { record: JSON.parse(rec) } : {}),
+    }
+    if (!card.attachments[aid].createdAt) delete card.attachments[aid].createdAt
+  }))
+
+  // attach links and rebuild backlinks
+  for (const link of rawLinks) {
+    const srcId = link.source
+    const tgtId = link.target
+    const linkId = link.linkId
+    if (!srcId || !tgtId || !linkId || !decCards[srcId] || !decCards[tgtId]) continue
+    decCards[srcId].links[linkId] = {
+      from:    srcId,
+      to:      tgtId,
+      fromDir: link.fromDir || null,
+      toDir:   link.toDir   || null,
+      typeId:  link.typeId  || null,
+    }
+    decCards[tgtId].backlinks[linkId] = srcId
   }
 
-  return cards
+  return { cards: decCards, edgeTypes: decEdgeTypes }
 }
 
 export default $
