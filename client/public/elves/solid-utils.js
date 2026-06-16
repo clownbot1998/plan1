@@ -1,5 +1,5 @@
 import { Self } from '@plan98/types'
-import { bayunCore, getSessionId } from './cyber-security.js'
+import { bayunCore, BayunCore, getSessionId } from './cyber-security.js'
 
 const ENC_PREFIX = 'bayun:'
 
@@ -7,36 +7,30 @@ const $ = Self('solid-utils', {})
 
 // ── Bayun encrypt / decrypt ───────────────────────────────────────────────────
 
-export function encryptLiteral(plainText) {
-  return new Promise((resolve) => {
-    const sessionId = getSessionId()
-    if (!bayunCore || !sessionId) { resolve(String(plainText)); return }
-    try {
-      bayunCore.encryptText({
-        sessionId,
-        plainText: String(plainText),
-        shouldEncryptWithGroupKey: false,
-        successCallback: (ct) => resolve(ct ? `${ENC_PREFIX}${ct}` : String(plainText)),
-        failureCallback: () => resolve(String(plainText)),
-      })
-    } catch { resolve(String(plainText)) }
-  })
+export async function encryptLiteral(plainText) {
+  const sessionId = getSessionId()
+  if (!bayunCore || !sessionId) return String(plainText)
+  try {
+    const ct = await bayunCore.lockText({
+      sessionId,
+      text: String(plainText),
+      encryptionPolicy: BayunCore.EncryptionPolicy.MEMBER,
+      keyGenerationPolicy: BayunCore.KeyGenerationPolicy.DEFAULT,
+    })
+    return ct ? `${ENC_PREFIX}${ct}` : String(plainText)
+  } catch { return String(plainText) }
 }
 
-export function decryptLiteral(text) {
-  return new Promise((resolve) => {
-    if (!String(text).startsWith(ENC_PREFIX)) { resolve(text); return }
-    const sessionId = getSessionId()
-    if (!bayunCore || !sessionId) { resolve(text); return }
-    try {
-      bayunCore.decryptText({
-        sessionId,
-        encryptedText: String(text).slice(ENC_PREFIX.length),
-        successCallback: (pt) => resolve(pt ?? text),
-        failureCallback: () => resolve(text),
-      })
-    } catch { resolve(text) }
-  })
+export async function decryptLiteral(text) {
+  if (!String(text).startsWith(ENC_PREFIX)) return text
+  const sessionId = getSessionId()
+  if (!bayunCore || !sessionId) return text
+  try {
+    return await bayunCore.unlockText({
+      sessionId,
+      lockedText: String(text).slice(ENC_PREFIX.length),
+    }) ?? text
+  } catch { return text }
 }
 
 // ── TTL serializer ────────────────────────────────────────────────────────────
