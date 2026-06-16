@@ -150,6 +150,9 @@ const $ = Self(tag, {
   _rejectedOps: [],
   edgeTypes: { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
   players: {},
+  ioMode: null,
+  ioEngine: null,
+  ioStatus: '',
 })
 
 // ── presence ─────────────────────────────────────────────────────────────────
@@ -253,7 +256,22 @@ function wasSave() {
       await wasDel(path).catch(() => null)
       await wasPut(path, json, { type: 'application/json' })
     } catch {}
+    wasttlSave(cards, edgeTypes)
   }, 1500)
+}
+
+let _wasttlTimer = null
+function wasttlSave(cards, edgeTypes) {
+  clearTimeout(_wasttlTimer)
+  _wasttlTimer = setTimeout(async () => {
+    try {
+      const { boardToTurtle } = await import('./solid-utils.js')
+      const ttl = await boardToTurtle(_boardId || 'default', cards, edgeTypes)
+      const path = `/bulletin-board/${_boardId || 'default'}.ttl`
+      await wasDel(path).catch(() => null)
+      await wasPut(path, ttl, { type: 'text/turtle' })
+    } catch {}
+  }, 500)
 }
 
 // ── op log ────────────────────────────────────────────────────────────────────
@@ -760,6 +778,28 @@ function renderAttachments(cardId, card) {
       </div>
     </div>
   `
+}
+
+function renderIoPanel(ioMode, ioEngine) {
+  const verb = ioMode === 'export' ? 'Export to' : 'Import from'
+  if (!ioEngine) return `
+    <div class="io-panel">
+      <div class="io-title">${verb}…</div>
+      <button class="io-opt" data-io-engine="json">JSON file</button>
+      <button class="io-cancel" data-io-cancel>cancel</button>
+    </div>
+  `
+  if (ioEngine === 'json') return `
+    <div class="io-panel">
+      <div class="io-title">${verb} JSON file</div>
+      <button class="io-opt io-opt-primary" data-io-do>
+        ${ioMode === 'export' ? 'Download .json' : 'Choose file…'}
+      </button>
+      <div class="io-status" data-io-status></div>
+      <button class="io-cancel" data-io-cancel>cancel</button>
+    </div>
+  `
+  return ''
 }
 
 function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, sagasOpen, ops = []) {
@@ -1403,21 +1443,34 @@ function afterUpdate(target) {
 
   const shareOverlay = target.querySelector('.share-overlay')
   if (shareOverlay) {
-    const { launchHref } = $.learn()
+    const { launchHref, ioMode, ioEngine, ioStatus } = $.learn()
     if (mode === 'share' && !launchHref) {
       shareOverlay.style.display = 'flex'
       const url = `${location.origin}/app/bulletin-board?id=${_boardId}`
       const safe = escapeHtml(url)
-      if (shareOverlay.dataset.renderedUrl !== url) {
-      shareOverlay.dataset.renderedUrl = url
-      shareOverlay.innerHTML = `
-        <join-cta
-          url="${safe}"
-          title="bulletin-board"
-          description="the elves need your help. the rainbow connection is down and if you don't get it back online, no one will. good luck. team up with friends to solve fact-based mysteries."
-        ></join-cta>
-      `
-      } // end renderedUrl guard
+
+      const joinDiv = shareOverlay.querySelector('.share-join')
+      if (joinDiv && joinDiv.dataset.url !== url) {
+        joinDiv.dataset.url = url
+        joinDiv.innerHTML = `
+          <join-cta
+            url="${safe}"
+            title="bulletin-board"
+            description="the elves need your help. the rainbow connection is down and if you don't get it back online, no one will. good luck. team up with friends to solve fact-based mysteries."
+          ></join-cta>
+        `
+      }
+
+      const ioDiv = shareOverlay.querySelector('.share-io')
+      if (ioDiv) {
+        const ioSig = `${ioMode}|${ioEngine}`
+        if (ioDiv.dataset.sig !== ioSig) {
+          ioDiv.dataset.sig = ioSig
+          ioDiv.innerHTML = ioMode ? renderIoPanel(ioMode, ioEngine) : ''
+        }
+        const statusEl = ioDiv.querySelector('[data-io-status]')
+        if (statusEl && statusEl.textContent !== ioStatus) statusEl.textContent = ioStatus
+      }
     } else {
       shareOverlay.style.display = 'none'
     }
@@ -1457,7 +1510,10 @@ function mount(target) {
     </div>
     <div class="card-launch" data-open="false"></div>
     <div class="camera-overlay" data-open="false"></div>
-    <div class="share-overlay" style="display:none"></div>
+    <div class="share-overlay" style="display:none">
+      <div class="share-join"></div>
+      <div class="share-io"></div>
+    </div>
     <div class="park-hud" hidden></div>
     <board-call></board-call>
   `
@@ -1794,6 +1850,54 @@ $.when('dblclick', '.bulletin-canvas', e => {
   const { mode } = $.learn()
   if (mode !== 'pan' && mode !== 'manage') return
   setZoom(1)
+})
+
+// ── import / export ───────────────────────────────────────────────────────────
+
+$.when('cta-export', 'join-cta', () => {
+  $.teach({ ioMode: 'export', ioEngine: null, ioStatus: '' })
+})
+
+$.when('cta-import', 'join-cta', () => {
+  $.teach({ ioMode: 'import', ioEngine: null, ioStatus: '' })
+})
+
+$.when('click', '[data-io-engine]', (e) => {
+  $.teach({ ioEngine: e.target.dataset.ioEngine, ioStatus: '' })
+})
+
+$.when('click', '[data-io-cancel]', () => {
+  $.teach({ ioMode: null, ioEngine: null, ioStatus: '' })
+})
+
+$.when('click', '[data-io-do]', async (e) => {
+  const { ioMode, ioEngine } = $.learn()
+
+  if (ioEngine === 'json' && ioMode === 'export') {
+    const { cards, edgeTypes } = $.learn()
+    const blob = new Blob([JSON.stringify({ cards, edgeTypes }, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    Object.assign(document.createElement('a'), {
+      href: url, download: `bulletin-board-${_boardId.slice(0, 8)}.json`
+    }).click()
+    URL.revokeObjectURL(url)
+    $.teach({ ioMode: null, ioEngine: null, ioStatus: '' })
+  }
+
+  if (ioEngine === 'json' && ioMode === 'import') {
+    const input = Object.assign(document.createElement('input'), { type: 'file', accept: '.json' })
+    input.onchange = async () => {
+      try {
+        const { cards, edgeTypes } = JSON.parse(await input.files[0].text())
+        $.teach({ cards: cards || {}, edgeTypes: edgeTypes || {}, ioMode: null, ioEngine: null, ioStatus: '' })
+        save(document.querySelector(tag))
+      } catch (err) {
+        $.teach({ ioStatus: `error: ${err.message}` })
+      }
+    }
+    input.click()
+  }
+
 })
 
 $.when('click', '[data-zoom-in]', e => {
@@ -2790,6 +2894,56 @@ $.style(`
   & .the-compass .c-move   { grid-row: 5/7; grid-column: 2/4; background: mediumseagreen; }
   & .the-compass .c-os     { grid-row: 3/5; grid-column: 1/3; background: dodgerblue; }
   & .the-compass .c-camera { grid-row: 1/3; grid-column: 2/4; background: mediumpurple; }
+  & .io-picker {
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    min-width: 260px;
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+    box-shadow: 0 4px 24px rgba(0,0,0,.2);
+  }
+  & .io-picker-title {
+    font-family: 'Recursive', sans-serif;
+    font-weight: 700;
+    font-size: .95rem;
+    margin-bottom: .25rem;
+  }
+  & .io-btn {
+    font-family: 'Recursive', sans-serif;
+    font-size: .85rem;
+    padding: .5rem .75rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: white;
+    cursor: pointer;
+    text-align: left;
+  }
+  & .io-btn:hover { background: #f5f5f5; }
+  & .io-btn-primary { border-color: dodgerblue; color: dodgerblue; }
+  & .io-btn-primary:hover { background: dodgerblue; color: white; }
+  & .io-label {
+    font-family: 'Recursive', sans-serif;
+    font-size: .8rem;
+    display: flex;
+    flex-direction: column;
+    gap: .25rem;
+  }
+  & .io-input {
+    font-family: 'Recursive', sans-serif;
+    font-size: .8rem;
+    padding: .3rem .5rem;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+  }
+  & .io-status {
+    font-family: 'Recursive', sans-serif;
+    font-size: .75rem;
+    opacity: .7;
+    min-height: 1.2em;
+    word-break: break-all;
+  }
 
   & .the-compass[data-open="false"] button:not(.root) {
     opacity: 0; pointer-events: none; transform: scale(0.4);
@@ -3386,3 +3540,4 @@ $.style(`
       0 40px 80px rgba(0,0,0,.08);
   }
 `)
+

@@ -18,6 +18,8 @@ $.draw(target => {
         <div class="join-actions">
           <button class="standard-button bias-generic" data-copy>copy</button>
           <button class="standard-button bias-generic" data-share>share</button>
+          <button class="standard-button bias-generic" data-import>import</button>
+          <button class="standard-button bias-generic" data-export>export</button>
         </div>
       </div>
       <div class="join-right">
@@ -50,6 +52,14 @@ $.when('click', '[data-share]', async e => {
   if (navigator.share) {
     try { await navigator.share({ url, title }) } catch (_) {}
   }
+})
+
+$.when('click', '[data-import]', e => {
+  e.target.closest(tag)?.dispatchEvent(new CustomEvent('cta-import', { bubbles: true }))
+})
+
+$.when('click', '[data-export]', e => {
+  e.target.closest(tag)?.dispatchEvent(new CustomEvent('cta-export', { bubbles: true }))
 })
 
 $.style(`
