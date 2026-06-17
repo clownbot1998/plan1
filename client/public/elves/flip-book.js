@@ -3862,7 +3862,12 @@ $.when('click','[data-sidebar-save]',async event=>{
   const r=event.target.closest(tag);if(!r||!btn)return
   const orig=btn.textContent
   btn.disabled=true;btn.textContent='…'
-  try{await saveFlipbook(r);btn.textContent='✓'}
+  try{
+    await saveFlipbook(r)
+    await publishToGallery(r).catch(()=>null)
+    btn.textContent='✓'
+    window.parent.postMessage({ type: 'flip-book-saved' }, location.origin)
+  }
   catch(e){btn.textContent='!'}
   setTimeout(()=>{btn.disabled=false;btn.textContent=orig},1500)
 })

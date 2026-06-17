@@ -285,7 +285,12 @@ const viewRenderers = {
               </button>
             </div>
             <div class="action-bar-center"></div>
-            <div class="action-bar-right"></div>
+            <div class="action-bar-right">
+              <button class="manage-btn" data-share-board title="Share this board in chat">
+                <sl-icon name="grid"></sl-icon>
+                <span>Share Board</span>
+              </button>
+            </div>
           </div>
           <div class="chat-main">
             <div class="scroll-back" data-scrollback="main">
@@ -514,6 +519,12 @@ function renderAttachmentPreview(attachments) {
     if (record.$type === 'computer.sillyz.data.video') {
       return `<div class="preview-item" data-remove-attachment="${cid}"><was-video src="${record.src}"></was-video><button class="preview-remove"><sl-icon name="x"></sl-icon></button></div>`
     }
+    if (record.$type === 'computer.sillyz.data.flipbook') {
+      return `<div class="preview-item" data-remove-attachment="${cid}"><div class="preview-flipbook"><sl-icon name="brush"></sl-icon><span>${record.frames || '?'}f</span></div><button class="preview-remove"><sl-icon name="x"></sl-icon></button></div>`
+    }
+    if (record.$type === 'computer.sillyz.data.board') {
+      return `<div class="preview-item text-preview" data-remove-attachment="${cid}"><sl-icon name="grid"></sl-icon><span>${escapeHyperText(record.title || record.id || 'board')}</span><button class="preview-remove"><sl-icon name="x"></sl-icon></button></div>`
+    }
     return `<div class="preview-item text-preview" data-remove-attachment="${cid}"><span>${escapeHyperText((record.text || '').slice(0, 40))}</span><button class="preview-remove"><sl-icon name="x"></sl-icon></button></div>`
   }).join('')
 }
@@ -523,6 +534,13 @@ function renderAttachments(attachments) {
   return `<div class="message-attachments">${attachments.map(att => {
     if (att.$type === 'computer.sillyz.data.image') return `<was-image src="${att.src}" class="attachment-thumb"></was-image>`
     if (att.$type === 'computer.sillyz.data.video') return `<was-video src="${att.src}" class="attachment-thumb"></was-video>`
+    if (att.$type === 'computer.sillyz.data.flipbook') {
+      const label = `${att.frames || '?'} frames · ${att.canvasW || ''}×${att.canvasH || ''}`
+      return `<a class="attachment-card attachment-flipbook" href="/app/flip-book?id=${encodeURIComponent(att.id)}" target="_blank"><sl-icon name="brush"></sl-icon><span>${escapeHyperText(label)}</span></a>`
+    }
+    if (att.$type === 'computer.sillyz.data.board') {
+      return `<a class="attachment-card attachment-board" href="/app/bulletin-board?id=${encodeURIComponent(att.id)}" target="_blank"><sl-icon name="grid"></sl-icon><span>${escapeHyperText(att.title || att.id || 'board')}</span></a>`
+    }
     return `<div class="attachment-text">${escapeHyperText((att.text || '').slice(0, 120))}</div>`
   }).join('')}</div>`
 }
@@ -831,6 +849,15 @@ $.when('click', '[data-remove-attachment]', (event) => {
 
 $.when('click', '[data-back-to-chat]', () => $.teach({ view: views.chat }))
 $.when('click', '[data-close-thread]', () => $.teach({ activeThread: null }))
+
+$.when('click', '[data-share-board]', () => {
+  const { currentRoom, attachments } = $.learn()
+  if (!currentRoom) return
+  const record = { $type: 'computer.sillyz.data.board', id: currentRoom, title: currentRoom }
+  const cid = crypto.randomUUID()
+  const existing = new Set(attachments.map(a => a.cid))
+  if (!existing.has(cid)) $.teach({ attachments: [...attachments, { cid, record }] })
+})
 $.when('click', '[data-new-group]',    () => $.teach({ view: views.newGroup }))
 
 $.when('click', '[data-message-menu]', (event) => {
@@ -1042,6 +1069,53 @@ $.when('gallery-share', 'plan98-gallery', (event) => {
   const current  = $.learn()[key] || []
   const existing = new Set(current.map(i => i.cid))
   $.teach({ [key]: [...current, ...event.detail.items.filter(i => !existing.has(i.cid))], showAttachments: false })
+})
+
+function mediaAppUrl(mediaType, currentRoom) {
+  const BASE = {
+    image:       '/app/plan98-camera',
+    video:       '/app/v-log',
+    audio:       '/app/v-log',
+    'flip-book': '/app/flip-book',
+  }
+  const base = BASE[mediaType]
+  if (!base) return null
+  if (mediaType === 'flip-book') {
+    const id = `/group-chat/${currentRoom || 'default'}/${crypto.randomUUID()}`
+    return `${base}?id=${encodeURIComponent(id)}`
+  }
+  return base
+}
+
+function refreshGalleries(host) {
+  host.querySelectorAll('plan98-gallery').forEach(g => { g.mounted = false })
+}
+
+$.when('gallery-create-media', 'plan98-gallery', (event) => {
+  const { mediaType } = event.detail
+  const { currentRoom } = $.learn()
+  const appUrl = mediaAppUrl(mediaType, currentRoom)
+  if (!appUrl) return
+  const host = event.target.closest(tag)
+  if (!host) return
+  const overlay = document.createElement('div')
+  overlay.className = 'media-editor-overlay'
+  overlay.innerHTML = `
+    <div class="media-editor-inner">
+      <button class="media-editor-close" data-close-editor><sl-icon name="x"></sl-icon></button>
+      <iframe src="${appUrl}" class="media-editor-frame"></iframe>
+    </div>
+  `
+  const close = () => { overlay.remove(); refreshGalleries(host) }
+  overlay.querySelector('[data-close-editor]').addEventListener('click', close)
+
+  const onMessage = (e) => {
+    if (e.origin !== location.origin) return
+    if (e.data?.type === 'flip-book-saved') { close(); window.removeEventListener('message', onMessage) }
+  }
+  window.addEventListener('message', onMessage)
+
+  host.appendChild(overlay)
 })
 
 let groupsLoaded = false
@@ -1283,12 +1357,23 @@ $.style(`
   & .message-attachments { display: flex; gap: .25rem; flex-wrap: wrap; margin-top: .25rem; }
   & .attachment-thumb { width: 120px; height: 120px; object-fit: cover; border-radius: .25rem; }
   & .attachment-text { background: rgba(0,0,0,.05); padding: .25rem .5rem; border-radius: .25rem; font-size: .85rem; max-width: 200px; }
+  & .attachment-card { display: inline-flex; align-items: center; gap: .4rem; padding: .4rem .75rem; border-radius: .5rem; font-size: .85rem; text-decoration: none; color: rgba(0,0,0,.75); border: 1px solid rgba(0,0,0,.15); background: rgba(255,255,255,.8); }
+  & .attachment-card:hover { background: white; border-color: var(--root-theme, mediumseagreen); }
+  & .attachment-flipbook { border-color: rgba(0,100,200,.2); background: rgba(0,100,200,.05); }
+  & .attachment-board { border-color: rgba(0,150,80,.2); background: rgba(0,150,80,.05); }
+  & .preview-flipbook { display: flex; align-items: center; gap: .25rem; padding: .25rem .4rem; font-size: .75rem; color: rgba(0,0,0,.65); }
   & .attachment-preview { display: flex; gap: .25rem; padding: .25rem .5rem; overflow-x: auto; background: linear-gradient(rgba(255,255,255,.75), rgba(255,255,255,.75)), var(--root-theme, mediumseagreen); }
   & .attachment-preview:empty { display: none; }
   & .preview-item { position: relative; width: 60px; height: 60px; flex-shrink: 0; border-radius: .25rem; overflow: hidden; }
   & .preview-remove { position: absolute; top: 0; right: 0; width: 1.25rem; height: 1.25rem; background: rgba(0,0,0,.7); color: white; border: none; border-radius: 0 0 0 .25rem; cursor: pointer; display: grid; place-content: center; font-size: .6rem; }
 
   & .fullscreen-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.9); display: grid; place-content: center; cursor: zoom-out; }
+
+  & .media-editor-overlay { position: absolute; inset: 0; z-index: 500; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; }
+  & .media-editor-inner { position: relative; width: 90%; height: 90%; display: flex; flex-direction: column; background: white; border-radius: .5rem; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,.5); }
+  & .media-editor-close { position: absolute; top: .5rem; right: .5rem; z-index: 10; display: flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; background: rgba(0,0,0,.6); color: white; border: none; border-radius: 50%; cursor: pointer; }
+  & .media-editor-close:hover { background: rgba(0,0,0,.85); }
+  & .media-editor-frame { flex: 1; border: none; width: 100%; height: 100%; }
   & .fullscreen-image { max-width: 90vw; max-height: 90vh; width: auto; height: auto; object-fit: contain; }
 
   & .tiptap-editor { min-height: 2.5rem; max-height: 35vh; overflow-y: auto; flex: 1; }

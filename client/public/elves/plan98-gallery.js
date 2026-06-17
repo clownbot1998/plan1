@@ -304,6 +304,16 @@ function renderThumb(resource, options = {}) {
     `
   }
 
+  if (type === 'computer.sillyz.data.flipbook') {
+    const label = `${record.frames || '?'}f · ${record.canvasW || ''}×${record.canvasH || ''}`
+    return `
+      <button class="gallery-thumb text-thumb flipbook-thumb" data-cid="${cid}">
+        <sl-icon name="brush" style="font-size:1.5rem;opacity:.6"></sl-icon>
+        <div class="thumb-text">${escapeHyperText(label)}</div>
+      </button>
+    `
+  }
+
   const preview = escapeHyperText((record.text || '').slice(0, 120))
   return `
     <button class="gallery-thumb text-thumb" data-cid="${cid}">
@@ -869,6 +879,9 @@ $.style(`
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
     gap: .75rem;
+    overflow-y: auto;
+    flex: 1;
+    align-content: start;
   }
 
   & .create-type-btn {
