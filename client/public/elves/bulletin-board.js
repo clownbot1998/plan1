@@ -234,6 +234,19 @@ function wasTtlPath(id) {
   return `/bulletin-board/${id || 'default'}.ttl`
 }
 
+async function upsertBayunGroup(groupId) {
+  try {
+    const { getSession, bayunCore } = await import('./cyber-security.js')
+    const { sessionId } = getSession()
+    if (!sessionId || !bayunCore || !groupId) return
+    try {
+      await bayunCore.getGroupById({ sessionId, groupId })
+    } catch {
+      try { await bayunCore.joinPublicGroup({ sessionId, groupId }) } catch {}
+    }
+  } catch {}
+}
+
 async function wasLoad() {
   await ensureSpace().catch(() => null)
   // TTL is canonical — fall back to JSON for boards not yet migrated
@@ -241,8 +254,9 @@ async function wasLoad() {
     const blob = await wasGet(wasTtlPath(_boardId))
     if (blob) {
       const { turtleToBoard } = await import('./solid-utils.js')
-      const { cards, edgeTypes } = await turtleToBoard(await blob.text())
-      $.teach({ cards, edgeTypes })
+      const { cards, edgeTypes, groupId } = await turtleToBoard(await blob.text())
+      $.teach({ cards, edgeTypes, ...(groupId ? { boardGroupId: groupId } : {}) })
+      if (groupId) upsertBayunGroup(groupId)
       return
     }
   } catch {}
@@ -266,7 +280,8 @@ function wasSave() {
     const { cards, edgeTypes } = $.learn()
     try {
       const { boardToTurtle } = await import('./solid-utils.js')
-      const ttl = await boardToTurtle(_boardId || 'default', cards, edgeTypes)
+      const { boardGroupId } = $.learn()
+      const ttl = await boardToTurtle(_boardId || 'default', cards, edgeTypes, boardGroupId || null)
       const path = wasTtlPath(_boardId)
       await wasDel(path).catch(() => null)
       await wasPut(path, ttl, { type: 'text/turtle' })
@@ -1489,7 +1504,7 @@ function mount(target) {
       <div class="cards-layer"></div>
       <div class="create-preview"></div>
     </div>
-    <div class="zoom-widget">
+    <div class="zoom-widget" style="display:${(mode === 'pan' || mode === 'manage' || mode === 'link') ? 'flex' : 'none'}">
       <button class="zoom-btn" data-zoom-out>−</button>
       <button class="zoom-label" data-zoom-reset data-zoom-lbl>${zoom >= 1 ? `${zoom * 100 | 0}%` : `${Math.round(zoom * 100)}%`}</button>
       <button class="zoom-btn" data-zoom-in>+</button>
@@ -1561,6 +1576,8 @@ function update(target) {
   workspace.style.setProperty('--pan-y', panY + 'px')
   workspace.style.setProperty('--zoom', zoom)
 
+  const zoomWidget = target.querySelector('.zoom-widget')
+  if (zoomWidget) zoomWidget.style.display = (!launchHref && (mode === 'pan' || mode === 'manage' || mode === 'link')) ? 'flex' : 'none'
   const zoomLbl = target.querySelector('[data-zoom-lbl]')
   if (zoomLbl) zoomLbl.textContent = zoom >= 1 ? `${zoom * 100 | 0}%` : `${Math.round(zoom * 100)}%`
 
@@ -2473,7 +2490,8 @@ $.when('click', '[data-mode]', e => {
   // open new overlay
   if (next === 'gallery') openGallery()
   else if (next === 'browse') {
-    const href = `/app/dream-team?room=${encodeURIComponent(_boardId)}`
+    const { boardGroupId } = $.learn()
+    const href = `/app/group-chat?room=${encodeURIComponent(_boardId)}${boardGroupId ? `&group=${encodeURIComponent(boardGroupId)}` : ''}`
     openLaunch(href)
     history.pushState({ type: 'bulletin-board-launch', href }, '', href)
   }

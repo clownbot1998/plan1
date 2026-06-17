@@ -58,7 +58,7 @@ function parseTtlStr(s) {
 //                   bb:record (attachment data)
 // Plain fields: all structural refs, coords, colors, dates, IDs
 
-export async function boardToTurtle(boardId, cards, edgeTypes) {
+export async function boardToTurtle(boardId, cards, edgeTypes, groupId) {
   const now = new Date().toISOString()
   const cardEntries = Object.entries(cards)
 
@@ -90,6 +90,7 @@ export async function boardToTurtle(boardId, cards, edgeTypes) {
     '',
     '<> a bb:Board ;',
     `   dcterms:identifier "${ttlStr(boardId)}" ;`,
+    ...(groupId ? [`   bb:groupId "${ttlStr(groupId)}" ;`] : []),
     `   dcterms:modified "${now}"^^xsd:dateTime .`,
     '',
   ]
@@ -165,12 +166,14 @@ export async function turtleToBoard(ttlString) {
   const rawEdgeTypes = {}
   const rawAttachments = []
   const rawLinks = []
+  const rawBoard = {}
 
   let subject = null, type = null, block = {}
 
   function flush() {
     if (!subject || !type) { block = {}; subject = null; type = null; return }
-    if (type === 'card')       rawCards[subject] = { ...block }
+    if (type === 'board')      Object.assign(rawBoard, block)
+    else if (type === 'card')  rawCards[subject] = { ...block }
     else if (type === 'et')    rawEdgeTypes[block.typeId] = { ...block }
     else if (type === 'att')   rawAttachments.push({ ...block })
     else if (type === 'link')  rawLinks.push({ ...block })
@@ -181,14 +184,22 @@ export async function turtleToBoard(ttlString) {
     const line = raw.trim()
     if (!line || line.startsWith('@') || line.startsWith('#')) continue
 
-    // new subject
+    // board subject: <> a bb:Board
+    if (line.match(/^<>\s+a\s+bb:Board/)) {
+      flush()
+      subject = '__board__'
+      type = 'board'
+      continue
+    }
+
+    // new subject <#id> a Type
     const subjMatch = line.match(/^<#([^>]+)>\s+a\s+(\S+)/)
     if (subjMatch) {
       flush()
       subject = subjMatch[1]
       const typeToken = subjMatch[2].replace(/[;.].*$/, '').trim()
-      if (typeToken === 'bb:Card')        type = 'card'
-      else if (typeToken === 'bb:EdgeType')  type = 'et'
+      if (typeToken === 'bb:Card')          type = 'card'
+      else if (typeToken === 'bb:EdgeType')   type = 'et'
       else if (typeToken === 'bb:Attachment') type = 'att'
       else if (typeToken === 'ht:TypedLink')  type = 'link'
       else { subject = null }
@@ -285,7 +296,7 @@ export async function turtleToBoard(ttlString) {
     decCards[tgtId].backlinks[linkId] = srcId
   }
 
-  return { cards: decCards, edgeTypes: decEdgeTypes }
+  return { cards: decCards, edgeTypes: decEdgeTypes, groupId: rawBoard.groupId || null }
 }
 
 export default $
