@@ -16,10 +16,12 @@ docker start plan98-multiplayer  # geckos → port 9208
 docker start libretranslate    # translation → localhost:3005
 ```
 
-After starting plan98-was, WAS needs tsx started manually:
+After starting, WAS needs tsx started manually inside the container:
 ```
-docker exec plan98-was sh -c "cd /app/server/was/wallet-attached-storage-server-main/nodejs && npx tsx scripts/start.ts" &
+docker exec -d plan1-was npx tsx scripts/start.ts
 ```
+Then run `ensureSpace()` in the browser console to initialize the space.
+Note: local container is `plan1-was` (not `plan98-was`).
 
 **Remote machine (local.tychi.me):**
 Docker containers run independently (not affected by local reboots):
