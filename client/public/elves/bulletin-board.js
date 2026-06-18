@@ -796,24 +796,58 @@ function renderAttachments(cardId, card) {
 }
 
 function renderIoPanel(ioMode, ioEngine) {
-  const verb = ioMode === 'export' ? 'Export to' : 'Import from'
-  if (!ioEngine) return `
-    <div class="io-panel">
-      <div class="io-title">${verb}…</div>
-      <button class="io-opt" data-io-engine="json">JSON file</button>
-      <button class="io-cancel" data-io-cancel>cancel</button>
-    </div>
-  `
+  const isImport = ioMode === 'import'
+  const verb = isImport ? 'Import from' : 'Export to'
+
+  if (!ioEngine) {
+    const importOpts = isImport ? `
+      <button class="io-btn" data-io-engine="bsky">
+        <sl-icon name="twitter"></sl-icon> Bluesky follows
+      </button>` : ''
+    return `
+      <div class="io-picker">
+        <div class="io-picker-title">${verb}…</div>
+        ${importOpts}
+        <button class="io-btn" data-io-engine="json">
+          <sl-icon name="file-earmark-code"></sl-icon> JSON file
+        </button>
+        <button class="io-btn" data-io-cancel>cancel</button>
+      </div>
+    `
+  }
+
   if (ioEngine === 'json') return `
-    <div class="io-panel">
-      <div class="io-title">${verb} JSON file</div>
-      <button class="io-opt io-opt-primary" data-io-do>
-        ${ioMode === 'export' ? 'Download .json' : 'Choose file…'}
+    <div class="io-picker">
+      <div class="io-picker-title">${verb} JSON file</div>
+      <button class="io-btn io-btn-primary" data-io-do>
+        ${isImport ? 'Choose file…' : 'Download .json'}
       </button>
       <div class="io-status" data-io-status></div>
-      <button class="io-cancel" data-io-cancel>cancel</button>
+      <button class="io-btn" data-io-cancel>cancel</button>
     </div>
   `
+
+  if (ioEngine === 'bsky') return `
+    <div class="io-picker">
+      <div class="io-picker-title">Import from Bluesky</div>
+      <div class="io-tabs">
+        <button class="io-tab io-tab-active" data-bsky-tab="follows">Follows</button>
+        <button class="io-tab" data-bsky-tab="starter-pack">Starter pack</button>
+      </div>
+      <label class="io-label" data-bsky-follows-section>
+        Handle
+        <input class="io-input" type="text" placeholder="tychi.me" data-bsky-handle autocomplete="off">
+      </label>
+      <label class="io-label" data-bsky-pack-section style="display:none">
+        Starter pack URL
+        <input class="io-input" type="text" placeholder="https://bsky.app/starter-pack/..." data-bsky-pack-url autocomplete="off">
+      </label>
+      <button class="io-btn io-btn-primary" data-io-do-bsky>Load</button>
+      <div class="io-status" data-io-status></div>
+      <button class="io-btn" data-io-cancel>cancel</button>
+    </div>
+  `
+
   return ''
 }
 
@@ -1917,6 +1951,123 @@ $.when('click', '[data-io-do]', async (e) => {
 
 })
 
+$.when('click', '[data-bsky-tab]', (e) => {
+  const btn = e.target.closest('[data-bsky-tab]')
+  if (!btn) return
+  const picker = btn.closest('.io-picker')
+  if (!picker) return
+  const tab = btn.dataset.bskyTab
+  picker.querySelectorAll('[data-bsky-tab]').forEach(b => b.classList.toggle('io-tab-active', b.dataset.bskyTab === tab))
+  picker.querySelector('[data-bsky-follows-section]').style.display = tab === 'follows' ? '' : 'none'
+  picker.querySelector('[data-bsky-pack-section]').style.display = tab === 'starter-pack' ? '' : 'none'
+})
+
+$.when('click', '[data-io-do-bsky]', async (e) => {
+  const picker = e.target.closest('.io-picker')
+  if (!picker) return
+
+  const activeTab = picker.querySelector('.io-tab-active')?.dataset.bskyTab || 'follows'
+  const BASE = 'https://public.api.bsky.app/xrpc'
+
+  const CARD_W = 200, CARD_H = 120, GAP = 24
+  const STRIDE_X = CARD_W + GAP
+  const STRIDE_Y = CARD_H + GAP
+
+  function actorToText(a) {
+    return [a.displayName || a.handle, `@${a.handle}`, '', (a.description || '').slice(0, 240)].join('\n').trim()
+  }
+
+  function layoutCards(actor, members) {
+    const cards = {}
+    const now = new Date().toISOString()
+    const COLS = Math.max(1, Math.ceil(Math.sqrt(members.length)))
+    const gridW = COLS * STRIDE_X - GAP
+    const cx = Math.round(gridW / 2 - CARD_W / 2)
+
+    const actorId = crypto.randomUUID()
+    cards[actorId] = {
+      text: actorToText(actor), x: cx, y: 0,
+      w: CARD_W, h: CARD_H, color: 'lightcyan',
+      createdAt: now, links: {}, backlinks: {}, attachments: {},
+    }
+
+    members.forEach((m, i) => {
+      cards[crypto.randomUUID()] = {
+        text: actorToText(m),
+        x: (i % COLS) * STRIDE_X,
+        y: STRIDE_Y + CARD_H + Math.floor(i / COLS) * STRIDE_Y,
+        w: CARD_W, h: CARD_H, color: 'lemonchiffon',
+        createdAt: now, links: {}, backlinks: {}, attachments: {},
+      }
+    })
+    return cards
+  }
+
+  if (activeTab === 'follows') {
+    const handle = picker.querySelector('[data-bsky-handle]')?.value?.trim().replace(/^@/, '')
+    if (!handle) { $.teach({ ioStatus: 'enter a handle first' }); return }
+
+    $.teach({ ioStatus: 'loading…' })
+    try {
+      const [profileRes, followsRes] = await Promise.all([
+        fetch(`${BASE}/app.bsky.actor.getProfile?actor=${encodeURIComponent(handle)}`),
+        fetch(`${BASE}/app.bsky.graph.getFollows?actor=${encodeURIComponent(handle)}&limit=100`),
+      ])
+      if (!profileRes.ok) throw new Error(`profile ${profileRes.status}`)
+      if (!followsRes.ok) throw new Error(`follows ${followsRes.status}`)
+      const profile = await profileRes.json()
+      const { follows } = await followsRes.json()
+
+      $.teach({ ioStatus: `placing ${follows.length + 1} cards…` })
+      const cards = layoutCards(profile, follows)
+      const { edgeTypes } = $.learn()
+      $.teach({ cards, edgeTypes, ioMode: null, ioEngine: null, ioStatus: '' })
+      save(document.querySelector(tag))
+    } catch (err) {
+      $.teach({ ioStatus: `error: ${err.message}` })
+    }
+  }
+
+  if (activeTab === 'starter-pack') {
+    const raw = picker.querySelector('[data-bsky-pack-url]')?.value?.trim()
+    if (!raw) { $.teach({ ioStatus: 'enter a starter pack URL first' }); return }
+
+    // extract rkey and creator from URL: /starter-pack/{handle}/{rkey}
+    const m = raw.match(/starter-pack\/([^/]+)\/([^/?#]+)/)
+    if (!m) { $.teach({ ioStatus: 'unrecognised starter pack URL' }); return }
+    const [, creator, rkey] = m
+
+    $.teach({ ioStatus: 'loading starter pack…' })
+    try {
+      const creatorRes = await fetch(`${BASE}/app.bsky.actor.getProfile?actor=${encodeURIComponent(creator)}`)
+      if (!creatorRes.ok) throw new Error(`creator ${creatorRes.status}`)
+      const creatorProfile = await creatorRes.json()
+      const did = creatorProfile.did
+
+      const packRes = await fetch(`${BASE}/app.bsky.graph.getStarterPack?starterPack=${encodeURIComponent(`at://${did}/app.bsky.graph.starterpack/${rkey}`)}`)
+      if (!packRes.ok) throw new Error(`starter pack ${packRes.status}`)
+      const { starterPack } = await packRes.json()
+
+      const listUri = starterPack?.list?.uri
+      if (!listUri) throw new Error('no list in starter pack')
+
+      $.teach({ ioStatus: 'loading members…' })
+      const membersRes = await fetch(`${BASE}/app.bsky.graph.getList?list=${encodeURIComponent(listUri)}&limit=100`)
+      if (!membersRes.ok) throw new Error(`list ${membersRes.status}`)
+      const { items } = await membersRes.json()
+      const members = items.map(i => i.subject)
+
+      $.teach({ ioStatus: `placing ${members.length + 1} cards…` })
+      const cards = layoutCards(creatorProfile, members)
+      const { edgeTypes } = $.learn()
+      $.teach({ cards, edgeTypes, ioMode: null, ioEngine: null, ioStatus: '' })
+      save(document.querySelector(tag))
+    } catch (err) {
+      $.teach({ ioStatus: `error: ${err.message}` })
+    }
+  }
+})
+
 $.when('click', '[data-zoom-in]', e => {
   if (!e.target.closest(tag)) return
   setZoom($.learn().zoom + 0.25)
@@ -2962,6 +3113,25 @@ $.style(`
     min-height: 1.2em;
     word-break: break-all;
   }
+  & .io-tabs {
+    display: flex;
+    gap: .25rem;
+    border-bottom: 1px solid #e0e0e0;
+    margin-bottom: .25rem;
+  }
+  & .io-tab {
+    font-family: 'Recursive', sans-serif;
+    font-size: .8rem;
+    padding: .3rem .65rem;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: none;
+    cursor: pointer;
+    color: rgba(0,0,0,.5);
+    border-radius: 3px 3px 0 0;
+  }
+  & .io-tab:hover { color: rgba(0,0,0,.8); }
+  & .io-tab.io-tab-active { color: dodgerblue; border-bottom-color: dodgerblue; font-weight: 600; }
 
   & .the-compass[data-open="false"] button:not(.root) {
     opacity: 0; pointer-events: none; transform: scale(0.4);
