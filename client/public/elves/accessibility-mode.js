@@ -599,6 +599,45 @@ const modalities = {
 
 }
 
+const GIT_REMOTE = 'https://tangled.org/clowncode.bsky.social/plan1'
+const GIT_DIR = '/plan1'
+let _gitLib, _gitFS, _gitPFS
+
+async function getGit() {
+  if (_gitLib) return { git: _gitLib, fs: _gitFS, pfs: _gitPFS }
+  const [{ default: git }, { default: FS }] = await Promise.all([
+    import('isomorphic-git'),
+    import('@isomorphic-git/lightning-fs'),
+  ])
+  _gitFS = new FS('git-elf')
+  _gitPFS = _gitFS.promises
+  _gitLib = git
+  return { git, fs: _gitFS, pfs: _gitPFS }
+}
+
+const gitHttp = {
+  async request({ url, method, headers, body }) {
+    let reqBody
+    if (body) {
+      const chunks = []
+      for await (const chunk of body) chunks.push(chunk)
+      const len = chunks.reduce((n, c) => n + c.length, 0)
+      const buf = new Uint8Array(len)
+      let off = 0
+      for (const c of chunks) { buf.set(c, off); off += c.length }
+      reqBody = buf
+    }
+    const resp = await fetch(`/api/git-proxy?url=${encodeURIComponent(url)}`, { method, headers, body: reqBody })
+    return {
+      url: resp.url, method,
+      headers: Object.fromEntries(resp.headers),
+      body: [new Uint8Array(await resp.arrayBuffer())],
+      statusCode: resp.status,
+      statusMessage: resp.statusText,
+    }
+  }
+}
+
 const commands = {
   ...killCommandHandlers,
 
@@ -788,6 +827,128 @@ text: ls
       $.teach({ modality: 'js' })
     }).catch(e => console.error(e))
     return { body: fmt('js.entering'), system: true }
+  },
+
+  'git': async function(...args) {
+    const [sub, ...rest] = args
+    const { git, fs, pfs } = await getGit()
+
+    if (!sub || sub === 'help') {
+      return { saga: true, body: `@ git
+
+# clone
+<code
+text: git clone
+
+> clone plan1 from tangled (depth 1)
+
+# read
+<code
+text: git log --oneline
+
+<code
+text: git ls-files
+
+<code
+text: git grep pattern
+
+<code
+text: git cat path/to/file
+
+<code
+text: git show HEAD:path/to/file
+
+> update with: git pull` }
+    }
+
+    if (sub === 'clone') {
+      const lines = [`cloning ${GIT_REMOTE} → ${GIT_DIR} (depth 1)...`]
+      await git.clone({
+        fs, http: gitHttp, dir: GIT_DIR, url: GIT_REMOTE,
+        depth: 1, singleBranch: true,
+        onProgress: e => lines.push(`  ${e.phase}${e.total ? ` ${e.loaded}/${e.total}` : ''}`),
+      })
+      lines.push('done')
+      return { body: lines.join('\n'), system: true }
+    }
+
+    if (sub === 'pull') {
+      await git.pull({ fs, http: gitHttp, dir: GIT_DIR, author: { name: 'git-elf', email: 'elf@plan98' } })
+      return { body: 'pulled', system: true }
+    }
+
+    if (sub === 'fetch') {
+      await git.fetch({ fs, http: gitHttp, dir: GIT_DIR, depth: 1 })
+      return { body: 'fetched', system: true }
+    }
+
+    if (sub === 'log') {
+      const n = parseInt((rest.find(a => /^-n\d+$/.test(a)) || '-n20').slice(2)) || 20
+      const oneline = rest.includes('--oneline')
+      const commits = await git.log({ fs, dir: GIT_DIR, depth: n })
+      const body = commits.map(({ oid, commit }) =>
+        oneline
+          ? `${oid.slice(0, 7)} ${commit.message.split('\n')[0]}`
+          : `commit ${oid}\n    ${commit.message.split('\n')[0]}`
+      ).join('\n')
+      return { body, system: true }
+    }
+
+    if (sub === 'ls-files') {
+      const files = await git.listFiles({ fs, dir: GIT_DIR })
+      return { body: files.join('\n'), system: true }
+    }
+
+    if (sub === 'ls') {
+      const p = rest[0] ? `${GIT_DIR}/${rest[0]}` : GIT_DIR
+      const entries = await pfs.readdir(p)
+      return { body: entries.join('  '), system: true }
+    }
+
+    if (sub === 'cat') {
+      if (!rest[0]) return { body: 'usage: git cat <path>', system: true }
+      const body = await pfs.readFile(`${GIT_DIR}/${rest[0]}`, 'utf8')
+      return { body, system: true }
+    }
+
+    if (sub === 'grep') {
+      if (!rest[0]) return { body: 'usage: git grep <pattern>', system: true }
+      const re = new RegExp(rest[0], 'i')
+      const files = await git.listFiles({ fs, dir: GIT_DIR })
+      const hits = []
+      for (const f of files) {
+        try {
+          const txt = await pfs.readFile(`${GIT_DIR}/${f}`, 'utf8')
+          txt.split('\n').forEach((line, i) => {
+            if (re.test(line)) hits.push(`${f}:${i + 1}: ${line}`)
+          })
+        } catch { /* binary */ }
+      }
+      return { body: hits.length ? hits.join('\n') : 'no matches', system: true }
+    }
+
+    if (sub === 'show') {
+      const ref = rest[0]
+      if (!ref) return { body: 'usage: git show <ref>:<path>', system: true }
+      const colon = ref.indexOf(':')
+      if (colon === -1) {
+        const commit = await git.readCommit({ fs, dir: GIT_DIR, oid: ref })
+        return { body: JSON.stringify(commit, null, 2), system: true }
+      }
+      const refName = ref.slice(0, colon) || 'HEAD'
+      const filepath = ref.slice(colon + 1)
+      const oid = await git.resolveRef({ fs, dir: GIT_DIR, ref: refName })
+      const { blob } = await git.readBlob({ fs, dir: GIT_DIR, oid, filepath })
+      return { body: new TextDecoder().decode(blob), system: true }
+    }
+
+    if (sub === 'status') {
+      const matrix = await git.statusMatrix({ fs, dir: GIT_DIR })
+      const dirty = matrix.filter(([, h, w, s]) => h !== 1 || w !== 1 || s !== 1)
+      return { body: dirty.length ? dirty.map(([f, h, w, s]) => `${f}  ${h}${w}${s}`).join('\n') : 'clean', system: true }
+    }
+
+    return { body: `unknown git subcommand: ${sub} — try git help`, system: true }
   },
 }
 

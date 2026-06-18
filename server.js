@@ -523,10 +523,12 @@ async function handleRequest(request) {
         const v = request.headers.get(k)
         if (v) fwdHeaders[k] = v
       }
+      const body = request.method === 'POST' ? await request.arrayBuffer() : undefined
       const resp = await fetch(targetUrl, {
         method: request.method,
         headers: fwdHeaders,
-        body: request.method === 'POST' ? request.body : undefined,
+        body,
+        redirect: 'follow',
       })
       const respHeaders = { 'access-control-allow-origin': '*' }
       for (const [k, v] of resp.headers) {

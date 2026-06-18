@@ -396,6 +396,45 @@ const modalities = {
 
 }
 
+const GIT_REMOTE = 'https://tangled.org/clowncode.bsky.social/plan1'
+const GIT_DIR = '/plan1'
+let _gitLib, _gitFS, _gitPFS
+
+async function getGit() {
+  if (_gitLib) return { git: _gitLib, fs: _gitFS, pfs: _gitPFS }
+  const [{ default: git }, { default: FS }] = await Promise.all([
+    import('isomorphic-git'),
+    import('@isomorphic-git/lightning-fs'),
+  ])
+  _gitFS = new FS('git-elf')
+  _gitPFS = _gitFS.promises
+  _gitLib = git
+  return { git, fs: _gitFS, pfs: _gitPFS }
+}
+
+const gitHttp = {
+  async request({ url, method, headers, body }) {
+    let reqBody
+    if (body) {
+      const chunks = []
+      for await (const chunk of body) chunks.push(chunk)
+      const len = chunks.reduce((n, c) => n + c.length, 0)
+      const buf = new Uint8Array(len)
+      let off = 0
+      for (const c of chunks) { buf.set(c, off); off += c.length }
+      reqBody = buf
+    }
+    const resp = await fetch(`/api/git-proxy?url=${encodeURIComponent(url)}`, { method, headers, body: reqBody })
+    return {
+      url: resp.url, method,
+      headers: Object.fromEntries(resp.headers),
+      body: [new Uint8Array(await resp.arrayBuffer())],
+      statusCode: resp.status,
+      statusMessage: resp.statusText,
+    }
+  }
+}
+
 const commands = {
   ...killCommandHandlers,
 
@@ -415,6 +454,9 @@ const commands = {
 \`pwd\` — print working directory (where am I?)
 \`ls\` — list contents of current directory
 \`cd <path>\` — change directory (\`cd ..\` to go up)
+
+**git (tangled remote)**
+\`git clone\` \`git log --oneline\` \`git grep <pattern>\` \`git cat <path>\` \`git help\`
 
 **shell**
 \`↑ / ↓\` — navigate command history
@@ -540,6 +582,113 @@ Type \`<elf-name>\` to load a custom element.
       $.teach({ modality: 'js' })
     }).catch(e => console.error(e))
     return `Entering JS modality. Type 'exit' to leave.`
+  },
+
+  'git': async function(...args) {
+    const [sub, ...rest] = args
+    const { git, fs, pfs } = await getGit()
+
+    if (!sub || sub === 'help') {
+      return `**git commands**
+\`git clone\` — clone plan1 from tangled (depth 1)
+\`git pull\` — fast-forward update
+\`git log\` / \`git log --oneline\` / \`git log -n5\`
+\`git ls-files\` — list tracked files
+\`git ls [path]\` — list directory
+\`git cat <path>\` — read file contents
+\`git show <ref>:<path>\` — file at ref (e.g. HEAD:blog/foo.md)
+\`git grep <pattern>\` — search all tracked files
+\`git status\` — working tree status`
+    }
+
+    if (sub === 'clone') {
+      const lines = ['cloning ' + GIT_REMOTE + ' → ' + GIT_DIR + ' (depth 1)...']
+      await git.clone({
+        fs, http: gitHttp, dir: GIT_DIR, url: GIT_REMOTE,
+        depth: 1, singleBranch: true,
+        onProgress: e => lines.push(`  ${e.phase}${e.total ? ` ${e.loaded}/${e.total}` : ''}`),
+      })
+      lines.push('done')
+      return lines.join('\n')
+    }
+
+    if (sub === 'pull') {
+      await git.pull({ fs, http: gitHttp, dir: GIT_DIR, author: { name: 'git-elf', email: 'elf@plan98' } })
+      return 'pulled'
+    }
+
+    if (sub === 'fetch') {
+      await git.fetch({ fs, http: gitHttp, dir: GIT_DIR, depth: 1 })
+      return 'fetched'
+    }
+
+    if (sub === 'log') {
+      const n = parseInt((rest.find(a => /^-n\d+$/.test(a)) || '-n20').slice(2)) || 20
+      const oneline = rest.includes('--oneline')
+      const commits = await git.log({ fs, dir: GIT_DIR, depth: n })
+      return commits.map(({ oid, commit }) =>
+        oneline
+          ? `${oid.slice(0, 7)} ${commit.message.split('\n')[0]}`
+          : `commit ${oid}\n    ${commit.message.split('\n')[0]}`
+      ).join('\n')
+    }
+
+    if (sub === 'ls-files') {
+      const files = await git.listFiles({ fs, dir: GIT_DIR })
+      return files.join('\n')
+    }
+
+    if (sub === 'ls') {
+      const p = rest[0] ? `${GIT_DIR}/${rest[0]}` : GIT_DIR
+      const entries = await pfs.readdir(p)
+      return entries.join('  ')
+    }
+
+    if (sub === 'cat') {
+      if (!rest[0]) return 'usage: git cat <path>'
+      return await pfs.readFile(`${GIT_DIR}/${rest[0]}`, 'utf8')
+    }
+
+    if (sub === 'grep') {
+      if (!rest[0]) return 'usage: git grep <pattern>'
+      const re = new RegExp(rest[0], 'i')
+      const files = await git.listFiles({ fs, dir: GIT_DIR })
+      const hits = []
+      for (const f of files) {
+        try {
+          const txt = await pfs.readFile(`${GIT_DIR}/${f}`, 'utf8')
+          txt.split('\n').forEach((line, i) => {
+            if (re.test(line)) hits.push(`${f}:${i + 1}: ${line}`)
+          })
+        } catch { /* binary */ }
+      }
+      return hits.length ? hits.join('\n') : 'no matches'
+    }
+
+    if (sub === 'show') {
+      const ref = rest[0]
+      if (!ref) return 'usage: git show <ref>:<path>'
+      const colon = ref.indexOf(':')
+      if (colon === -1) {
+        const commit = await git.readCommit({ fs, dir: GIT_DIR, oid: ref })
+        return JSON.stringify(commit, null, 2)
+      }
+      const refName = ref.slice(0, colon) || 'HEAD'
+      const filepath = ref.slice(colon + 1)
+      const oid = await git.resolveRef({ fs, dir: GIT_DIR, ref: refName })
+      const { blob } = await git.readBlob({ fs, dir: GIT_DIR, oid, filepath })
+      return new TextDecoder().decode(blob)
+    }
+
+    if (sub === 'status') {
+      const matrix = await git.statusMatrix({ fs, dir: GIT_DIR })
+      const dirty = matrix.filter(([, h, w, s]) => h !== 1 || w !== 1 || s !== 1)
+      return dirty.length
+        ? dirty.map(([f, h, w, s]) => `${f}  ${h}${w}${s}`).join('\n')
+        : 'clean'
+    }
+
+    return `unknown git subcommand: ${sub} — try \`git help\``
   },
 }
 
