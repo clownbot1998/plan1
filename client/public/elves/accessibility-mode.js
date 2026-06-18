@@ -5,6 +5,7 @@ import $paperPocket, { sideEffects, systemMenu, getTheme, afterUpdateTheme } fro
 import { get as wasGet, put as wasPut, del as wasDel, ensureSpace } from './plan98-wallet.js'
 import Vosk from 'vosk-browser'
 import { agent } from './clownbot-agent.js'
+import { callTool as elfCallTool } from './elf-tools.js'
 
 const SL = 'https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.16.0/cdn/assets/icons'
 const sagaDocs = [
@@ -617,6 +618,186 @@ const modalities = {
     return null
   },
 
+}
+
+const shellToolDefinitions = [
+  {
+    type: 'function',
+    function: {
+      name: 'shell',
+      description: 'Run a shell command and return its output. Available commands: git (clone/pull/fetch/log/ls-files/ls/cat/grep/show/status), ls [path], pwd, cd <path>, help.',
+      parameters: { type: 'object', properties: { command: { type: 'string', description: 'Full command string, e.g. "git log --oneline" or "ls /blog"' } }, required: ['command'] },
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_file',
+      description: 'Read a file from the server and return its contents.',
+      parameters: { type: 'object', properties: { path: { type: 'string', description: 'File path, e.g. /elves/my-computer.js' } }, required: ['path'] },
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_file',
+      description: 'Write content to a file on the server (persists to disk).',
+      parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] },
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'patch_file',
+      description: 'Find and replace text in a file on the server.',
+      parameters: { type: 'object', properties: { path: { type: 'string' }, find: { type: 'string' }, replace: { type: 'string' } }, required: ['path', 'find', 'replace'] },
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_files',
+      description: 'List files in a directory using the file manifest.',
+      parameters: { type: 'object', properties: { dir: { type: 'string', description: 'Directory path, use "/" for all' } }, required: ['dir'] },
+    }
+  },
+]
+
+async function callToolGated(name, args) {
+  const desc = Object.entries(args).map(([k, v]) => `${k}: ${String(v).slice(0, 100)}`).join(' | ')
+  await humanRPC({ action: name, description: desc })
+  if (name === 'shell') {
+    const parts = args.command.trim().split(/\s+/)
+    const [cmd, ...rest] = parts
+    const program = commands[cmd] || commands[cmd?.toLowerCase()]
+    if (!program) return { error: `unknown command: ${cmd}` }
+    const result = await program.apply($, rest)
+    if (!result) return { ok: true }
+    return { output: typeof result === 'object' ? result.body : result }
+  }
+  return elfCallTool(name, args)
+}
+
+let _agentAbort = null
+
+async function agentChat(userMessage) {
+  const env = (typeof plan98 !== 'undefined' && plan98?.env) || {}
+  const apiUrl = env.FALLBACK_LLM_URL || env.OLLAMA_HOST || ''
+  const apiKey = env.FALLBACK_LLM_KEY || env.OLLAMA_KEY || 'ollama'
+  const model = env.FALLBACK_LLM_MODEL || env.OLLAMA_MODEL || 'qwen2.5-coder:7b'
+  if (!apiUrl) return addMessage({ body: 'no AI configured — set FALLBACK_LLM_URL in .env', author: 'assistant', system: true })
+
+  _agentAbort = new AbortController()
+  let _thinkingRaf = null
+  function flushThinking(text) {
+    if (_thinkingRaf) return
+    _thinkingRaf = requestAnimationFrame(() => {
+      _thinkingRaf = null
+      $.teach({ thinkingFace: text })
+    })
+  }
+  $.teach({ thinking: true })
+  const messages = [
+    { role: 'system', content: `You are clownbot, an AI that lives in a browser shell called plan1. You help the user navigate and query their system. You have shell and file tools. Use them to answer questions. Be concise. All tool calls require explicit user permission — the user will see a yes/no prompt before each one executes.` },
+    { role: 'user', content: userMessage },
+  ]
+
+  try {
+    while (true) {
+      const resp = await fetch(apiUrl + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, messages, stream: true, tools: shellToolDefinitions }),
+        signal: _agentAbort.signal,
+      })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}))
+        throw new Error(err.error?.message || `API error: ${resp.status}`)
+      }
+
+      let accumulated = ''
+      const toolCallAcc = {}
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      stream: while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop()
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6).trim()
+          if (data === '[DONE]') break stream
+          let chunk
+          try { chunk = JSON.parse(data) } catch { continue }
+          const delta = chunk.choices?.[0]?.delta
+          if (!delta) continue
+          if (delta.content) {
+            accumulated += delta.content
+            flushThinking(accumulated)
+          }
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const i = tc.index ?? 0
+              if (!toolCallAcc[i]) toolCallAcc[i] = { id: '', type: 'function', function: { name: '', arguments: '' } }
+              if (tc.id) toolCallAcc[i].id = tc.id
+              if (tc.function?.name) toolCallAcc[i].function.name += tc.function.name
+              if (tc.function?.arguments) toolCallAcc[i].function.arguments += tc.function.arguments
+            }
+          }
+        }
+      }
+
+      let toolCalls = Object.values(toolCallAcc)
+
+      // fallback: model emitted tool call as text instead of structured delta
+      if (!toolCalls.length && accumulated.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(accumulated.trim())
+          if (parsed.name && parsed.arguments) {
+            toolCalls = [{ id: crypto.randomUUID(), type: 'function', function: { name: parsed.name, arguments: JSON.stringify(parsed.arguments) } }]
+            accumulated = ''
+          }
+        } catch { /* not a tool call, render as text */ }
+      }
+
+      if (!toolCalls.length) {
+        $.teach({ thinking: false, thinkingFace: null })
+        addMessage({ body: accumulated || '(no response)', author: 'assistant' })
+        return
+      }
+
+      if (accumulated) addMessage({ body: accumulated, author: 'assistant' })
+      $.teach({ thinkingFace: null })
+      messages.push({ role: 'assistant', content: accumulated || null, tool_calls: toolCalls })
+
+      for (const tc of toolCalls) {
+        let args = {}
+        try { args = JSON.parse(tc.function.arguments) } catch {}
+        try {
+          const result = await callToolGated(tc.function.name, args)
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) })
+        } catch (e) {
+          if (e.declined) {
+            $.teach({ thinking: false, thinkingFace: null })
+            addMessage({ body: 'declined.', author: 'assistant', system: true })
+            return
+          }
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: e.message }) })
+        }
+      }
+    }
+  } catch (e) {
+    $.teach({ thinking: false, thinkingFace: null })
+    if (e.name !== 'AbortError') {
+      addMessage({ body: `agent error: ${e.message}`, author: 'assistant', system: true })
+    }
+  } finally {
+    _agentAbort = null
+  }
 }
 
 const GIT_REMOTE = 'https://tangled.org/clowncode.bsky.social/plan1'
@@ -1371,7 +1552,7 @@ async function execute(message, options={}) {
     }
     return
   } else {
-    addMessage({ body: fmt('command.unknown'), author: 'assistant', system: true })
+    agentChat(message)
   }
 }
 
@@ -1988,8 +2169,9 @@ function isLastLine(textarea) {
 }
 
 function interrupt() {
+  if (_agentAbort) { _agentAbort.abort(); _agentAbort = null }
   normalMode()
-  $.teach({ secureEntry: false, messageHeight: null, messageText: '', messageDraft: '' })
+  $.teach({ secureEntry: false, messageHeight: null, messageText: '', messageDraft: '', thinking: false, thinkingFace: null })
   addMessage({ body: fmt('sagas.interrupted'), author: 'assistant' })
 }
 

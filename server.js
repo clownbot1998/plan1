@@ -148,6 +148,9 @@ function buildEnvScript(isAdmin = false) {
   const env = {
     OLLAMA_HOST:         safeEnv('OLLAMA_HOST',    'http://localhost:11434/v1'),
     OLLAMA_KEY:          safeEnv('OLLAMA_KEY',      'ollama'),
+    FALLBACK_LLM_URL:    safeEnv('FALLBACK_LLM_URL'),
+    FALLBACK_LLM_KEY:    safeEnv('FALLBACK_LLM_KEY'),
+    FALLBACK_LLM_MODEL:  safeEnv('FALLBACK_LLM_MODEL', 'qwen2.5-coder:7b'),
     ANTHROPIC_API_KEY:   safeEnv('ANTHROPIC_API_KEY'),
     LIBRE_TRANSLATE_URL:  safeEnv('LIBRE_TRANSLATE_URL'),
     ELEVEN_LABS_API_KEY:  safeEnv('ELEVEN_LABS_API_KEY'),
