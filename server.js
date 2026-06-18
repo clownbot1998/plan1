@@ -506,6 +506,38 @@ async function handleRequest(request) {
     }
   }
 
+  // /api/git-proxy → smart-HTTP git proxy (CORS bypass for browser isomorphic-git)
+  if (path === '/api/git-proxy') {
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: {
+        'access-control-allow-origin': '*',
+        'access-control-allow-headers': 'content-type, accept, git-protocol',
+        'access-control-allow-methods': 'GET, POST',
+      }})
+    }
+    const targetUrl = url.searchParams.get('url')
+    if (!targetUrl) return new Response('missing url param', { status: 400 })
+    try {
+      const fwdHeaders = {}
+      for (const k of ['content-type', 'accept', 'git-protocol']) {
+        const v = request.headers.get(k)
+        if (v) fwdHeaders[k] = v
+      }
+      const resp = await fetch(targetUrl, {
+        method: request.method,
+        headers: fwdHeaders,
+        body: request.method === 'POST' ? request.body : undefined,
+      })
+      const respHeaders = { 'access-control-allow-origin': '*' }
+      for (const [k, v] of resp.headers) {
+        if (k.toLowerCase() !== 'transfer-encoding') respHeaders[k] = v
+      }
+      return new Response(resp.body, { status: resp.status, headers: respHeaders })
+    } catch (e) {
+      return new Response(String(e), { status: 502 })
+    }
+  }
+
   // /api/translate → libretranslate proxy (avoids mixed-content + CORS from browser)
   if (path === '/api/translate') {
     const libreUrl = safeEnv('LIBRE_TRANSLATE_URL')
