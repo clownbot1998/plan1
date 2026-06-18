@@ -606,7 +606,7 @@ Type \`<elf-name>\` to load a custom element.
       await git.clone({
         fs, http: gitHttp, dir: GIT_DIR, url: GIT_REMOTE,
         depth: 1, singleBranch: true,
-        onProgress: e => lines.push(`  ${e.phase}${e.total ? ` ${e.loaded}/${e.total}` : ''}`),
+        onProgress: e => { if (e.phase !== lines[lines.length - 1]?.trim()) lines.push(`  ${e.phase}`) },
       })
       lines.push('done')
       return lines.join('\n')

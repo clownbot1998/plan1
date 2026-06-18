@@ -319,6 +319,7 @@ const $ = Self('accessibility-mode', {
   boardCards: [],
   exportOpen: false,
   metaSession: null,
+  humanPrompt: null,
 })
 
 export function sh(message) {
@@ -352,6 +353,25 @@ function mergeMessage(state, payload) {
       payload
     ]
   }
+}
+
+const _humanCallbacks = {}
+
+function humanRPC(request) {
+  const id = crypto.randomUUID()
+  return new Promise((resolve, reject) => {
+    _humanCallbacks[id] = { resolve, reject }
+    $.teach({ humanPrompt: { id, ...request } })
+  })
+}
+
+function humanRPCRespond(id, yes) {
+  const cb = _humanCallbacks[id]
+  if (!cb) return
+  delete _humanCallbacks[id]
+  $.teach({ humanPrompt: null })
+  if (yes) cb.resolve(true)
+  else cb.reject(Object.assign(new Error('Declined.'), { declined: true }))
 }
 
 function addMessage(payload) {
@@ -862,17 +882,19 @@ text: git show HEAD:path/to/file
     }
 
     if (sub === 'clone') {
+      await humanRPC({ action: 'git clone', description: `clone ${GIT_REMOTE} into local IndexedDB` })
       const lines = [`cloning ${GIT_REMOTE} → ${GIT_DIR} (depth 1)...`]
       await git.clone({
         fs, http: gitHttp, dir: GIT_DIR, url: GIT_REMOTE,
         depth: 1, singleBranch: true,
-        onProgress: e => lines.push(`  ${e.phase}${e.total ? ` ${e.loaded}/${e.total}` : ''}`),
+        onProgress: e => { if (e.phase !== lines[lines.length - 1]?.trim()) lines.push(`  ${e.phase}`) },
       })
       lines.push('done')
       return { body: lines.join('\n'), system: true }
     }
 
     if (sub === 'pull') {
+      await humanRPC({ action: 'git pull', description: `pull latest from ${GIT_REMOTE}` })
       await git.pull({ fs, http: gitHttp, dir: GIT_DIR, author: { name: 'git-elf', email: 'elf@plan98' } })
       return { body: 'pulled', system: true }
     }
@@ -982,7 +1004,7 @@ function mount(target) {
 
 $.draw((target) => {
   mount(target)
-  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading, sidebarOpen, sagaFilter, sessions, boardCards, exportOpen, metaSession } = $.learn()
+  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading, sidebarOpen, sagaFilter, sessions, boardCards, exportOpen, metaSession, humanPrompt } = $.learn()
 
   const toQuote = (body) =>
     (body || '').split('\n').map(l => l.trim() ? `> ${escapeHyperText(l)}` : '').join('\n')
@@ -1108,6 +1130,17 @@ $.draw((target) => {
         </div>
       </div>
       <form>
+        ${humanPrompt ? `
+          <div class="human-prompt">
+            <span class="human-prompt-label">permission request</span>
+            <span class="human-prompt-action">${escapeHyperText(humanPrompt.action || '')}</span>
+            ${humanPrompt.description ? `<span class="human-prompt-desc">${escapeHyperText(humanPrompt.description)}</span>` : ''}
+            <div class="human-prompt-btns">
+              <button class="human-prompt-yes" data-rpc-id="${humanPrompt.id}">yes</button>
+              <button class="human-prompt-no" data-rpc-id="${humanPrompt.id}">no</button>
+            </div>
+          </div>
+        ` : ''}
         ${thinking ? `
           <div class="loading">
             <flying-disk></flying-disk>
@@ -1329,8 +1362,12 @@ async function execute(message, options={}) {
         addMessage({ ...msg, author: 'assistant' })
       }
     } catch(e) {
-      addMessage({ body: `Error. Inspect Logs.<br><a href="${window.location.origin + window.location.pathname}?q=${message}&debug=true">Reload in debug mode</a>`, author: 'assistant' })
-      console.error(e)
+      if (e.declined) {
+        addMessage({ body: 'declined.', author: 'assistant', system: true })
+      } else {
+        addMessage({ body: `Error. Inspect Logs.<br><a href="${window.location.origin + window.location.pathname}?q=${message}&debug=true">Reload in debug mode</a>`, author: 'assistant' })
+        console.error(e)
+      }
     }
     return
   } else {
@@ -1509,6 +1546,41 @@ $.style(`
   }
 
   & .mic-btn.-loading { opacity: .5; }
+
+  & .human-prompt {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    background: color-mix(in srgb, var(--root-theme, mediumseagreen) 12%, transparent);
+    border-top: 2px solid var(--root-theme, mediumseagreen);
+    font-size: .85rem;
+  }
+  & .human-prompt-label {
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    opacity: .6;
+  }
+  & .human-prompt-action { font-weight: bold; }
+  & .human-prompt-desc { opacity: .75; font-size: .8rem; }
+  & .human-prompt-btns {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  & .human-prompt-yes,
+  & .human-prompt-no {
+    padding: 4px 16px;
+    border-radius: 4px;
+    border: 1px solid currentColor;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: .85rem;
+    background: transparent;
+  }
+  & .human-prompt-yes { color: var(--root-theme, mediumseagreen); }
+  & .human-prompt-no { opacity: .6; }
 
   & form input,
   & form textarea {
@@ -2094,4 +2166,12 @@ $.when('click', '[data-meta-delete]', async (event) => {
   const sessions = await wasGet(_wasManifestPath)
     .then(b => b.text()).then(t => JSON.parse(t).sessions || []).catch(() => [])
   $.teach({ metaSession: null, sessions })
+})
+
+$.when('click', '.human-prompt-yes', (event) => {
+  humanRPCRespond(event.target.dataset.rpcId, true)
+})
+
+$.when('click', '.human-prompt-no', (event) => {
+  humanRPCRespond(event.target.dataset.rpcId, false)
 })
