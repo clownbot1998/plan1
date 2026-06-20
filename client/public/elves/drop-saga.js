@@ -12,7 +12,10 @@ const $ = Self(tag, {
   done: 0,
   total: 0,
   sagaText: null,
+  sagaIndex: null,
 })
+
+const INDEX_PATH = '/drop-saga/index.json'
 
 function sagaPath(id) { return `/drop-saga/${id}/index.saga` }
 function manifestPath(id) { return `/drop-saga/${id}/manifest.json` }
@@ -29,6 +32,68 @@ function mimeFor(ext) {
 
 function isVideo(mime) { return mime.startsWith('video/') || mime.startsWith('audio/') }
 
+async function loadIndex() {
+  try {
+    const blob = await get(INDEX_PATH)
+    const entries = JSON.parse(await blob.text())
+    $.teach({ sagaIndex: entries }, (s, p) => ({ ...s, ...p }))
+    return entries
+  } catch {
+    $.teach({ sagaIndex: [] }, (s, p) => ({ ...s, ...p }))
+    return []
+  }
+}
+
+async function registerSaga(id, fileCount, label = '') {
+  const entries = await loadIndex()
+  const idx = entries.findIndex(e => e.id === id)
+  const entry = { id, label, fileCount, updatedAt: new Date().toISOString() }
+  if (idx >= 0) entries[idx] = entry
+  else entries.unshift(entry)
+  await put(INDEX_PATH, JSON.stringify(entries), { type: 'application/json' })
+  $.teach({ sagaIndex: entries }, (s, p) => ({ ...s, ...p }))
+}
+
+function navigateTo(id) {
+  history.replaceState(null, '', `?id=${id}`)
+  document.querySelectorAll(tag).forEach(el => { el._mountedId = null })
+  $.teach({ id: null, files: [], sagaText: null, uploading: false, done: 0, total: 0, sagaIndex: null }, (s, p) => ({ ...s, ...p }))
+}
+
+const TEMPLATES = [
+  {
+    id: 'keynote',
+    name: 'keynote',
+    description: 'text slides for talks and pitches',
+    sagaText: '> opening\n\n> the problem\n\n> the solution\n\n> demo\n\n> next steps',
+  },
+  {
+    id: 'photo-album',
+    name: 'photo album',
+    description: 'import a zip in manage, then regenerate',
+    sagaText: '> import your images in the manage tab\n> then click regenerate saga',
+  },
+  {
+    id: 'video-reel',
+    name: 'video reel',
+    description: 'autoplay video sequence',
+    sagaText: '> import your videos in the manage tab\n> then click regenerate saga',
+  },
+  {
+    id: 'mixed',
+    name: 'mixed media',
+    description: 'images, video, and text in sequence',
+    sagaText: '> title\n\n<was-image\nsrc: /drop-saga/example/photo.jpg\n\n> commentary\n\n<was-video\nsrc: /drop-saga/example/clip.mp4\nautoplay: true',
+  },
+]
+
+async function createFromTemplate(tmpl) {
+  const id = crypto.randomUUID()
+  await put(sagaPath(id), tmpl.sagaText, { type: 'text/plain' })
+  await registerSaga(id, 0, tmpl.name)
+  navigateTo(id)
+}
+
 function mount(target) {
   const attr = target.getAttribute('saga-id')
     || new URLSearchParams(window.location.search).get('id')
@@ -38,7 +103,7 @@ function mount(target) {
   if (target._mountedId === id) return
   target._mountedId = id
 
-  $.teach({ id, files: [], sagaText: null, uploading: false, done: 0, total: 0 }, (s, p) => ({ ...s, ...p }))
+  $.teach({ id, files: [], sagaText: null, uploading: false, done: 0, total: 0, sagaIndex: null }, (s, p) => ({ ...s, ...p }))
 
   get(manifestPath(id))
     .then(blob => blob.text())
@@ -48,6 +113,8 @@ function mount(target) {
       files.forEach(f => warm(f.path))
     })
     .catch(() => {})
+
+  loadIndex()
 }
 
 async function saveManifest(id, files) {
@@ -82,6 +149,7 @@ async function processFiles(incoming) {
   await writeSaga(id, all)
   $.teach({ uploading: false, files: all }, (s, p) => ({ ...s, ...p }))
   uploaded.forEach(f => warm(f.path))
+  await registerSaga(id, all.length)
 }
 
 function isDotfile(name) {
@@ -137,13 +205,12 @@ async function exportZip() {
   URL.revokeObjectURL(url)
 }
 
-
 let _pitchUrl = null
 let _pitchText = null
 
 $.draw(target => {
   mount(target)
-  const { tab, id, files, uploading, done, total, sagaText } = $.learn()
+  const { tab, id, files, uploading, done, total, sagaText, sagaIndex } = $.learn()
   if (!id) return ''
 
   const nav = ['home', 'manage', 'edit', 'present'].map(t =>
@@ -153,6 +220,21 @@ $.draw(target => {
   let content = ''
 
   if (tab === 'home') {
+    const indexList = sagaIndex === null
+      ? `<div class="ds-section-loading">loading sagas…</div>`
+      : sagaIndex.length === 0
+        ? `<div class="ds-section-empty">no sagas yet — import something or start from a template</div>`
+        : sagaIndex.map(entry => {
+            const active = entry.id === id ? ' -active' : ''
+            const label = entry.label || entry.id.slice(0, 8)
+            const meta = entry.fileCount ? `${entry.fileCount} files` : 'no files'
+            return `<button class="ds-saga-item${active}" data-goto-saga="${entry.id}"><span class="ds-saga-name">${label}</span><span class="ds-saga-meta">${meta}</span></button>`
+          }).join('')
+
+    const templateCards = TEMPLATES.map(t =>
+      `<button class="ds-template-card" data-use-template="${t.id}"><span class="ds-template-name">${t.name}</span><span class="ds-template-desc">${t.description}</span></button>`
+    ).join('')
+
     content = `
       <div class="ds-landing">
         <div class="ds-interlude">
@@ -179,7 +261,15 @@ $.draw(target => {
             <button class="ds-btn -hero" data-tab="present">go to present →</button>
           </div>
         </div>
-        ${files.length ? `<div class="ds-landing-meta">${files.length} files in this space &nbsp;·&nbsp; <code>${id}</code></div>` : ''}
+        <div class="ds-section">
+          <div class="ds-section-label">your sagas</div>
+          <div class="ds-saga-list">${indexList}</div>
+          <button class="ds-btn ds-new-btn" data-new-saga>+ new saga</button>
+        </div>
+        <div class="ds-section">
+          <div class="ds-section-label">template gallery</div>
+          <div class="ds-template-grid">${templateCards}</div>
+        </div>
       </div>`
   }
 
@@ -247,6 +337,24 @@ $.when('click', '[data-tab]', e => {
   }
 })
 
+$.when('click', '[data-goto-saga]', e => {
+  const btn = e.target.closest('[data-goto-saga]')
+  if (!btn) return
+  navigateTo(btn.dataset.gotoSaga)
+})
+
+$.when('click', '[data-new-saga]', () => {
+  const id = crypto.randomUUID()
+  navigateTo(id)
+})
+
+$.when('click', '[data-use-template]', e => {
+  const btn = e.target.closest('[data-use-template]')
+  if (!btn) return
+  const tmpl = TEMPLATES.find(t => t.id === btn.dataset.useTemplate)
+  if (tmpl) createFromTemplate(tmpl)
+})
+
 $.when('input', '.ds-textarea', e => {
   const { id } = $.learn()
   const text = e.target.value
@@ -285,7 +393,6 @@ $.when('change', '[data-file-pick]', async e => {
   if (zip) { importZip(zip); return }
   if (files.length) importFileList(files)
 })
-
 
 $.style(`
   & {
@@ -402,9 +509,92 @@ $.style(`
     border-color: #444;
     color: #ccc;
   }
-  & .ds-landing-meta {
-    font-size: .75rem;
+  & .ds-section {
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+  }
+  & .ds-section-label {
+    font-size: .7rem;
+    color: #555;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+  & .ds-section-loading,
+  & .ds-section-empty {
+    font-size: .8rem;
     color: #444;
+  }
+  & .ds-saga-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  & .ds-saga-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: .5rem .75rem;
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    color: #bbb;
+    text-align: left;
+    transition: background .1s, border-color .1s;
+  }
+  & .ds-saga-item:hover {
+    background: #1e1e1e;
+    border-color: #333;
+  }
+  & .ds-saga-item.-active {
+    border-color: #444;
+    color: #fff;
+  }
+  & .ds-saga-name {
+    font-size: .85rem;
+    flex: 1;
+  }
+  & .ds-saga-meta {
+    font-size: .75rem;
+    color: #555;
+  }
+  & .ds-new-btn {
+    align-self: flex-start;
+  }
+  & .ds-template-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 1rem;
+  }
+  & .ds-template-card {
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+    padding: 1rem;
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    color: inherit;
+    text-align: left;
+    transition: background .1s, border-color .1s;
+  }
+  & .ds-template-card:hover {
+    background: #1e1e1e;
+    border-color: #444;
+  }
+  & .ds-template-name {
+    font-size: .9rem;
+    font-weight: 600;
+    color: #ddd;
+  }
+  & .ds-template-desc {
+    font-size: .75rem;
+    color: #666;
+    line-height: 1.4;
   }
   & .ds-present {
     height: 100%;
