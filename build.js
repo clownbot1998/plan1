@@ -417,7 +417,7 @@ const searchSrcMtime = Math.max(
   dirMaxMtime(join(PUB, 'sagas')),
   ...posts.map(p => p.mtime)
 )
-if (mtime(searchManifestPath) < searchSrcMtime) {
+if (mtime(searchManifestPath) <= searchSrcMtime) {
   writeFile(searchManifestPath, JSON.stringify(docs))
   print('write: search-manifest.json (' + docs.length + ' docs)')
 } else {
@@ -445,7 +445,7 @@ const fileManifest = []
 walkAll(PUB, '', fileManifest)
 const fileManifestPath = join(DIST, 'file-manifest.json')
 const fileSrcMtime = dirMaxMtime(PUB, FILE_SKIP)
-if (mtime(fileManifestPath) < fileSrcMtime) {
+if (mtime(fileManifestPath) <= fileSrcMtime) {
   writeFile(fileManifestPath, JSON.stringify(fileManifest))
   print('write: file-manifest.json (' + fileManifest.length + ' files)')
 } else {
@@ -485,7 +485,7 @@ const clownbotManifest = {
 
 const clownbotManifestPath = join(DIST, 'clownbot-manifest.json')
 const clownbotSrcMtime = Math.max(dirMaxMtime(MEMORY), ...posts.slice(0, 10).map(p => p.mtime))
-if (mtime(clownbotManifestPath) < clownbotSrcMtime) {
+if (mtime(clownbotManifestPath) <= clownbotSrcMtime) {
   writeFile(clownbotManifestPath, JSON.stringify(clownbotManifest))
   print('write: clownbot-manifest.json (' + memories.length + ' memories, ' + recentPosts.length + ' posts)')
 } else {
@@ -513,7 +513,7 @@ function collectLetters() {
 const letters = collectLetters()
 const lettersManifestPath = join(DIST, 'letters-manifest.json')
 const lettersSrcMtime = dirMaxMtime(MEMORY)
-if (mtime(lettersManifestPath) < lettersSrcMtime) {
+if (mtime(lettersManifestPath) <= lettersSrcMtime) {
   writeFile(lettersManifestPath, JSON.stringify(letters))
   print('write: letters-manifest.json (' + letters.length + ' letters)')
 } else {
@@ -662,7 +662,7 @@ const [, privateErr] = os.stat(PRIVATE)
 if (privateErr === 0) {
   walkPrivate(PRIVATE, '', privateFiles)
   const privateSrcMtime = privateFiles.reduce((m, f) => Math.max(m, f.mtime), 0)
-  if (mtime(privateManifestPath) < privateSrcMtime) {
+  if (mtime(privateManifestPath) <= privateSrcMtime) {
     writeFile(privateManifestPath, JSON.stringify(privateFiles))
     print('write: private-manifest.json (' + privateFiles.length + ' files)')
   } else {
