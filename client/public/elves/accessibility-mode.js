@@ -679,6 +679,8 @@ async function callToolGated(name, args) {
 }
 
 let _agentAbort = null
+let _sagaMessagesRef = null
+let _sagaHistoryHtml = ''
 
 async function agentChat(userMessage) {
   const env = (typeof plan98 !== 'undefined' && plan98?.env) || {}
@@ -697,9 +699,16 @@ async function agentChat(userMessage) {
     })
   }
   $.teach({ thinking: true })
+
+  const { messages: history } = $.learn()
+  const historyMessages = history
+    .filter(m => (m.author === 'human' || m.author === 'assistant') && m.body && !m.system && !m.tty && !m.saga)
+    .slice(-30)
+    .map(m => ({ role: m.author === 'human' ? 'user' : 'assistant', content: m.body }))
+
   const messages = [
     { role: 'system', content: `You are clownbot, an AI that lives in a browser shell called plan1. You help the user navigate and query their system. You have shell and file tools. Use them to answer questions. Be concise. All tool calls require explicit user permission — the user will see a yes/no prompt before each one executes.` },
-    { role: 'user', content: userMessage },
+    ...historyMessages,
   ]
 
   try {
@@ -1190,8 +1199,9 @@ $.draw((target) => {
   const toQuote = (body) =>
     (body || '').split('\n').map(l => l.trim() ? `> ${escapeHyperText(l)}` : '').join('\n')
 
-  const sagaScript = [
-    ...messages.map((m, i) => {
+  if (messages !== _sagaMessagesRef) {
+    _sagaMessagesRef = messages
+    const historyScript = messages.map((m, i) => {
       if (m.saga) return m.body
       if (m.author === 'unassigned') return escapeHyperText(m.body)
       if (m.tty || m.system) return escapeHyperText(m.body)
@@ -1200,18 +1210,20 @@ $.draw((target) => {
       const prev = messages[i - 1]
       const continuingSagas = prev && prev.author === 'assistant' && !prev.saga && !prev.tty && !prev.system && (prev.actor || 'Sagas') === actor
       return continuingSagas ? toQuote(m.body) : `@ ${actor}\n${toQuote(m.body)}`
-    }),
-    (() => {
-      if (!thinkingFace && !ttyLive) return null
-      const text = thinkingFace || ttyLive
-      if (ttyLive) return escapeHyperText(text)
-      const lastMsg = messages[messages.length - 1]
-      const continuingSagas = lastMsg && lastMsg.author === 'assistant' && !lastMsg.saga && !lastMsg.tty && !lastMsg.system
-      return continuingSagas ? toQuote(text) : `@ Sagas\n${toQuote(text)}`
-    })(),
-  ].filter(Boolean).join('\n\n')
+    }).filter(Boolean).join('\n\n')
+    _sagaHistoryHtml = historyScript ? Saga(historyScript) : ''
+  }
 
-  const sagaHtml = sagaScript ? Saga(sagaScript) : ''
+  const streamScript = (() => {
+    if (!thinkingFace && !ttyLive) return null
+    const text = thinkingFace || ttyLive
+    if (ttyLive) return escapeHyperText(text)
+    const lastMsg = messages[messages.length - 1]
+    const continuingSagas = lastMsg && lastMsg.author === 'assistant' && !lastMsg.saga && !lastMsg.tty && !lastMsg.system
+    return continuingSagas ? toQuote(text) : `@ Sagas\n${toQuote(text)}`
+  })()
+
+  const sagaHtml = _sagaHistoryHtml + (streamScript ? Saga(streamScript) : '')
 
   const allSagas = [
     ...sagaDocs,
@@ -1257,6 +1269,7 @@ $.draw((target) => {
         <button type="button" class="sidebar-toggle" data-toggle-sidebar title="sagas">${icon('journal-text')}</button>
         <div class="messages">
           ${sagaHtml}
+          <div class="thinking-disk" aria-hidden="${thinking ? 'false' : 'true'}"><flying-disk></flying-disk></div>
         </div>
       </div>
       <div class="sagas-sidebar" data-open="${sidebarOpen}">
@@ -1320,11 +1333,6 @@ $.draw((target) => {
               <button class="human-prompt-yes" data-rpc-id="${humanPrompt.id}">yes</button>
               <button class="human-prompt-no" data-rpc-id="${humanPrompt.id}">no</button>
             </div>
-          </div>
-        ` : ''}
-        ${thinking ? `
-          <div class="loading">
-            <flying-disk></flying-disk>
           </div>
         ` : ''}
         <div class="compose-row">
@@ -1728,6 +1736,27 @@ $.style(`
 
   & .mic-btn.-loading { opacity: .5; }
 
+  & .thinking-disk[aria-hidden="true"] { display: none; }
+  & .thinking-disk {
+    padding: .5rem;
+  }
+  & .thinking-disk flying-disk {
+    display: grid;
+    place-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    overflow: hidden;
+  }
+
+  & form,
+  & .human-prompt {
+    max-width: min(65ch, 100%);
+    margin-inline: auto;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
   & .human-prompt {
     display: flex;
     flex-direction: column;
@@ -2072,6 +2101,8 @@ $.style(`
     padding: .5rem;
     min-height: 100%;
     font-family: Courier, 'Courier New', monospace;
+    max-width: min(65ch, 100%);
+    margin-inline: auto;
   }
 
 
@@ -2175,18 +2206,10 @@ function interrupt() {
   addMessage({ body: fmt('sagas.interrupted'), author: 'assistant' })
 }
 
-const hotkeys = {}
-
 $.when('keydown', '[name="messageText"]', (event) => {
-  hotkeys[event.key] = true
-
-  if(hotkeys['Control'] && (event.key === 'c' || event.key === 'C')) {
+  if (event.ctrlKey && (event.key === 'c' || event.key === 'C')) {
     interrupt()
   }
-})
-
-$.when('keyup', '[name="messageText"]', (event) => {
-  hotkeys[event.key] = false
 })
 
 $.when('click', '[data-toggle-sidebar]', async () => {
