@@ -84,7 +84,7 @@ export function r($, path, options={}) {
 }
 
 
-export function render(script) {
+export function render(script, options = {}) {
   // nothing in, nothing out
   if(!script) return ''
   const state = {}
@@ -240,7 +240,11 @@ export function render(script) {
         }).join('')
 
       // add some hype to our scene
-      scene += `<${actor} ${attributes}>${innerHTML || innerText}</${actor}>`
+      if (options.actor) {
+        scene += options.actor({ tag: actor, props: properties, innerHTML, innerText })
+      } else {
+        scene += `<${actor} ${attributes}>${innerHTML || innerText}</${actor}>`
+      }
 
       // back to normal time
       time = NORMAL_TIME

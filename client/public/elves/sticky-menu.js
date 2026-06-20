@@ -10,6 +10,7 @@ const SECTIONS = {
       { label: 'ur-shell',    href: '/app/ur-shell' },
       { label: 'Private AI',  href: '/app/private-ai' },
       { label: 'Hail Mary',   href: '/app/hail-mary' },
+      { label: 'Drop Saga',   href: '/app/drop-saga' },
     ]
   },
   sketch: {

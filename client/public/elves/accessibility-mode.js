@@ -2,7 +2,12 @@ import { Self, Saga } from '@plan98/types'
 import IntlMessageFormat from 'intl-messageformat'
 import { showModal, hideModal } from '@plan98/modal'
 import $paperPocket, { sideEffects, systemMenu, getTheme, afterUpdateTheme } from './paper-pocket.js'
-import { get as wasGet, put as wasPut, del as wasDel, ensureSpace } from './plan98-wallet.js'
+import { get as wasGet, del as wasDel, ensureSpace } from './plan98-wallet.js'
+import {
+  loadSession, saveSession, deleteSession,
+  listSessions, upsertManifest, removeFromManifest,
+  messagesToSaga, scheduleFlush, getSaga, putSaga,
+} from './my-sagas.js'
 import Vosk from 'vosk-browser'
 import { agent } from './clownbot-agent.js'
 import { callTool as elfCallTool } from './elf-tools.js'
@@ -170,82 +175,55 @@ async function loadStrings() {
 
 let fileSystem = null
 
-// ── WAS persistence ───────────────────────────────────────────────────────────
+// ── WAS persistence (via my-sagas) ───────────────────────────────────────────
 
 let _shellSessionId = new URLSearchParams(location.search).get('id') || 'default'
-let _wasJsonPath = `/accessibility-mode/${_shellSessionId}.json`
-let _wasSagaPath = `/accessibility-mode/${_shellSessionId}.saga`
 
 function newSession() {
   _shellSessionId = crypto.randomUUID()
-  _wasJsonPath = `/accessibility-mode/${_shellSessionId}.json`
-  _wasSagaPath = `/accessibility-mode/${_shellSessionId}.saga`
   window.history.replaceState(null, '', `?id=${_shellSessionId}`)
 }
 
 async function switchSession(id) {
   _shellSessionId = id
-  _wasJsonPath = `/accessibility-mode/${id}.json`
-  _wasSagaPath = `/accessibility-mode/${id}.saga`
   window.history.replaceState(null, '', `?id=${id}`)
   $.teach({ history: [], historyCursor: null, sidebarOpen: false, exportOpen: false })
   const hadHistory = await wasLoad()
   if (!hadHistory) showPreroll()
 }
-const _wasManifestPath = `/accessibility-mode/index.json`
-
-function messagesToSaga(messages) {
-  const toQuote = (body) => (body || '').split('\n').map(l => l.trim() ? `> ${l}` : '').join('\n')
-  return messages.map(m => {
-    if (m.saga) return m.body
-    if (m.author === 'unassigned') return m.body
-    if (m.tty || m.system) return m.body
-    if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
-    return `@ ${m.actor || 'Sagas'}\n${toQuote(m.body)}`
-  }).filter(Boolean).join('\n\n')
-}
-
-async function updateManifest(meta = {}) {
-  const existing = await wasGet(_wasManifestPath)
-    .then(b => b.text()).then(t => JSON.parse(t)).catch(() => ({ sessions: [] }))
-  const sessions = existing.sessions || []
-  const idx = sessions.findIndex(s => s.id === _shellSessionId)
-  const now = Date.now()
-  if (idx === -1) sessions.unshift({ id: _shellSessionId, created: now, updated: now, ...meta })
-  else { sessions[idx] = { ...sessions[idx], updated: now, ...meta }; sessions.sort((a, b) => b.updated - a.updated) }
-  await wasPut(_wasManifestPath, JSON.stringify({ sessions }), { type: 'application/json' })
-}
-
-async function removeFromManifest(id) {
-  const existing = await wasGet(_wasManifestPath)
-    .then(b => b.text()).then(t => JSON.parse(t)).catch(() => ({ sessions: [] }))
-  const sessions = (existing.sessions || []).filter(s => s.id !== id)
-  await wasPut(_wasManifestPath, JSON.stringify({ sessions }), { type: 'application/json' })
-}
-
-let _wasPending = null
-let _wasFlushing = false
 
 function wasSave() {
   const { messages, history } = $.learn()
   if (!messages.length) return
-  _wasPending = { messages, history }
-  wasFlush()
+  scheduleFlush(_shellSessionId, { messages, history })
 }
 
-async function wasFlush() {
-  if (_wasFlushing || !_wasPending) return
-  _wasFlushing = true
-  const { messages, history } = _wasPending
-  _wasPending = null
-  try {
-    await wasPut(_wasJsonPath, JSON.stringify({ messages, history }), { type: 'application/json' })
-    await wasPut(_wasSagaPath, messagesToSaga(messages), { type: 'text/plain' })
-    await updateManifest()
-  } catch {}
-  _wasFlushing = false
-  wasFlush()
+async function wasLoad() {
+  const session = await loadSession(_shellSessionId)
+  if (session) {
+    $.teach({ messages: session.messages, history: session.history })
+    return true
+  }
+  const text = await getSaga(_shellSessionId)
+  if (text && text.trim()) {
+    $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
+    return true
+  }
+  return false
 }
+
+document.addEventListener('my-sagas:update', ({ detail: { id, text } }) => {
+  if (id !== _shellSessionId) return
+  const { messages } = $.learn()
+  const sagaIdx = messages.findIndex(m => m.author === 'unassigned' && m.saga)
+  if (sagaIdx !== -1) {
+    const updated = [...messages]
+    updated[sagaIdx] = { ...updated[sagaIdx], body: text }
+    $.teach({ messages: updated })
+  } else if (!messages.some(m => m.author === 'human')) {
+    $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
+  }
+})
 
 async function loadBoardCards() {
   try {
@@ -258,22 +236,6 @@ async function loadBoardCards() {
     }))
     $.teach({ boardCards })
   } catch {}
-}
-
-async function wasLoad() {
-  await ensureSpace().catch(() => null)
-  try {
-    const blob = await wasGet(_wasJsonPath)
-    if (!blob) return false
-    const data = JSON.parse(await blob.text())
-    const msgs = data?.messages || []
-    const hasRealHistory = msgs.some(m => m.author === 'human')
-    if (hasRealHistory) {
-      $.teach({ messages: msgs, history: data.history || [] })
-      return true
-    }
-  } catch {}
-  return false
 }
 
 // tty websocket
@@ -917,9 +879,7 @@ text: ls
   'clear': async () => {
     const id = _shellSessionId
     $.teach({ messages: [], history: [], historyCursor: null })
-    wasDel(_wasJsonPath).catch(() => null)
-    wasDel(_wasSagaPath).catch(() => null)
-    removeFromManifest(id).catch(() => null)
+    deleteSession(id).catch(() => null)
     return null
   },
 
@@ -1178,6 +1138,10 @@ function showPreroll() {
 function mount(target) {
   if(target.mounted) return
   target.mounted = true
+  const sagaId = target.getAttribute('saga-id')
+  if (sagaId && sagaId !== _shellSessionId) {
+    _shellSessionId = sagaId
+  }
   const command = target.getAttribute('command')
   const message = target.getAttribute('message')
   const src = target.getAttribute('src')
@@ -1190,6 +1154,18 @@ function mount(target) {
     else if(message) sh(message)
   })
   loadBoardCards()
+}
+
+function embedStub({ tag, props, innerHTML, innerText }) {
+  if ('text' in props || 'html' in props) {
+    const attrs = Object.entries(props)
+      .filter(([k]) => k !== 'text' && k !== 'html')
+      .map(([k, v]) => `${k}="${escapeHyperText(v)}"`)
+      .join(' ')
+    return `<${tag} ${attrs}>${innerHTML || innerText}</${tag}>`
+  }
+  const shorthand = `&lt;${tag}\n` + Object.entries(props).map(([k, v]) => `${k}: ${v}`).join('\n')
+  return `<a class="am-embed-stub" href="javascript:;" data-embed-tag="${escapeHyperText(tag)}" data-embed-props="${escapeHyperText(JSON.stringify(props))}"><pre>${shorthand}</pre></a>`
 }
 
 $.draw((target) => {
@@ -1211,7 +1187,7 @@ $.draw((target) => {
       const continuingSagas = prev && prev.author === 'assistant' && !prev.saga && !prev.tty && !prev.system && (prev.actor || 'Sagas') === actor
       return continuingSagas ? toQuote(m.body) : `@ ${actor}\n${toQuote(m.body)}`
     }).filter(Boolean).join('\n\n')
-    _sagaHistoryHtml = historyScript ? Saga(historyScript) : ''
+    _sagaHistoryHtml = historyScript ? Saga(historyScript, { actor: embedStub }) : ''
   }
 
   const streamScript = (() => {
@@ -1223,7 +1199,7 @@ $.draw((target) => {
     return continuingSagas ? toQuote(text) : `@ Sagas\n${toQuote(text)}`
   })()
 
-  const sagaHtml = _sagaHistoryHtml + (streamScript ? Saga(streamScript) : '')
+  const sagaHtml = _sagaHistoryHtml + (streamScript ? Saga(streamScript, { actor: embedStub }) : '')
 
   const allSagas = [
     ...sagaDocs,
@@ -1685,6 +1661,26 @@ $.style(`
   main > & {
     position: fixed;
     inset: 0;
+  }
+
+  & .am-embed-stub {
+    display: inline-block;
+    color: dodgerblue;
+    text-decoration: none;
+    cursor: pointer;
+    border: 1px solid dodgerblue;
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin: 2px 0;
+  }
+  & .am-embed-stub:hover {
+    background: color-mix(in srgb, dodgerblue 12%, transparent);
+  }
+  & .am-embed-stub pre {
+    margin: 0;
+    font-family: Courier, monospace;
+    font-size: .8rem;
+    pointer-events: none;
   }
 
   & {
@@ -2216,9 +2212,8 @@ $.when('click', '[data-toggle-sidebar]', async () => {
   const opening = !$.learn().sidebarOpen
   $.teach({ sidebarOpen: opening })
   if (opening) {
-    const manifest = await wasGet(_wasManifestPath)
-      .then(b => b.text()).then(t => JSON.parse(t)).catch(() => ({ sessions: [] }))
-    $.teach({ sessions: manifest.sessions || [] })
+    const sessions = await listSessions()
+    $.teach({ sessions })
     loadBoardCards()
   }
 })
@@ -2266,13 +2261,7 @@ $.when('click', '[data-sb-export-toggle]', () => {
 $.when('click', '[data-load-saga]', async (event) => {
   const path = event.target.dataset.loadSaga
   try {
-    let text
-    if (path.startsWith('/accessibility-mode/')) {
-      const blob = await wasGet(path)
-      text = blob ? await blob.text() : null
-    } else {
-      text = await fetch(path).then(r => r.text())
-    }
+    const text = await fetch(path).then(r => r.text())
     if (!text) throw new Error('empty')
     $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
   } catch {
@@ -2283,27 +2272,12 @@ $.when('click', '[data-load-saga]', async (event) => {
 
 $.when('click', '[data-sb-print]', () => {
   const { messages } = $.learn()
-  const toQuote = (body) => (body || '').split('\n').map(l => l.trim() ? `> ${l}` : '').join('\n')
-  const script = messages.map(m => {
-    if (m.saga) return m.body
-    if (m.author === 'unassigned') return m.body
-    if (m.tty || m.system) return m.body
-    if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
-    return `@ ${m.actor || 'Sagas'}\n${toQuote(m.body)}`
-  }).filter(Boolean).join('\n\n')
-  printSaga(script)
+  printSaga(messagesToSaga(messages))
 })
 
 $.when('click', '[data-sb-save]', () => {
   const { messages } = $.learn()
-  const toQuote = (body) => (body || '').split('\n').map(l => l.trim() ? `> ${l}` : '').join('\n')
-  const script = messages.map(m => {
-    if (m.saga) return m.body
-    if (m.author === 'unassigned') return m.body
-    if (m.tty || m.system) return m.body
-    if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
-    return `@ ${m.actor || 'Sagas'}\n${toQuote(m.body)}`
-  }).filter(Boolean).join('\n\n')
+  const script = messagesToSaga(messages)
   const blob = new Blob([script], { type: 'text/plain' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
@@ -2348,28 +2322,15 @@ $.when('click', '[data-stop-close]', (event) => {
 $.when('click', '[data-meta-save]', async () => {
   const title = document.querySelector('[name="metaTitle"]')?.value?.trim() || ''
   const { metaSession: id } = $.learn()
-  const savedId = _shellSessionId
-  const savedJson = _wasJsonPath
-  const savedSaga = _wasSagaPath
-  _shellSessionId = id
-  _wasJsonPath = `/accessibility-mode/${id}.json`
-  _wasSagaPath = `/accessibility-mode/${id}.saga`
-  await updateManifest({ title }).catch(() => null)
-  _shellSessionId = savedId
-  _wasJsonPath = savedJson
-  _wasSagaPath = savedSaga
-  const sessions = await wasGet(_wasManifestPath)
-    .then(b => b.text()).then(t => JSON.parse(t).sessions || []).catch(() => [])
+  await upsertManifest(id, { title }).catch(() => null)
+  const sessions = await listSessions()
   $.teach({ metaSession: null, sessions })
 })
 
 $.when('click', '[data-meta-delete]', async (event) => {
   const id = event.target.dataset.metaDelete
-  await removeFromManifest(id).catch(() => null)
-  wasDel(`/accessibility-mode/${id}.json`).catch(() => null)
-  wasDel(`/accessibility-mode/${id}.saga`).catch(() => null)
-  const sessions = await wasGet(_wasManifestPath)
-    .then(b => b.text()).then(t => JSON.parse(t).sessions || []).catch(() => [])
+  await deleteSession(id).catch(() => null)
+  const sessions = await listSessions()
   $.teach({ metaSession: null, sessions })
 })
 
@@ -2379,4 +2340,21 @@ $.when('click', '.human-prompt-yes', (event) => {
 
 $.when('click', '.human-prompt-no', (event) => {
   humanRPCRespond(event.target.dataset.rpcId, false)
+})
+
+$.when('click', '.am-embed-stub', (event) => {
+  const a = event.target.closest('.am-embed-stub')
+  if (!a) return
+  const tag = a.dataset.embedTag
+  const props = JSON.parse(a.dataset.embedProps || '{}')
+  const attrs = Object.entries(props).map(([k, v]) => `${k}="${escapeHyperText(v)}"`).join(' ')
+  showModal(`
+    <div style="display:grid;height:100%;width:100%;grid-template-rows:auto 1fr;">
+      <div style="background:black;">
+        <button data-modal-close class="branded-button">Back</button>
+      </div>
+      <${tag} ${attrs}></${tag}>
+    </div>
+  `, { blockExit: true, onHide: () => $.teach({ popped: false }) })
+  $.teach({ popped: true })
 })

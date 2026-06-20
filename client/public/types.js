@@ -103,8 +103,8 @@ export function Self(x, box) {
   return elf(x, box)
 }
 
-export function Saga(x) {
-  return saga(Text(x))
+export function Saga(x, options = {}) {
+  return saga(Text(x), options)
 }
 
 export function Activities(x) {

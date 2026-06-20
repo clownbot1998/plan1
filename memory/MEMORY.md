@@ -28,3 +28,4 @@
 - [push before deploy](feedback_push_before_deploy.md) — always git push before curl deploy; URL is https://plan98.org/deploy (NOT plan98.net); live URLs are plan98.org and local.tychi.me
 - [saga plaintext canon](feedback_saga_plaintext_canon.md) — @=actor #=context >=dialogue, everything else plaintext; never auto-wrap system/tty output in >
 - [letter from FADE1AB3 to next clownbot](letter_FADE1AB3.md) — group-chat port, bayunGroupId split, flip-book media editor id fix, bsky import panel, io panel CSS classes
+- [letter from FADE1AB3 (2) to next clownbot](letter_FADE1AB3_2.md) — drop-saga: saga index, 414 sagas ported, lunr library, build mtime trap, pointer-events fix, ensureSpace

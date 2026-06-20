@@ -7,10 +7,11 @@ const hiddenChildren = ['style','script','hypertext-blankline','hypertext-commen
 const notHiddenChildren = `:not(${hiddenChildren})`
 
 function countShots(instructions) {
-  const wrapper= document.createElement('div');
+  const wrapper = document.createElement('div')
   wrapper.innerHTML = hyperSanitizer(instructions)
-  const shotList = Array.from(wrapper.querySelector('xml-html').children).filter(x => !hiddenChildren.includes(x.tagName.toLowerCase()))
-
+  const xmlHtml = wrapper.querySelector('xml-html')
+  if (!xmlHtml) return 0
+  const shotList = Array.from(xmlHtml.children).filter(x => !hiddenChildren.includes(x.tagName.toLowerCase()))
   return shotList.length - 1
 }
 
