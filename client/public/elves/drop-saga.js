@@ -98,6 +98,7 @@ function searchSagas(query) {
 }
 
 async function createFromTemplate(sagaText, label = '') {
+  await ensureSpace().catch(() => null)
   const id = crypto.randomUUID()
   await put(sagaPath(id), sagaText, { type: 'text/plain' })
   await registerSaga(id, 0, label)
@@ -579,10 +580,12 @@ $.style(`
   & .ds-saga-name {
     font-size: .85rem;
     flex: 1;
+    pointer-events: none;
   }
   & .ds-saga-meta {
     font-size: .75rem;
     color: #555;
+    pointer-events: none;
   }
   & .ds-new-btn {
     align-self: flex-start;
@@ -629,11 +632,13 @@ $.style(`
     font-size: .9rem;
     font-weight: 600;
     color: #ddd;
+    pointer-events: none;
   }
   & .ds-template-desc {
     font-size: .75rem;
     color: #666;
     line-height: 1.4;
+    pointer-events: none;
   }
   & .ds-present {
     height: 100%;
