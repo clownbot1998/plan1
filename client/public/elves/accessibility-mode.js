@@ -2,7 +2,7 @@ import { Self, Saga } from '@plan98/types'
 import IntlMessageFormat from 'intl-messageformat'
 import { showModal, hideModal } from '@plan98/modal'
 import $paperPocket, { sideEffects, systemMenu, getTheme, afterUpdateTheme } from './paper-pocket.js'
-import { get as wasGet, del as wasDel, ensureSpace } from './plan98-wallet.js'
+import { get as wasGet, put, del as wasDel, ensureSpace } from './plan98-wallet.js'
 import {
   loadSession, saveSession, deleteSession,
   listSessions, upsertManifest, removeFromManifest,
@@ -178,7 +178,10 @@ let fileSystem = null
 
 // ── WAS persistence (via my-sagas) ───────────────────────────────────────────
 
-let _shellSessionId = new URLSearchParams(location.search).get('id') || 'default'
+const _urlParams = new URLSearchParams(location.search)
+let _shellSessionId = _urlParams.get('id') || 'default'
+// Optional override: when embedded in another elf that owns a different WAS path
+const _overrideSagaPath = _urlParams.get('saga-path') || null
 
 function newSession() {
   _shellSessionId = crypto.randomUUID()
@@ -199,6 +202,17 @@ function wasSave() {
   const { messages, history } = $.learn()
   if (!messages.length) return
   scheduleFlush(_shellSessionId, { messages, history })
+  if (_overrideSagaPath) {
+    const sagaText = messagesToSaga(messages)
+    ensureSpace().catch(() => null).then(() => {
+      put(_overrideSagaPath, sagaText, { type: 'text/plain' }).catch(() => null)
+      fetch(`/sync${_overrideSagaPath}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'text/plain', 'Version': `"${Date.now()}"` },
+        body: sagaText,
+      }).catch(() => null)
+    })
+  }
 }
 
 let _unsubscribeSaga = null
@@ -220,6 +234,24 @@ function _applyIncomingSaga(text) {
 async function wasLoad() {
   _unsubscribeSaga?.()
   _unsubscribeSession?.()
+
+  if (_overrideSagaPath) {
+    // Embedded by an external elf (e.g. drop-saga) — read directly from its WAS path
+    await ensureSpace().catch(() => null)
+    let text = ''
+    try {
+      const blob = await wasGet(_overrideSagaPath)
+      text = blob ? await blob.text() : ''
+    } catch {}
+    if (text && text.trim()) {
+      $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
+    }
+    const es = new EventSource(`/sync${_overrideSagaPath}`)
+    es.onmessage = e => { if (e.data) _applyIncomingSaga(e.data) }
+    es.onerror = () => {}
+    _unsubscribeSaga = () => es.close()
+    return !!(text && text.trim())
+  }
 
   const session = await loadSession(_shellSessionId)
   if (session) {
@@ -1151,10 +1183,6 @@ function showPreroll() {
 function mount(target) {
   if(target.mounted) return
   target.mounted = true
-  const sagaId = target.getAttribute('saga-id')
-  if (sagaId && sagaId !== _shellSessionId) {
-    _shellSessionId = sagaId
-  }
   const command = target.getAttribute('command')
   const message = target.getAttribute('message')
   const src = target.getAttribute('src')

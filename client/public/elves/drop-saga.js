@@ -3,9 +3,28 @@ import JSZip from 'jszip'
 import lunr from 'lunr'
 import { put, get, ensureSpace } from './plan98-wallet.js'
 import { warm } from './was-image.js'
-import {
-  getSaga, putSaga, listSessions, upsertManifest, removeFromManifest,
-} from './my-sagas.js'
+
+const INDEX_PATH = '/drop-saga/index.json'
+
+function sagaPath(id) { return `/drop-saga/${id}/index.saga` }
+
+async function getSaga(id) {
+  await ensureSpace().catch(() => null)
+  try {
+    const blob = await get(sagaPath(id))
+    return blob ? blob.text() : ''
+  } catch { return '' }
+}
+
+async function putSaga(id, text) {
+  await ensureSpace().catch(() => null)
+  await put(sagaPath(id), text, { type: 'text/plain' })
+  fetch(`/sync${sagaPath(id)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'text/plain', 'Version': `"${Date.now()}"` },
+    body: text,
+  }).catch(() => null)
+}
 
 const tag = 'drop-saga'
 const $ = Self(tag, {
@@ -36,14 +55,24 @@ function mimeFor(ext) {
 function isVideo(mime) { return mime.startsWith('video/') || mime.startsWith('audio/') }
 
 async function loadIndex() {
-  const entries = await listSessions()
-  $.teach({ sagaIndex: entries }, (s, p) => ({ ...s, ...p }))
-  return entries
+  try {
+    const blob = await get(INDEX_PATH)
+    const entries = blob ? JSON.parse(await blob.text()) : []
+    $.teach({ sagaIndex: entries }, (s, p) => ({ ...s, ...p }))
+    return entries
+  } catch {
+    $.teach({ sagaIndex: [] }, (s, p) => ({ ...s, ...p }))
+    return []
+  }
 }
 
 async function registerSaga(id, fileCount, label = '') {
-  await upsertManifest(id, { label, fileCount })
-  const entries = await listSessions()
+  const entries = await loadIndex()
+  const idx = entries.findIndex(e => e.id === id)
+  const entry = { id, label, fileCount, updatedAt: new Date().toISOString() }
+  if (idx >= 0) entries[idx] = entry
+  else entries.unshift(entry)
+  await put(INDEX_PATH, JSON.stringify(entries), { type: 'application/json' })
   $.teach({ sagaIndex: entries }, (s, p) => ({ ...s, ...p }))
 }
 
@@ -87,13 +116,16 @@ function searchSagas(query) {
   }
 }
 
-async function createFromTemplate(sagaText, label = '') {
+async function createFromTemplate(text, label = '') {
   await ensureSpace().catch(() => null)
   const id = crypto.randomUUID()
-  await putSaga(id, sagaText)
+  await putSaga(id, text)
   await registerSaga(id, 0, label)
   navigateTo(id, 'edit')
+  $.teach({ sagaText: text }, (s, p) => ({ ...s, ...p }))
 }
+
+let _sagaSync = null
 
 function mount(target) {
   const attr = target.getAttribute('saga-id')
@@ -103,6 +135,13 @@ function mount(target) {
   if (!id) { id = crypto.randomUUID(); localStorage.setItem(storageKey, id) }
   if (target._mountedId === id) return
   target._mountedId = id
+
+  _sagaSync?.close()
+  _sagaSync = new EventSource(`/sync${sagaPath(id)}`)
+  _sagaSync.onmessage = e => {
+    if (e.data) $.teach({ sagaText: e.data }, (s, p) => ({ ...s, ...p }))
+  }
+  _sagaSync.onerror = () => {}
 
   $.teach({ id, files: [], sagaText: null, uploading: false, done: 0, total: 0, sagaIndex: null }, (s, p) => ({ ...s, ...p }))
 
@@ -132,6 +171,7 @@ async function writeSaga(id, files) {
     return `<was-image\nsrc: ${f.path}`
   }).join('\n\n')
   await putSaga(id, lines)
+  $.teach({ sagaText: lines }, (s, p) => ({ ...s, ...p }))
 }
 
 async function processFiles(incoming) {
@@ -316,7 +356,8 @@ $.draw(target => {
   }
 
   if (tab === 'accessibility') {
-    content = `<div class="ds-access"><accessibility-mode saga-id="${id}"></accessibility-mode></div>`
+    const sagaP = encodeURIComponent(sagaPath(id))
+    content = `<div class="ds-access"><iframe src="/app/accessibility-mode?id=${id}&saga-path=${sagaP}" class="ds-access-frame" allow="microphone"></iframe></div>`
   }
 
   return `
@@ -338,17 +379,15 @@ $.draw(target => {
 
 $.when('click', '[data-tab]', e => {
   const t = e.target.dataset.tab
-  const { id, sagaText } = $.learn()
+  const { id } = $.learn()
   $.teach({ tab: t }, (s, p) => ({ ...s, ...p }))
-  if ((t === 'edit' || t === 'present') && sagaText === null) {
-    loadSagaText(id)
-  }
+  if (t === 'edit' || t === 'present') loadSagaText(id)
 })
 
-// keep sagaText in sync when returning from accessibility tab
+// reload sagaText when returning to edit/present — iframe may have written new content
 $.when('click', '[data-tab="edit"], [data-tab="present"]', () => {
-  const { id } = $.learn()
-  loadSagaText(id)
+  const { id, tab } = $.learn()
+  if (tab === 'accessibility') loadSagaText(id)
 })
 
 $.when('click', '[data-goto-saga]', e => {
@@ -715,8 +754,10 @@ $.style(`
     height: 100%;
     overflow: hidden;
   }
-  & .ds-access accessibility-mode {
+  & .ds-access-frame {
     display: block;
+    width: 100%;
     height: 100%;
+    border: none;
   }
 `)
