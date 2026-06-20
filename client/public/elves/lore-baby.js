@@ -1,4 +1,5 @@
 import { Self, Saga, Activities } from '@plan98/types'
+import { listSessions, getSaga, putSaga, subscribeSaga, sagaPath } from './my-sagas.js'
 import './lrud-elf.js'
 import { innerHTML } from 'diffhtml'
 import lunr from 'lunr'
@@ -101,7 +102,14 @@ function persist(target, $, _flags) {
     if (src) {
       const file = update.view.state.doc.toString()
       $.controller({ [src]: { file, src }})
-      if (!target._applyingRemote) target.simpleton?.changed()
+      if (!target._applyingRemote) {
+        if (isMySaga(src)) {
+          clearTimeout(target._wasSaveTimer)
+          target._wasSaveTimer = setTimeout(() => putSaga(idFromSrc(src), file), 800)
+        } else {
+          target.simpleton?.changed()
+        }
+      }
     }
 	}
 }
@@ -278,7 +286,12 @@ $.e('click', '[data-search]', search)
 
 Vim.defineEx('write', 'w', () => {
   const { src } = $.model()
-  persistSave(src, $)
+  if (isMySaga(src)) {
+    const { file } = $.model()[src] || {}
+    if (file !== undefined) putSaga(idFromSrc(src), file)
+  } else {
+    persistSave(src, $)
+  }
 })
 
 const sagaDocs = [
@@ -298,6 +311,35 @@ sagaDocs.forEach(x => {
   documents.push(x)
   docMap.set(x.path, x)
 })
+
+listSessions().then(sessions => {
+  sessions.forEach(s => {
+    const p = sagaPath(s.id)
+    if (docMap.has(p)) return
+    const doc = { name: s.title || s.id.slice(0, 8), path: p }
+    documents.push(doc)
+    docMap.set(p, doc)
+    idx.add(doc)
+  })
+})
+
+function isMySaga(src) { return src && src.startsWith('/my-sagas/') }
+
+function idFromSrc(src) { return src.replace('/my-sagas/', '').replace('.saga', '') }
+
+async function loadMySaga(src, target, root) {
+  const id = idFromSrc(src)
+  const file = await getSaga(id)
+  $.controller({ src, [src]: { file, src } })
+  insert(root || target, file)
+  target._wasUnsubscribe?.()
+  target._wasUnsubscribe = subscribeSaga(id, text => {
+    $.controller({ [src]: { file: text, src } })
+    if (target.view) target._applyingRemote = true
+    insert(target, text)
+    target._applyingRemote = false
+  })
+}
 
 $.view(render, { beforeUpdate, afterUpdate })
 
@@ -402,20 +444,24 @@ function beforeUpdate(target) {
         $.controller({ src: url, [url]: { file, src: url } })
       }
       if(url) {
-        fetch(url).then(async blob => {
-          const file = await blob.text()
-          $.controller({ src: url, [url]: { file, src: url }})
-          insert(target, file)
-        }).catch(e => {
-          fetch(path).then(async blob => {
+        if (isMySaga(url)) {
+          loadMySaga(url, target, target)
+        } else {
+          fetch(url).then(async blob => {
             const file = await blob.text()
             $.controller({ src: url, [url]: { file, src: url }})
             insert(target, file)
-          }).catch(e2 => {
-            console.error(e)
-            console.error(e2)
+          }).catch(e => {
+            fetch(path).then(async blob => {
+              const file = await blob.text()
+              $.controller({ src: url, [url]: { file, src: url }})
+              insert(target, file)
+            }).catch(e2 => {
+              console.error(e)
+              console.error(e2)
+            })
           })
-        })
+        }
 
       }
     }
@@ -436,7 +482,7 @@ function afterUpdate(target) {
 
   const { src } = $.model()
   const { file } = $.model()[src] || {}
-  if (src && file !== undefined) {
+  if (src && file !== undefined && !isMySaga(src)) {
     connectSimpleton(target, src, file, $)
   }
 
@@ -666,12 +712,16 @@ $.e('keydown', 'input[name="search"]', event => {
     const item = documents.find(y => suggestions[suggestIndex].ref === y.path)
 
     if(item) {
-      fetch(item.path).then(async (res) => {
-        const file = await res.text()
-        $.controller({ src: item.path, [item.path]: { file, src: item.path }})
-        insert(root, file)
-      })
       $.controller({ src: item.path, data: null, edit: true })
+      if (isMySaga(item.path)) {
+        loadMySaga(item.path, root, root)
+      } else {
+        fetch(item.path).then(async (res) => {
+          const file = await res.text()
+          $.controller({ src: item.path, [item.path]: { file, src: item.path }})
+          insert(root, file)
+        })
+      }
       document.activeElement.blur()
       return
     }
@@ -765,12 +815,16 @@ window.addEventListener('lrud:press', e => {
     const item = documents.find(y => suggestions[suggestIndex]?.ref === y.path)
     if (!item) return
     const root = document.querySelector($.link)
-    fetch(item.path).then(async res => {
-      const file = await res.text()
-      $.controller({ src: item.path, [item.path]: { file, src: item.path } })
-      insert(root, file)
-    })
     $.controller({ src: item.path, data: null, edit: true, showSuggestions: false })
+    if (isMySaga(item.path)) {
+      loadMySaga(item.path, root, root)
+    } else {
+      fetch(item.path).then(async res => {
+        const file = await res.text()
+        $.controller({ src: item.path, [item.path]: { file, src: item.path } })
+        insert(root, file)
+      })
+    }
   }
 })
 

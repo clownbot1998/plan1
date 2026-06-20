@@ -11,6 +11,7 @@ const SECTIONS = {
       { label: 'Private AI',  href: '/app/private-ai' },
       { label: 'Hail Mary',   href: '/app/hail-mary' },
       { label: 'Drop Saga',   href: '/app/drop-saga' },
+      { label: 'My Sagas',   href: '/app/my-sagas' },
     ]
   },
   sketch: {

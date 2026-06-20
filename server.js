@@ -389,29 +389,33 @@ async function handleRequest(request) {
     });
   }
 
-  // sync — /sync/<key> — same as braid but no disk read, no auth on PUT, open to any JSON key
+  // sync — /sync/<key> — SSE push channel, no disk backing, no auth on PUT
   if (path.startsWith('/sync/') && (request.method === 'GET' || request.method === 'PUT' || request.method === 'OPTIONS')) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, PUT', 'access-control-allow-headers': 'content-type, version, parents' } });
-    const key = path.slice(5); // '/sync/my-sagas/abc.json' → '/my-sagas/abc.json'
-    if (!syncState.has(key)) syncState.set(key, { text: '', version: '"v0"', subs: new Set() });
+    const key = path.slice(5);
+    if (!syncState.has(key)) syncState.set(key, { text: '', subs: new Set() });
     const state = syncState.get(key);
 
     if (request.method === 'GET') {
-      let ctrl;
+      let ctrl, heartbeat;
+      const sseFrame = text => enc.encode(`data: ${text.split('\n').join('\ndata: ')}\n\n`);
       const stream = new ReadableStream({
-        start(c) { ctrl = c; state.subs.add(c); c.enqueue(makeBraidBytes(state.version, '', null, state.text)); },
-        cancel() { state.subs.delete(ctrl); },
+        start(c) {
+          ctrl = c; state.subs.add(c);
+          if (state.text) c.enqueue(sseFrame(state.text));
+          heartbeat = setInterval(() => {
+            try { c.enqueue(enc.encode(': ping\n\n')); } catch { clearInterval(heartbeat); state.subs.delete(ctrl); }
+          }, 30000);
+        },
+        cancel() { clearInterval(heartbeat); state.subs.delete(ctrl); },
       });
-      return new Response(stream, { status: 209, headers: { 'content-type': 'text/plain; charset=utf-8', 'subscribe': 'true', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no', 'access-control-allow-origin': '*' } });
+      return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no', 'access-control-allow-origin': '*' } });
     }
 
     if (request.method === 'PUT') {
-      const versionHdr = request.headers.get('Version') ?? `"sync-${Date.now()}"`;
-      const prevVersion = state.version;
       state.text = await request.text();
-      state.version = versionHdr;
-      const update = makeBraidBytes(versionHdr, prevVersion, null, state.text);
-      for (const sub of state.subs) { try { sub.enqueue(update); } catch { state.subs.delete(sub); } }
+      const frame = enc.encode(`data: ${state.text.split('\n').join('\ndata: ')}\n\n`);
+      for (const sub of state.subs) { try { sub.enqueue(frame); } catch { state.subs.delete(sub); } }
       return new Response('ok', { headers: { 'access-control-allow-origin': '*' } });
     }
   }
