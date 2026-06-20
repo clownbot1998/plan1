@@ -105,3 +105,5 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 | `P1AN0KEY-CAFE-BABE-DEAD-BEEFFACE2026` | 2026-06-10 (2) | shared stage: four-quadrant split replaced with one shared piano floor. QR corner increments per player. two bugs: qr-code caches by URL so setAttribute doesn't retrigger $.draw — replace element on slot change. nextSlot stale because playerList only updates couch-coop state — onRemotePlayerList pub/sub bridges to song-wave's $.teach. one stage, four dots, enemies fall. |
 
 | `FADE1AB3-CAFE-BABE-C0DE-BEEFFACE2026` | 2026-06-11 | cloud labels in 3D (THREE.Sprite, chromatic shadow, card text first line), join-cta elf (QR+copy+share, responsive), share overlay replacing QR modal, gallery fullscreen+black+no social buttons, dream-team compass stays normal. |
+
+| `B1D1SYNC-CAFE-BABE-C0DE-DEADBEEF2026` | 2026-06-20 | my-sagas shared store, plan98-sync abstraction (snapshot+SSE), accessibility-mode embed stubs + Saga renderer hook, drop-saga accessibility iframe, bi-directional live sync over /sync/ SSE, saga-pitch null guard, post-import state fix. |
