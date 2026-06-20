@@ -417,12 +417,8 @@ const searchSrcMtime = Math.max(
   dirMaxMtime(join(PUB, 'sagas')),
   ...posts.map(p => p.mtime)
 )
-if (mtime(searchManifestPath) <= searchSrcMtime) {
-  writeFile(searchManifestPath, JSON.stringify(docs))
-  print('write: search-manifest.json (' + docs.length + ' docs)')
-} else {
-  print('[cached] search-manifest.json')
-}
+writeFile(searchManifestPath, JSON.stringify(docs))
+print('write: search-manifest.json (' + docs.length + ' docs)')
 
 // ── file manifest (full client walk) ─────────────────────────────────────────
 
