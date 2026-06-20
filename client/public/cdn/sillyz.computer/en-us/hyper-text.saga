@@ -1,0 +1,193 @@
+<title-page
+author: Ty
+title: Hyper Text
+
+# Int. Bill Graham Civic Auditorium - December 9, 1968.
+
+An auditorium filled with people perplexed by a man on a stage with unfamiliar objects.
+
+@ Douglas Englebart
+> If in your office, you as an intellectual worker were supplied with a computer display, backed up by a computer that was alive for you all day, and was instantly responsive to every action you had—how much value could you derive from that?
+
+Doug smirks.
+
+@ Douglas Englebart
+> We're going to do our best to show you, rather than tell you about this program.
+
+^ Cut and Remixed and Spliced with Computer History Archives
+
+# Int. Computer History Museum - April 10, 2025
+
+@ Ty
+> The Agenda for this session is as follows.
+
+> 1. A speed run of hyptertext
+> 2. A brainstorm of user experience challenges
+> 3. A live coded proof of concept of the most interesting possibility
+
+> Before we begin, let's start with the finale, our call to action.
+
+> We need a Hypertext Marketplace
+
+> Every operating system has a marketplace
+
+Apple: App Store, Windows and Xbox: Microsoft Store, PlayStation Store, Nintendo e-Shop, debian (apt), arch (yay, pacman), fedora (rpm)
+
+> Other programming languages have package registries
+
+javascript (npm, yarn, jsr), python (pip), ruby (gem), java (maven/gradle), rust (cargo), go (go mod), perl (cpan), .net (NuGet), dart (pub), elixir (mix)
+
+> Hypertext has been generally been controlled in this order: by browser vendors, extension authors, library maintainers, end-users
+
+By collapsing the complexity of creating and distributing hypertext then vendors, authors, maintainers and users can become singular every day people, like you.
+
+@ Ty
+> Let's script the future together, starting now. But first, a speed run of hypertext.
+
+# What is Hypertext and why?
+
+Hypertext is an interactive media format, originally designed for augmenting human memory retrieval, inspired by a hypothetical World War II era device, a "Memex"; MEMory EXpansion.
+
+Modern hypertext is primarily known as the implementation that powers the World Wide Web.
+
+Hypertext, the vision, exists beyond the one widely-adopted example of the web and can be better described as an infinitely fold-able pop-up book.
+
+# Basic Hypertext
+
+When you read hypertext, you can drill into words and concepts to uncover more knowledge and understanding of any topic that has been encoded as hypertext.
+
+@ Ty
+> A basic introduction of hypertext. First, a heading
+
+<code-module
+src: /public/cdn/sillyz.computer/en-us/tutorials/html/h1.html
+
+<iframe
+src: /public/cdn/sillyz.computer/en-us/tutorials/html/h1.html
+
+> a list
+
+<code-module
+src: /public/cdn/sillyz.computer/en-us/tutorials/html/list.html
+
+<iframe
+src: /public/cdn/sillyz.computer/en-us/tutorials/html/list.html
+
+> a selectbox of options with their values
+
+<code-module
+src: /public/cdn/sillyz.computer/en-us/tutorials/html/select.html
+
+<iframe
+src: /public/cdn/sillyz.computer/en-us/tutorials/html/select.html
+
+> a link to the homepage of any website over any protocol
+
+<code-module
+src: /public/cdn/sillyz.computer/en-us/tutorials/html/link.html
+
+<iframe
+src: /public/cdn/sillyz.computer/en-us/tutorials/html/link.html
+
+a sampling of a hypertext function invocation
+
+<code-module
+src: /public/cdn/sillyz.computer/en-us/tutorials/md/hyper-text.md
+
+which summons the proper greetings for the proper planets at their moment in time
+
+<iframe
+src: /cdn/sillyz.computer/en-us/tutorials/md/hyper-text.md
+
+# Basic JavaScript
+
+When you write hypertext, you can define it with JavaScript. The hyper-text from just now is as follows.
+
+<code-module
+src: /public/elves/hyper-text.js
+
+> Reactive data binding
+
+<hello-nickname
+
+<code-module
+src: /public/elves/hello-nickname.js
+
+> simulated iphone dimensions running a game console and game engine
+
+<iframe
+src: /app/app-simulator?app=couch-coop&amp;class=iphone
+
+<code-module
+src: /public/elves/app-simulator.js
+
+<code-module
+src: /public/elves/couch-coop.js
+
+<code-module
+src: /public/elves/song-wave.js
+
+> chat rooms via relay
+
+<iframe
+src: /app/cool-chat
+
+<code-module
+src: /public/elves/cool-chat.js
+
+> local llm chat
+
+<iframe
+src: /app/hello-ollama
+
+<code-module
+src: /public/elves/hello-ollama.js
+
+> Braid working group, collaborative text syncronization over hypertext transfer protocol
+
+<qr-code
+src: https://sillyz.computer/app/simpleton-client?src=/sample-collaborative-text.txt
+
+<iframe
+src: /app/simpleton-client?src=/sample-collaborative-text.txt
+
+<iframe
+src: /app/world-map
+
+<iframe
+src: /app/code-module?src=/public/elves/iiw-40.js
+
+<a
+href: /app/iiw-40
+target: _blank
+text: IIW-40
+
+> Let's build a Hypertext Package Registry, together.
+
+@ Alan Kay
+> I wonder what Silicon Valley will do when they finally run out of Doug's ideas.
+
+& memex
+
+<iframe
+src: /app/code-module?src=/public/cdn/sillyz.computer/en-us/hyper-text.saga
+
+<iframe
+src: /app/code-module?src=/public/elves/paper-pocket.js
+
+<iframe
+src: /app/code-module?src=/public/elves/debug-gamepads.js
+
+<iframe
+src: /app/code-module?src=/public/elf.js
+
+<iframe
+src: /app/code-module?src=/public/index.html
+
+<live-graphic
+position: top-left
+src: /cdn/boxart.svg
+
+<a
+href: /app/paper-pocket?rom=typo-hero
+text: &lt;typo-hero

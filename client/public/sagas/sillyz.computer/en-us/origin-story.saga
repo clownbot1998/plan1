@@ -1,0 +1,25 @@
+# Interior Animation Studio
+
+Ty sits at the drawing board
+
+@ Silly (V.O.)
+> It is dangerous to go alone. Take this.
+
+A PAPER POCKET lands beneath the BLUE PENCIL
+
+<sketch-pad
+style: height: 200px;
+
+TY puts the PAPER POCKET in his MOUTH
+
+^ Cold Open to Last Gen Gaming
+
+<action-script
+text: Begin Quest
+data-action: quest
+data-script: /public/elves/silly-wizard.js
+
+<action-script
+text: Learn More
+data-action: learn
+data-script: /public/elves/silly-wizard.js

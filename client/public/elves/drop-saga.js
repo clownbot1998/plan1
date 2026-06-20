@@ -1,5 +1,6 @@
 import { Self } from '@plan98/types'
 import JSZip from 'jszip'
+import lunr from 'lunr'
 import { put, get, ensureSpace } from './plan98-wallet.js'
 import { warm } from './was-image.js'
 
@@ -13,6 +14,8 @@ const $ = Self(tag, {
   total: 0,
   sagaText: null,
   sagaIndex: null,
+  manifestSagas: null,
+  sagaSearch: '',
 })
 
 const INDEX_PATH = '/drop-saga/index.json'
@@ -54,44 +57,51 @@ async function registerSaga(id, fileCount, label = '') {
   $.teach({ sagaIndex: entries }, (s, p) => ({ ...s, ...p }))
 }
 
-function navigateTo(id) {
+function navigateTo(id, tab = 'home') {
   history.replaceState(null, '', `?id=${id}`)
   document.querySelectorAll(tag).forEach(el => { el._mountedId = null })
-  $.teach({ id: null, files: [], sagaText: null, uploading: false, done: 0, total: 0, sagaIndex: null }, (s, p) => ({ ...s, ...p }))
+  $.teach({ id: null, tab, files: [], sagaText: null, uploading: false, done: 0, total: 0, sagaIndex: null }, (s, p) => ({ ...s, ...p }))
 }
 
-const TEMPLATES = [
-  {
-    id: 'keynote',
-    name: 'keynote',
-    description: 'text slides for talks and pitches',
-    sagaText: '> opening\n\n> the problem\n\n> the solution\n\n> demo\n\n> next steps',
-  },
-  {
-    id: 'photo-album',
-    name: 'photo album',
-    description: 'import a zip in manage, then regenerate',
-    sagaText: '> import your images in the manage tab\n> then click regenerate saga',
-  },
-  {
-    id: 'video-reel',
-    name: 'video reel',
-    description: 'autoplay video sequence',
-    sagaText: '> import your videos in the manage tab\n> then click regenerate saga',
-  },
-  {
-    id: 'mixed',
-    name: 'mixed media',
-    description: 'images, video, and text in sequence',
-    sagaText: '> title\n\n<was-image\nsrc: /drop-saga/example/photo.jpg\n\n> commentary\n\n<was-video\nsrc: /drop-saga/example/clip.mp4\nautoplay: true',
-  },
-]
+let _lunrIndex = null
+let _manifestDocs = null
 
-async function createFromTemplate(tmpl) {
+async function loadManifestSagas() {
+  if (_manifestDocs) {
+    $.teach({ manifestSagas: _manifestDocs }, (s, p) => ({ ...s, ...p }))
+    return
+  }
+  try {
+    const res = await fetch('/search-manifest.json')
+    const all = await res.json()
+    const sagas = all.filter(d => d.type === 'saga')
+    _manifestDocs = sagas
+    _lunrIndex = lunr(function() {
+      this.ref('ref')
+      this.field('name', { boost: 10 })
+      this.field('keywords')
+      sagas.forEach(d => this.add(d))
+    })
+    $.teach({ manifestSagas: sagas }, (s, p) => ({ ...s, ...p }))
+  } catch {
+    $.teach({ manifestSagas: [] }, (s, p) => ({ ...s, ...p }))
+  }
+}
+
+function searchSagas(query) {
+  if (!query || !_lunrIndex || !_manifestDocs) return _manifestDocs || []
+  try {
+    return _lunrIndex.search(query).map(r => _manifestDocs.find(d => d.ref === r.ref)).filter(Boolean)
+  } catch {
+    return _manifestDocs || []
+  }
+}
+
+async function createFromTemplate(sagaText, label = '') {
   const id = crypto.randomUUID()
-  await put(sagaPath(id), tmpl.sagaText, { type: 'text/plain' })
-  await registerSaga(id, 0, tmpl.name)
-  navigateTo(id)
+  await put(sagaPath(id), sagaText, { type: 'text/plain' })
+  await registerSaga(id, 0, label)
+  navigateTo(id, 'edit')
 }
 
 function mount(target) {
@@ -115,6 +125,8 @@ function mount(target) {
     .catch(() => {})
 
   loadIndex()
+  loadSagaText(id)
+  loadManifestSagas()
 }
 
 async function saveManifest(id, files) {
@@ -210,7 +222,7 @@ let _pitchText = null
 
 $.draw(target => {
   mount(target)
-  const { tab, id, files, uploading, done, total, sagaText, sagaIndex } = $.learn()
+  const { tab, id, files, uploading, done, total, sagaText, sagaIndex, manifestSagas, sagaSearch } = $.learn()
   if (!id) return ''
 
   const nav = ['home', 'manage', 'edit', 'present'].map(t =>
@@ -230,10 +242,6 @@ $.draw(target => {
             const meta = entry.fileCount ? `${entry.fileCount} files` : 'no files'
             return `<button class="ds-saga-item${active}" data-goto-saga="${entry.id}"><span class="ds-saga-name">${label}</span><span class="ds-saga-meta">${meta}</span></button>`
           }).join('')
-
-    const templateCards = TEMPLATES.map(t =>
-      `<button class="ds-template-card" data-use-template="${t.id}"><span class="ds-template-name">${t.name}</span><span class="ds-template-desc">${t.description}</span></button>`
-    ).join('')
 
     content = `
       <div class="ds-landing">
@@ -267,8 +275,16 @@ $.draw(target => {
           <button class="ds-btn ds-new-btn" data-new-saga>+ new saga</button>
         </div>
         <div class="ds-section">
-          <div class="ds-section-label">template gallery</div>
-          <div class="ds-template-grid">${templateCards}</div>
+          <div class="ds-section-label">saga library</div>
+          ${manifestSagas === null
+            ? '<div class="ds-section-loading">loading library…</div>'
+            : `<input class="ds-search-input" placeholder="search sagas…" data-saga-search />
+               <div class="ds-template-grid">${
+                 (sagaSearch ? searchSagas(sagaSearch) : manifestSagas).map(s =>
+                   `<button class="ds-template-card" data-use-manifest="${encodeURIComponent(s.path)}"><span class="ds-template-name">${s.name}</span><span class="ds-template-desc">${s.ref}</span></button>`
+                 ).join('') || '<span class="ds-section-empty">no results</span>'
+               }</div>`
+          }
         </div>
       </div>`
   }
@@ -320,11 +336,13 @@ $.draw(target => {
     </div>`
 }, {
   afterUpdate: target => {
-    const { tab, sagaText } = $.learn()
-    if (tab !== 'edit') return
-    const ta = target.querySelector('.ds-textarea')
-    if (!ta || ta === document.activeElement) return
-    if (sagaText !== null && ta.value !== sagaText) ta.value = sagaText
+    const { tab, sagaText, sagaSearch } = $.learn()
+    if (tab === 'edit') {
+      const ta = target.querySelector('.ds-textarea')
+      if (ta && ta !== document.activeElement && sagaText !== null && ta.value !== sagaText) ta.value = sagaText
+    }
+    const si = target.querySelector('[data-saga-search]')
+    if (si && si !== document.activeElement && si.value !== sagaSearch) si.value = sagaSearch
   }
 })
 
@@ -340,19 +358,25 @@ $.when('click', '[data-tab]', e => {
 $.when('click', '[data-goto-saga]', e => {
   const btn = e.target.closest('[data-goto-saga]')
   if (!btn) return
-  navigateTo(btn.dataset.gotoSaga)
+  navigateTo(btn.dataset.gotoSaga, 'edit')
 })
 
 $.when('click', '[data-new-saga]', () => {
-  const id = crypto.randomUUID()
-  navigateTo(id)
+  navigateTo(crypto.randomUUID(), 'manage')
 })
 
-$.when('click', '[data-use-template]', e => {
-  const btn = e.target.closest('[data-use-template]')
+$.when('click', '[data-use-manifest]', async e => {
+  const btn = e.target.closest('[data-use-manifest]')
   if (!btn) return
-  const tmpl = TEMPLATES.find(t => t.id === btn.dataset.useTemplate)
-  if (tmpl) createFromTemplate(tmpl)
+  const path = decodeURIComponent(btn.dataset.useManifest)
+  const name = btn.querySelector('.ds-template-name')?.textContent || ''
+  const res = await fetch(path)
+  const text = await res.text()
+  await createFromTemplate(text, name)
+})
+
+$.when('input', '[data-saga-search]', e => {
+  $.teach({ sagaSearch: e.target.value }, (s, p) => ({ ...s, ...p }))
 })
 
 $.when('input', '.ds-textarea', e => {
@@ -562,6 +586,21 @@ $.style(`
   }
   & .ds-new-btn {
     align-self: flex-start;
+  }
+  & .ds-search-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 6px;
+    color: #ccc;
+    font-family: inherit;
+    font-size: .85rem;
+    padding: .5rem .75rem;
+    outline: none;
+  }
+  & .ds-search-input:focus {
+    border-color: #555;
   }
   & .ds-template-grid {
     display: grid;

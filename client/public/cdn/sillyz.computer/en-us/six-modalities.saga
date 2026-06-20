@@ -1,0 +1,62 @@
+# The Six Modalities of Computing
+
+<ol
+html: <li>Remote</li><li>Gaming</li><li>Mobile</li><li>Desktop</li><li>Shell</li><li>Music</li>
+
+<cdn-video
+src: /public/cdn/sillyz.computer/six-modalities/Intro/manifest.m3u8
+
+# Remote
+
+<new-session
+rom: remote-control
+
+<cdn-video
+src: /public/cdn/sillyz.computer/six-modalities/Remote/manifest.m3u8
+
+# Gaming
+
+<new-session
+rom: couch-coop
+
+<cdn-video
+src: /public/cdn/sillyz.computer/six-modalities/Gaming/manifest.m3u8
+
+# Mobile
+
+<new-session
+rom: mobile-device
+
+<cdn-video
+src: /public/cdn/sillyz.computer/six-modalities/Mobile/manifest.m3u8
+
+# Desktop
+
+<new-session
+rom: door-man
+
+<cdn-video
+src: /public/cdn/sillyz.computer/six-modalities/Desktop/manifest.m3u8
+
+# Shell
+
+<new-session
+rom: ur-shell
+
+<cdn-video
+src: /public/cdn/sillyz.computer/six-modalities/Shell/manifest.m3u8
+
+# Music
+
+<new-session
+rom: paper-pocket
+
+<cdn-video
+src: /public/cdn/sillyz.computer/six-modalities/Music/manifest.m3u8
+
+# Fin
+
+<cdn-video
+src: /public/cdn/sillyz.computer/six-modalities/Outro/manifest.m3u8
+
+
