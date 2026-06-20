@@ -7,6 +7,7 @@ import {
   loadSession, saveSession, deleteSession,
   listSessions, upsertManifest, removeFromManifest,
   messagesToSaga, scheduleFlush, getSaga, putSaga,
+  subscribeSession, subscribeSaga,
 } from './my-sagas.js'
 import Vosk from 'vosk-browser'
 import { agent } from './clownbot-agent.js'
@@ -185,9 +186,11 @@ function newSession() {
 }
 
 async function switchSession(id) {
+  _unsubscribeSaga?.()
+  _unsubscribeSession?.()
   _shellSessionId = id
   window.history.replaceState(null, '', `?id=${id}`)
-  $.teach({ history: [], historyCursor: null, sidebarOpen: false, exportOpen: false })
+  $.teach({ messages: [], history: [], historyCursor: null, sidebarOpen: false, exportOpen: false })
   const hadHistory = await wasLoad()
   if (!hadHistory) showPreroll()
 }
@@ -198,22 +201,11 @@ function wasSave() {
   scheduleFlush(_shellSessionId, { messages, history })
 }
 
-async function wasLoad() {
-  const session = await loadSession(_shellSessionId)
-  if (session) {
-    $.teach({ messages: session.messages, history: session.history })
-    return true
-  }
-  const text = await getSaga(_shellSessionId)
-  if (text && text.trim()) {
-    $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
-    return true
-  }
-  return false
-}
+let _unsubscribeSaga = null
+let _unsubscribeSession = null
 
-document.addEventListener('my-sagas:update', ({ detail: { id, text } }) => {
-  if (id !== _shellSessionId) return
+function _applyIncomingSaga(text) {
+  if (!text || !text.trim()) return
   const { messages } = $.learn()
   const sagaIdx = messages.findIndex(m => m.author === 'unassigned' && m.saga)
   if (sagaIdx !== -1) {
@@ -223,7 +215,28 @@ document.addEventListener('my-sagas:update', ({ detail: { id, text } }) => {
   } else if (!messages.some(m => m.author === 'human')) {
     $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
   }
-})
+}
+
+async function wasLoad() {
+  _unsubscribeSaga?.()
+  _unsubscribeSession?.()
+
+  const session = await loadSession(_shellSessionId)
+  if (session) {
+    $.teach({ messages: session.messages, history: session.history })
+    _unsubscribeSession = subscribeSession(_shellSessionId, s => {
+      $.teach({ messages: s.messages, history: s.history })
+    })
+    return true
+  }
+
+  const text = await getSaga(_shellSessionId)
+  if (text && text.trim()) {
+    $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
+  }
+  _unsubscribeSaga = subscribeSaga(_shellSessionId, _applyIncomingSaga)
+  return !!(text && text.trim())
+}
 
 async function loadBoardCards() {
   try {

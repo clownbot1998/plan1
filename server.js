@@ -84,6 +84,7 @@ const enc = new TextEncoder();
 // --- braid collaboration state ---
 const braidState = new Map();   // filePath -> { text, version, subs: Set }
 const braidLoading = new Map(); // filePath -> Promise<state>  (in-flight dedup)
+const syncState = new Map();    // key -> { text, version, subs: Set } (no disk backing)
 const _loginAttempts = new Map(); // ip -> { count, until }
 
 // --- wg-easy session (cached server-side; re-auth on 401) ---
@@ -386,6 +387,33 @@ async function handleRequest(request) {
         'set-cookie': sessionCookieHeader(secure),
       },
     });
+  }
+
+  // sync — /sync/<key> — same as braid but no disk read, no auth on PUT, open to any JSON key
+  if (path.startsWith('/sync/') && (request.method === 'GET' || request.method === 'PUT' || request.method === 'OPTIONS')) {
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, PUT', 'access-control-allow-headers': 'content-type, version, parents' } });
+    const key = path.slice(5); // '/sync/my-sagas/abc.json' → '/my-sagas/abc.json'
+    if (!syncState.has(key)) syncState.set(key, { text: '', version: '"v0"', subs: new Set() });
+    const state = syncState.get(key);
+
+    if (request.method === 'GET') {
+      let ctrl;
+      const stream = new ReadableStream({
+        start(c) { ctrl = c; state.subs.add(c); c.enqueue(makeBraidBytes(state.version, '', null, state.text)); },
+        cancel() { state.subs.delete(ctrl); },
+      });
+      return new Response(stream, { status: 209, headers: { 'content-type': 'text/plain; charset=utf-8', 'subscribe': 'true', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no', 'access-control-allow-origin': '*' } });
+    }
+
+    if (request.method === 'PUT') {
+      const versionHdr = request.headers.get('Version') ?? `"sync-${Date.now()}"`;
+      const prevVersion = state.version;
+      state.text = await request.text();
+      state.version = versionHdr;
+      const update = makeBraidBytes(versionHdr, prevVersion, null, state.text);
+      for (const sub of state.subs) { try { sub.enqueue(update); } catch { state.subs.delete(sub); } }
+      return new Response('ok', { headers: { 'access-control-allow-origin': '*' } });
+    }
   }
 
   // braid collaboration — /braid/<filePath> (in-memory only; no disk writes)

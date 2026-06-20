@@ -1,5 +1,6 @@
-import { Self, Saga } from '@plan98/types'
-import { get, put, del, ensureSpace } from './plan98-wallet.js'
+import { Self } from '@plan98/types'
+import { del } from './plan98-wallet.js'
+import { createSync } from './plan98-sync.js'
 
 const tag = 'my-sagas'
 const $ = Self(tag, {
@@ -28,16 +29,13 @@ export function messagesToSaga(messages) {
   }).filter(Boolean).join('\n\n')
 }
 
-// ── manifest ──────────────────────────────────────────────────────────────────
+// ── manifest (synced) ─────────────────────────────────────────────────────────
+
+const _manifestSync = createSync(MANIFEST_PATH)
 
 export async function listSessions() {
-  await ensureSpace().catch(() => null)
-  try {
-    const blob = await get(MANIFEST_PATH)
-    if (!blob) return []
-    const data = JSON.parse(await blob.text())
-    return data.sessions || []
-  } catch { return [] }
+  const data = await _manifestSync.load()
+  return data?.sessions || []
 }
 
 export async function upsertManifest(id, meta = {}) {
@@ -46,16 +44,18 @@ export async function upsertManifest(id, meta = {}) {
   const now = Date.now()
   if (idx === -1) sessions.unshift({ id, created: now, updated: now, ...meta })
   else { sessions[idx] = { ...sessions[idx], updated: now, ...meta }; sessions.sort((a, b) => b.updated - a.updated) }
-  await put(MANIFEST_PATH, JSON.stringify({ sessions }), { type: 'application/json' })
+  await _manifestSync.write({ sessions })
 }
 
 export async function removeFromManifest(id) {
   const sessions = await listSessions()
-  const filtered = sessions.filter(s => s.id !== id)
-  await put(MANIFEST_PATH, JSON.stringify({ sessions: filtered }), { type: 'application/json' })
+  await _manifestSync.write({ sessions: sessions.filter(s => s.id !== id) })
 }
 
-// ── saga text ─────────────────────────────────────────────────────────────────
+// ── saga text (synced plaintext via custom sync key) ─────────────────────────
+// saga text is plain text not JSON so we handle it directly via WAS+braid
+
+import { get, put, ensureSpace } from './plan98-wallet.js'
 
 export async function getSaga(id) {
   await ensureSpace().catch(() => null)
@@ -68,38 +68,58 @@ export async function getSaga(id) {
 export async function putSaga(id, text) {
   await ensureSpace().catch(() => null)
   await put(sagaPath(id), text, { type: 'text/plain' })
-  document.dispatchEvent(new CustomEvent('my-sagas:update', { detail: { id, text } }))
+  fetch(`/sync${sagaPath(id)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'text/plain', 'Version': `"${Date.now()}"` },
+    body: text,
+  }).catch(() => null)
 }
 
-// ── session (messages + history + saga export) ────────────────────────────────
+export function subscribeSaga(id, cb) {
+  const es = new EventSource(`/sync${sagaPath(id)}`)
+  es.onmessage = e => { if (e.data) cb(e.data) }
+  es.onerror = () => {}
+  return () => es.close()
+}
+
+// ── session (messages + history + saga export, synced) ────────────────────────
+
+const _sessionSyncs = {}
+
+function sessionSync(id) {
+  if (!_sessionSyncs[id]) _sessionSyncs[id] = createSync(sessionPath(id))
+  return _sessionSyncs[id]
+}
 
 export async function loadSession(id) {
-  await ensureSpace().catch(() => null)
-  try {
-    const blob = await get(sessionPath(id))
-    if (!blob) return null
-    const data = JSON.parse(await blob.text())
-    const msgs = data?.messages || []
-    const hasRealHistory = msgs.some(m => m.author === 'human')
-    if (!hasRealHistory) return null
-    return { messages: msgs, history: data.history || [] }
-  } catch { return null }
+  const data = await sessionSync(id).load()
+  if (!data) return null
+  const msgs = data.messages || []
+  if (!msgs.some(m => m.author === 'human')) return null
+  return { messages: msgs, history: data.history || [] }
 }
 
 export async function saveSession(id, { messages, history }) {
-  await ensureSpace().catch(() => null)
-  await put(sessionPath(id), JSON.stringify({ messages, history }), { type: 'application/json' })
-  await put(sagaPath(id), messagesToSaga(messages), { type: 'text/plain' })
+  await sessionSync(id).write({ messages, history })
+  await put(sagaPath(id), messagesToSaga(messages), { type: 'text/plain' }).catch(() => null)
   await upsertManifest(id)
+}
+
+export function subscribeSession(id, cb) {
+  return sessionSync(id).subscribe(data => {
+    if (!data) return
+    cb({ messages: data.messages || [], history: data.history || [] })
+  })
 }
 
 export async function deleteSession(id) {
   await del(sessionPath(id)).catch(() => null)
   await del(sagaPath(id)).catch(() => null)
   await removeFromManifest(id)
+  delete _sessionSyncs[id]
 }
 
-// ── flush queue (coalesces rapid saves per session) ───────────────────────────
+// ── flush queue (coalesces rapid saves) ───────────────────────────────────────
 
 const _pending = {}
 const _flushing = {}
