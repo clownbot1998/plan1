@@ -1286,7 +1286,7 @@ $.draw((target) => {
         <button type="button" class="sidebar-toggle" data-toggle-sidebar title="sagas">${icon('journal-text')}</button>
         <div class="messages">
           ${sagaHtml}
-          <div class="thinking-disk" aria-hidden="${thinking ? 'false' : 'true'}"><flying-disk></flying-disk></div>
+          <div class="thinking-disk" aria-hidden="${thinking ? 'false' : 'true'}"></div>
         </div>
       </div>
       <div class="sagas-sidebar" data-open="${sidebarOpen}">
@@ -1391,10 +1391,13 @@ function beforeUpdate(target) {
     }
   }
 
-  //saveCursor(target)
 }
 
 function afterUpdate(target) {
+  const diskWrap = target.querySelector('.thinking-disk')
+  if (diskWrap && !diskWrap.querySelector('flying-disk')) {
+    diskWrap.appendChild(document.createElement('flying-disk'))
+  }
   if (target.parentElement?.tagName === 'MAIN' && !target._scrollLocked) {
     target._scrollLocked = true
 
@@ -1415,14 +1418,23 @@ function afterUpdate(target) {
     }, { passive: false })
   }
 
-  //replaceCursor(target)
-
   {
-    const { messages } = $.learn()
-    if(target.lastIndex !== messages.length -1) {
-      target.lastIndex = messages.length - 1
-      const scrollBack = target.querySelector('.scroll-back')
-      if (scrollBack) scrollBack.scrollTop = scrollBack.scrollHeight
+    const scrollBack = target.querySelector('.scroll-back')
+    if (scrollBack) {
+      if (!target._scrollListening) {
+        target._scrollListening = true
+        target._scrollAnchored = true
+        scrollBack.addEventListener('scroll', () => {
+          const { scrollTop, scrollHeight, clientHeight } = scrollBack
+          target._scrollAnchored = scrollTop + clientHeight >= scrollHeight - 80
+        }, { passive: true })
+      }
+
+      if (target._scrollAnchored) {
+        requestAnimationFrame(() => {
+          scrollBack.scrollTop = scrollBack.scrollHeight
+        })
+      }
     }
   }
 
@@ -1778,8 +1790,8 @@ $.style(`
     padding: .5rem;
   }
   & .thinking-disk flying-disk {
-    display: grid;
-    place-content: center;
+    display: flex;
+    align-items: center;
     width: 48px;
     height: 48px;
     border-radius: 50%;
