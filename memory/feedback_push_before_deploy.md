@@ -13,6 +13,7 @@ Always `git push` before running the deploy curl command. The deploy pipeline do
 
 **How to apply:** push → deploy, in that order, every time.
 
-**Correct deploy URL:** `curl -X POST https://plan98.org/deploy`
-**Live URLs:** https://plan98.org and https://local.tychi.me
+**Correct deploy command:** `./plan1.sh deploy` — SSHes into local.tychi.me, pulls, builds, rsyncs, restarts.
+**Live URL:** https://local.tychi.me
+**NOT:** `curl -X POST https://plan98.org/deploy` — that URL does not exist / is not how deploys work. Check plan1.sh for the actual implementation.
 **NOT plan98.net** — that is a hallucinated URL that does not exist.
