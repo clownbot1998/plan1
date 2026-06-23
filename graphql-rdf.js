@@ -123,11 +123,92 @@ function projectCard(graph, card, children) {
   return out
 }
 
-// Resolve one read root (card / cards) against the graph.
+// Resolve one read root against the graph. Introspection (__schema/__type) and
+// the .ttl-derived `namespaces` are resolved here too — all vanilla, no schema engine.
 export function resolveRead(graph, root) {
-  if (root.name === 'card')  return projectCard(graph, graph.cards[root.args.id], root.children)
-  if (root.name === 'cards') return Object.values(graph.cards).map((c) => projectCard(graph, c, root.children))
+  if (root.name === 'card')       return projectCard(graph, graph.cards[root.args.id], root.children)
+  if (root.name === 'cards')      return Object.values(graph.cards).map((c) => projectCard(graph, c, root.children))
+  if (root.name === 'namespaces') return liveNamespaces(graph)
+  if (root.name === '__schema')   return introspectSchema()
+  if (root.name === '__type')     return introspectType(root.args.name)
   return null
+}
+
+// The .ttl-derived view: which elf namespaces actually hold state on this board.
+// The RDF-native half of introspection — the data IS the schema.
+export function liveNamespaces(graph) {
+  const set = new Set()
+  for (const c of Object.values(graph.cards)) for (const ns of Object.keys(c.elves)) set.add(ns)
+  return [...set].sort()
+}
+
+// ── schema as plain JS (the "context"), not SDL ───────────────────────────────
+// Structural types live here as data; the dynamic dimension (which elves have
+// hinged on a card) comes from the .ttl via `namespaces`. introspectSchema()
+// expands this into the standard __schema shape so classical tooling can read it.
+const SCALARS = new Set(['ID', 'String', 'Int', 'Float', 'Boolean', 'JSON'])
+const SCHEMA = {
+  query: 'Query', mutation: 'Mutation', subscription: 'Subscription',
+  types: {
+    Query: { kind: 'OBJECT', fields: {
+      card:       { type: 'Card', args: { id: 'ID!' } },
+      cards:      { type: '[Card!]!' },
+      namespaces: { type: '[String!]!', desc: 'Elf namespaces with live state on this board (from the .ttl)' },
+    } },
+    Mutation: { kind: 'OBJECT', fields: {
+      teach: { type: 'TeachResult!', args: { id: 'ID!', ns: 'String!', state: 'String!' }, desc: 'Write an elf load-state under a card (client encrypts before sending)' },
+    } },
+    Subscription: { kind: 'OBJECT', fields: {
+      card: { type: 'Card', args: { id: 'ID!' } },
+    } },
+    Card: { kind: 'OBJECT', desc: 'A bulletin-board card — the entity other elves hinge on', fields: {
+      id: 'ID!', content: 'String', x: 'Int', y: 'Int', width: 'Int', height: 'Int',
+      color: 'String', saga: 'String', created: 'String',
+      elf:     { type: 'JSON', args: { ns: 'String!' }, desc: 'Load-state for one elf namespace' },
+      elves:   { type: 'JSON', desc: 'All elf namespaces hinging on this card' },
+      linksTo: { type: '[Card!]!', desc: 'Cards this card links to (ht:linksTo)' },
+    } },
+    TeachResult: { kind: 'OBJECT', fields: { id: 'ID', ns: 'String', ok: 'Boolean!' } },
+    JSON: { kind: 'SCALAR', desc: 'Arbitrary JSON — an elf load-state blob (may be bayun: ciphertext)' },
+  },
+}
+
+// "[Card!]!" → nested {kind,name,ofType} TypeRef, vanilla
+function typeRef(s) {
+  s = s.trim()
+  if (s.endsWith('!')) return { kind: 'NON_NULL', name: null, ofType: typeRef(s.slice(0, -1)) }
+  if (s.startsWith('[') && s.endsWith(']')) return { kind: 'LIST', name: null, ofType: typeRef(s.slice(1, -1)) }
+  return { kind: SCALARS.has(s) ? 'SCALAR' : 'OBJECT', name: s, ofType: null }
+}
+function expandField(name, def) {
+  const d = typeof def === 'string' ? { type: def } : def
+  return {
+    name, description: d.desc || null,
+    args: Object.entries(d.args || {}).map(([an, at]) => ({ name: an, description: null, type: typeRef(at), defaultValue: null })),
+    type: typeRef(d.type), isDeprecated: false, deprecationReason: null,
+  }
+}
+function expandType(name, t) {
+  return {
+    kind: t.kind, name, description: t.desc || null,
+    fields: t.kind === 'OBJECT' ? Object.entries(t.fields).map(([fn, fd]) => expandField(fn, fd)) : null,
+    inputFields: null, interfaces: t.kind === 'OBJECT' ? [] : null, enumValues: null, possibleTypes: null,
+  }
+}
+export function introspectType(name) {
+  if (SCHEMA.types[name]) return expandType(name, SCHEMA.types[name])
+  if (SCALARS.has(name))  return expandType(name, { kind: 'SCALAR' })
+  return null
+}
+export function introspectSchema() {
+  const types = Object.entries(SCHEMA.types).map(([n, t]) => expandType(n, t))
+  for (const s of ['ID', 'String', 'Int', 'Float', 'Boolean']) if (!SCHEMA.types[s]) types.push(expandType(s, { kind: 'SCALAR' }))
+  return {
+    queryType: { name: SCHEMA.query },
+    mutationType: { name: SCHEMA.mutation },
+    subscriptionType: { name: SCHEMA.subscription },
+    types, directives: [],
+  }
 }
 
 // ── write resolution — upsert an elf:State block (LWW: one block per id×ns) ────
