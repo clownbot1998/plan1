@@ -87,6 +87,7 @@ export async function boardToTurtle(boardId, cards, edgeTypes, groupId) {
     '@prefix dcterms: <http://purl.org/dc/terms/> .',
     '@prefix bb:      <https://plan98.net/vocab/bulletin-board#> .',
     '@prefix ht:      <https://plan98.net/vocab/hypertext#> .',
+    '@prefix elf:     <https://plan98.net/vocab/elf#> .',
     '',
     '<> a bb:Board ;',
     `   dcterms:identifier "${ttlStr(boardId)}" ;`,
@@ -153,6 +154,23 @@ export async function boardToTurtle(boardId, cards, edgeTypes, groupId) {
     }
   }
 
+  // elf-state nodes — one subject per (card × namespace), back-reference cardId.
+  // This is how non-bulletin elves hinge on a card: the card is the entity,
+  // each elf namespace is a predicate carrying that elf's load-state.
+  // Encrypted with the card's groupId so it shares the card's access scope.
+  for (const [cardId, card] of cardEntries) {
+    for (const [ns, state] of Object.entries(card.elves || {})) {
+      const raw = state != null ? JSON.stringify(state) : ''
+      const enc = raw ? await encryptLiteral(raw, card.groupId) : ''
+      out.push(`<#elf-${cardId}-${ns}> a elf:State ;`)
+      out.push(`   elf:cardId "${ttlStr(cardId)}" ;`)
+      out.push(`   elf:namespace "${ttlStr(ns)}" ;`)
+      if (enc) out.push(`   elf:state "${ttlStr(enc)}" ;`)
+      out.push(`   bb:placeholder "true" .`)
+      out.push('')
+    }
+  }
+
   return out.join('\n')
 }
 
@@ -166,6 +184,7 @@ export async function turtleToBoard(ttlString) {
   const rawEdgeTypes = {}
   const rawAttachments = []
   const rawLinks = []
+  const rawElfStates = []
   const rawBoard = {}
 
   let subject = null, type = null, block = {}
@@ -177,6 +196,7 @@ export async function turtleToBoard(ttlString) {
     else if (type === 'et')    rawEdgeTypes[block.typeId] = { ...block }
     else if (type === 'att')   rawAttachments.push({ ...block })
     else if (type === 'link')  rawLinks.push({ ...block })
+    else if (type === 'elfstate') rawElfStates.push({ ...block })
     block = {}; subject = null; type = null
   }
 
@@ -202,6 +222,7 @@ export async function turtleToBoard(ttlString) {
       else if (typeToken === 'bb:EdgeType')   type = 'et'
       else if (typeToken === 'bb:Attachment') type = 'att'
       else if (typeToken === 'ht:TypedLink')  type = 'link'
+      else if (typeToken === 'elf:State')     type = 'elfstate'
       else { subject = null }
       continue
     }
@@ -209,7 +230,7 @@ export async function turtleToBoard(ttlString) {
     if (!subject) continue
 
     // string literal  bb:foo "value" [.;]
-    const strMatch = line.match(/^\s*(?:bb:|ht:|dcterms:)(\S+)\s+"((?:[^"\\]|\\.)*)"/)
+    const strMatch = line.match(/^\s*(?:bb:|ht:|dcterms:|elf:)(\S+)\s+"((?:[^"\\]|\\.)*)"/)
     if (strMatch) {
       block[strMatch[1]] = parseTtlStr(strMatch[2])
       continue
@@ -249,6 +270,7 @@ export async function turtleToBoard(ttlString) {
       links:     {},
       backlinks: {},
       attachments: {},
+      elves:     {},
     }
     if (!decCards[id].createdAt) delete decCards[id].createdAt
     if (!decCards[id].saga)     delete decCards[id].saga
@@ -278,6 +300,15 @@ export async function turtleToBoard(ttlString) {
       ...(rec ? { record: JSON.parse(rec) } : {}),
     }
     if (!card.attachments[aid].createdAt) delete card.attachments[aid].createdAt
+  }))
+
+  // decrypt elf-states and attach to their cards' elves bag
+  await Promise.all(rawElfStates.map(async (st) => {
+    const card = decCards[st.cardId]
+    if (!card || !st.namespace) return
+    const raw = st.state ? await decryptLiteral(st.state) : ''
+    try { card.elves[st.namespace] = raw ? JSON.parse(raw) : {} }
+    catch { card.elves[st.namespace] = {} }
   }))
 
   // attach links and rebuild backlinks
