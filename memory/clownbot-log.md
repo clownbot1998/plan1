@@ -107,3 +107,5 @@ uuid format: 8-4-4-4-12 hex, err towards silly phrases.
 | `FADE1AB3-CAFE-BABE-C0DE-BEEFFACE2026` | 2026-06-11 | cloud labels in 3D (THREE.Sprite, chromatic shadow, card text first line), join-cta elf (QR+copy+share, responsive), share overlay replacing QR modal, gallery fullscreen+black+no social buttons, dream-team compass stays normal. |
 
 | `B1D1SYNC-CAFE-BABE-C0DE-DEADBEEF2026` | 2026-06-20 | my-sagas shared store, plan98-sync abstraction (snapshot+SSE), accessibility-mode embed stubs + Saga renderer hook, drop-saga accessibility iframe, bi-directional live sync over /sync/ SSE, saga-pitch null guard, post-import state fix. |
+
+| `7URT1ED0-CAFE-BABE-C0DE-DEADBEEF2026` | 2026-06-22 | graphql over turtle: the card is the entity, elf namespaces are predicates. solid-utils.js elf:State round-trip (backwards-compatible both ways), graphql-rdf.js dep-free resolver (ttlToGraph + parseOperation + resolveRead + upsertElfState), LWW = one triple per card×namespace, zero-knowledge server passes bayun: ciphertext through. we didn't build a query language, we noticed we were speaking one. |
