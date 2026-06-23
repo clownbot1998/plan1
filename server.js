@@ -3,6 +3,8 @@ import { serveDir } from 'jsr:@std/http/file-server';
 import { Ed25519Signer } from 'npm:@did.coop/did-key-ed25519@0.0.14';
 import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3';
 import { resolve } from 'node:path';
+import { parse } from 'npm:graphql@^16.9.0';
+import { ttlToGraph, parseOperation, resolveRead, upsertElfState } from './graphql-rdf.js';
 
 const DIST    = (Deno.env.get('PLAN1_DIST') || new URL('./dist/', import.meta.url).pathname).replace(/\/?$/, '/');
 const PRIVATE = new URL('./private/', import.meta.url).pathname;
@@ -339,6 +341,39 @@ async function spawnTtydSession(sessionName) {
   return null
 }
 
+// --- graphql over turtle — read/write the board .ttl in the server WAS space ---
+// First cut: resolves against the deploy's own space (like /save). Board id comes
+// from variables.board (default 'default'); the .ttl is the entity graph.
+function _wasSpace() {
+  const wasHost = safeEnv('PLAN98_WAS_HOST');
+  if (!wasHost || !_spaceId) return null;
+  return new StorageClient(new URL(wasHost)).space({ signer: _signer, id: `urn:uuid:${_spaceId}` });
+}
+async function readBoardTtl(boardId) {
+  const space = _wasSpace();
+  if (!space) return '';
+  const res = await space.resource(`bulletin-board/${boardId}.ttl`).get({ signer: _signer }).catch(() => null);
+  return res?.status === 200 ? await res.text() : '';
+}
+async function writeBoardTtl(boardId, ttl) {
+  const space = _wasSpace();
+  if (!space) throw new Error('WAS not configured');
+  return space.resource(`bulletin-board/${boardId}.ttl`)
+    .put(new Blob([ttl], { type: 'text/turtle' }), { signer: _signer });
+}
+function gqlJson(obj, status = 200) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: {
+      'content-type': 'application/json',
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'POST, OPTIONS',
+      'access-control-allow-headers': 'content-type, authorization, cookie',
+    },
+  });
+}
+// --- end graphql ---
+
 Deno.serve({ port: PORT }, async (request) => {
   const res = await handleRequest(request);
   const { pathname } = new URL(request.url);
@@ -353,6 +388,71 @@ async function handleRequest(request) {
   if (path === '/') path = '/index.html';
 
   if (path === '/admin' || path === '/admin/') return adminPage(request);
+
+  // graphql over turtle — POST /graphql { query, variables }
+  // query/mutation 1:1 with the graphql-http envelope; subscriptions return the
+  // braid pointer (live streaming is a follow-up). The card is the entity:
+  // elf namespaces are predicates, LWW = one elf:State triple per card×namespace.
+  if (path === '/graphql') {
+    if (request.method === 'OPTIONS') return new Response(null, {
+      status: 204,
+      headers: {
+        'access-control-allow-origin': '*',
+        'access-control-allow-methods': 'POST, OPTIONS',
+        'access-control-allow-headers': 'content-type, authorization, cookie',
+      },
+    });
+    if (request.method !== 'POST') return gqlJson({ errors: [{ message: 'POST only' }] }, 405);
+
+    let body;
+    try { body = await request.json(); } catch { return gqlJson({ errors: [{ message: 'bad json' }] }, 400); }
+    const { query, variables } = body || {};
+    const vars = variables || {};
+    const boardId = vars.board || 'default';
+
+    let ops;
+    try { ops = parseOperation(parse(query || ''), vars); }
+    catch (e) { return gqlJson({ errors: [{ message: String(e?.message || e) }] }, 400); }
+
+    try {
+      if (ops.op === 'mutation') {
+        if (!checkAuth(request)) return gqlJson({ errors: [{ message: 'unauthorized' }] }, 401);
+        let ttl = await readBoardTtl(boardId);
+        const data = {};
+        for (const root of ops.roots) {
+          const key = root.alias || root.name;
+          if (root.name === 'teach') {
+            const { id, ns, state } = root.args;
+            if (!id || !ns) { data[key] = { ok: false, error: 'teach needs id and ns' }; continue; }
+            // client encrypts before sending; we store the literal verbatim
+            const lit = state == null ? '' : (typeof state === 'string' ? state : JSON.stringify(state));
+            ttl = upsertElfState(ttl, id, ns, lit);
+            data[key] = { id, ns, ok: true };
+          } else {
+            data[key] = null;
+          }
+        }
+        await writeBoardTtl(boardId, ttl);
+        return gqlJson({ data });
+      }
+
+      if (ops.op === 'subscription') {
+        // POST can't stream graphql subscriptions; point at the durable channel.
+        return gqlJson({
+          data: null,
+          extensions: { subscribe: `/braid/bulletin-board/${boardId}`, note: 'subscription transport is a follow-up; data is persisted in the .ttl' },
+        });
+      }
+
+      // query
+      const graph = ttlToGraph(await readBoardTtl(boardId));
+      const data = {};
+      for (const root of ops.roots) data[root.alias || root.name] = resolveRead(graph, root);
+      return gqlJson({ data });
+    } catch (e) {
+      return gqlJson({ errors: [{ message: String(e?.message || e) }] }, 500);
+    }
+  }
 
   // login — POST /api/login { passphrase } → sets session cookie
   if (path === '/api/login' && request.method === 'POST') {
@@ -387,6 +487,50 @@ async function handleRequest(request) {
         'set-cookie': sessionCookieHeader(secure),
       },
     });
+  }
+
+  // build-log — /build-log — SSE tail of /tmp/deno-build.log
+  if (path === '/build-log' && request.method === 'GET') {
+    const enc = new TextEncoder()
+    const sseMsg = t => enc.encode(`data: ${t.replace(/\n/g, '\ndata: ')}\n\n`)
+    let offset = 0
+    let ctrl, timer, heartbeat
+    const stream = new ReadableStream({
+      async start(c) {
+        ctrl = c
+        // send existing content
+        try {
+          const stat = await Deno.stat('/tmp/deno-build.log').catch(() => null)
+          if (stat) {
+            const f = await Deno.open('/tmp/deno-build.log')
+            const buf = new Uint8Array(stat.size)
+            await f.read(buf)
+            f.close()
+            offset = stat.size
+            const text = new TextDecoder().decode(buf)
+            if (text) c.enqueue(sseMsg(text))
+          }
+        } catch {}
+        // poll for new lines every 500ms
+        timer = setInterval(async () => {
+          try {
+            const stat = await Deno.stat('/tmp/deno-build.log').catch(() => null)
+            if (!stat || stat.size <= offset) return
+            const f = await Deno.open('/tmp/deno-build.log')
+            await f.seek(offset, Deno.SeekMode.Start)
+            const buf = new Uint8Array(stat.size - offset)
+            await f.read(buf)
+            f.close()
+            offset = stat.size
+            const text = new TextDecoder().decode(buf)
+            if (text) c.enqueue(sseMsg(text))
+          } catch { clearInterval(timer) }
+        }, 500)
+        heartbeat = setInterval(() => { try { c.enqueue(enc.encode(': ping\n\n')) } catch { clearInterval(heartbeat) } }, 30000)
+      },
+      cancel() { clearInterval(timer); clearInterval(heartbeat) }
+    })
+    return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'access-control-allow-origin': '*' } })
   }
 
   // sync — /sync/<key> — SSE push channel, no disk backing, no auth on PUT
