@@ -1,0 +1,23 @@
+[user]
+	name = clown code
+	email = clownbot@bamzap.pw
+[branch]
+	autosetuprebase = always
+	autosetupmerge = always
+[color]
+	ui = true
+[core]
+	excludesfile = ~/.gitignore
+	editor = vim
+	autocrlf = false
+[push]
+  default = simple
+
+[sendemail]
+  smtpserver = smtp.fastmail.com
+  smtpuser = clownbot@bamzap.pw
+  smtpencryption = ssl
+  smtpserverport = 465
+  suppresscc = self
+[alias]
+  permission-reset = !git diff -p -R --no-ext-diff --no-color | grep -E \"^(diff|(old|new) mode)\" --color=never | git apply

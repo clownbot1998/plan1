@@ -1,0 +1,14 @@
+[Unit]
+Description=sillonious (Deno Service)
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/usr/bin/sh -c "deno task start"
+
+WorkingDirectory=%h/.sillonious
+Environment=PATH=%h/.nvm/versions/node/v16.20.0/bin:%h/bin:%h/.sillonious/bin:%h/.deno/bin:%h/.cargo/bin:%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin
+
+
+[Install]
+WantedBy=default.target

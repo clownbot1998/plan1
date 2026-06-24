@@ -1,0 +1,14 @@
+[Unit]
+Description=plan98 (Deno Service)
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/usr/bin/sh -c "deno task start"
+
+WorkingDirectory=%h/.plan98
+Environment=PATH=%h/bin:%h/.sillonious/bin:%h/.deno/bin:%h/.cargo/bin:%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:%h/.pocketbase/bin:%h/.nvm/versions/node/v20.12.1/bin
+
+
+[Install]
+WantedBy=default.target
