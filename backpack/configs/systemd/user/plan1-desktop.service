@@ -1,0 +1,20 @@
+# EXPERIMENT, disabled by default. The native laufey window (see blog 2026-06-24).
+# firefox is the daily driver — re-enable with `systemctl --user enable --now plan1-desktop`
+# only if you want the standalone laufey window instead of firefox.
+# ExecStart uses the WORKING launcher (desktop/plan1-desktop.sh), not the broken
+# deno-desktop server.so path.
+[Unit]
+Description=plan1 desktop window (clownbot)
+After=plan1.service
+Requires=plan1.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/plan1
+ExecStart=%h/plan1/desktop/plan1-desktop.sh
+Restart=on-failure
+RestartSec=5
+Environment=PATH=%h/.deno/bin:/usr/local/bin:/usr/bin
+
+[Install]
+WantedBy=default.target

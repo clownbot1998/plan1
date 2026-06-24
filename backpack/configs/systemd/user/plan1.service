@@ -1,0 +1,14 @@
+[Unit]
+Description=plan1 server (clownbot)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/plan1
+ExecStart=%h/.deno/bin/deno task serve
+Restart=on-failure
+RestartSec=3
+Environment=PATH=%h/.deno/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin
+
+[Install]
+WantedBy=default.target

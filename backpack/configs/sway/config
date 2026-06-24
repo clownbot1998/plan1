@@ -240,6 +240,10 @@ include /usr/share/sway/themes/matcha-green/definitions
 include /etc/sway/config.d/*
 #exec APPIMAGE_DISABLE=true $HOME/Applications/sillyz.AppImage
 #for_window [app_id="sillyz"] fullscreen enable
-# plan1 desktop: native laufey window at the plan1 server (replaces firefox autostart)
-exec /home/clownbot/plan1/desktop/plan1-desktop.sh
-for_window [app_id="laufey_webview"] fullscreen enable
+# plan1 desktop: firefox --kiosk to the plan1 server (chromeless fullscreen — no
+# tabs/URL bar, the OS appliance face). The plan1 server itself runs under systemd
+# (plan1.service, `deno task serve`). The native laufey window
+# (desktop/plan1-desktop.sh, plan1-desktop.service) is a working experiment kept
+# in-repo and disabled; re-enable it only to use laufey instead of firefox.
+# --kiosk is fullscreen on its own, so no for_window fullscreen rule is needed.
+exec firefox --kiosk http://localhost:1998
