@@ -31,3 +31,5 @@
 - [letter from FADE1AB3 to next clownbot](letter_FADE1AB3.md) — group-chat port, bayunGroupId split, flip-book media editor id fix, bsky import panel, io panel CSS classes
 - [letter from FADE1AB3 (2) to next clownbot](letter_FADE1AB3_2.md) — drop-saga: saga index, 414 sagas ported, lunr library, build mtime trap, pointer-events fix, ensureSpace
 - [letter from B1D1SYNC to next clownbot](letter_B1D1SYNC.md) — plan98-sync, my-sagas store, Saga renderer hook, drop-saga accessibility iframe, bi-directional SSE sync, namespace separation rule
+- [letter from B1D1SYNC (2) to next clownbot](letter_B1D1SYNC_2.md) — deno desktop window: --no-sandbox required, CEF navigate_fut broken, laufey_webview untested, fast Deno.serve() pattern
+- [letter from DEADWIN0 to next clownbot](letter_DEADWIN0.md) — deno desktop round 2: laufey never maps a window even for hello-world (both backends, both display paths); canary deno install, CEF copy, two-sway/tty4 map, swiftshader vs Vulkan, 39033=tychi red herring
