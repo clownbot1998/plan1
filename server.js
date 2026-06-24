@@ -10,6 +10,16 @@ const DIST    = (Deno.env.get('PLAN1_DIST') || new URL('./dist/', import.meta.ur
 const PRIVATE = new URL('./private/', import.meta.url).pathname;
 const PORT = Number(Deno.env.get('PLAN1_PORT') ?? 1998);
 
+// bind immediately so navigate_fut (laufey desktop) connects within 250ms
+let _handleReady = false;
+Deno.serve({ port: PORT }, async (req) => {
+  if (!_handleReady) return new Response('starting…', { status: 503 });
+  const res = await handleRequest(req);
+  const { pathname } = new URL(req.url);
+  if (NO_COEP_PATHS.some(p => pathname.startsWith(p))) return addEmbeddable(res);
+  return addIsolation(res);
+});
+
 function safeEnv(key, fallback = '') {
   return Deno.env.get(key) ?? fallback;
 }
@@ -374,12 +384,7 @@ function gqlJson(obj, status = 200) {
 }
 // --- end graphql ---
 
-Deno.serve({ port: PORT }, async (request) => {
-  const res = await handleRequest(request);
-  const { pathname } = new URL(request.url);
-  if (NO_COEP_PATHS.some(p => pathname.startsWith(p))) return addEmbeddable(res);
-  return addIsolation(res);
-});
+_handleReady = true;
 
 async function handleRequest(request) {
   const url = new URL(request.url);

@@ -1,5 +1,12 @@
 {
   "tasks": {
+    "start": "deno task serve & deno task desktop",
+    "serve": "deno run --allow-all --env-file=.env server.js",
+    "build": "qjs --std build.js",
+    "deploy": "./scripts/deploy.sh",
+    "compile:server": "deno desktop server.js",
+    "compile:desktop": "deno desktop scripts/desktop-bridge.js --backend webview",
+    "desktop": "./scripts/laufey --runtime ./server/server.so",
     "test": "deno test --no-check --allow-net --allow-env --env-file=.env debugging_utilities/test_was_e2e.ts"
   }
 }

@@ -1,0 +1,19 @@
+#!/bin/bash
+export DISPLAY="${DISPLAY:-:1}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1003}"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# prefer compiled CEF bundle in server/
+if [ -x "$SCRIPT_DIR/server/laufey" ]; then
+  exec "$SCRIPT_DIR/server/laufey" --ozone-platform=x11 --no-sandbox "$@"
+fi
+
+# fallback: CEF from cache
+LAUFEY_REAL=$(find /home/clownbot/.cache/deno/laufey -name "laufey" -not -name "laufey_webview" 2>/dev/null | sort -V | tail -1)
+if [ -n "$LAUFEY_REAL" ]; then
+  exec "$LAUFEY_REAL" --ozone-platform=x11 --no-sandbox "$@"
+fi
+
+# last resort: webview
+LAUFEY_WEBVIEW=$(find /home/clownbot/.cache/deno/laufey -name "laufey_webview" 2>/dev/null | sort -V | tail -1)
+exec "$LAUFEY_WEBVIEW" "$@"

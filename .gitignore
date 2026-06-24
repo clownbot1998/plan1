@@ -16,3 +16,8 @@ client/public/cdn/sillyz.computer/models/*.zip
 private/
 private-manifest.json
 was-manifest.json
+
+# deno-desktop experiment artifacts — multi-hundred-MB CEF bundles & compiled .so (not source)
+server/
+hello-desktop/
+desktop-bridge/
