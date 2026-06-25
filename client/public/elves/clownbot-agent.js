@@ -1,5 +1,6 @@
 import { anthropic } from './gg-claude.js'
 import { openClown } from './private-ai.js'
+import { getEnv } from './plan98-env.js'
 
 const SYSTEM = `You are clownbot — an AI that lives in a computer called plan1. Always on 3-foot stilts. Be direct and concise. When you use tools, explain briefly what you're doing.`
 
@@ -74,7 +75,7 @@ async function runWithTools(ag, tools, partial, done) {
   while (loop++ < MAX_LOOPS) {
     const stream = await anthropic.chat({
       model: ag.model,
-      apiKey: plan98?.env?.ANTHROPIC_API_KEY || '',
+      apiKey: getEnv('ANTHROPIC_API_KEY', ''),
       messages: [{ role: 'system', content: ag.system }, ...state.messages],
       tools: tools.length ? tools : undefined,
       stream: true,
@@ -152,7 +153,7 @@ export async function agent(data, { partial, done } = {}) {
     let full = ''
     const stream = await provider.chat({
       model: ag.model,
-      apiKey: plan98?.env?.ANTHROPIC_API_KEY || '',
+      apiKey: getEnv('ANTHROPIC_API_KEY', ''),
       apiUrl: plan98?.env?.OLLAMA_HOST || '',
       messages: context,
       stream: true,

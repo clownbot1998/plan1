@@ -2,6 +2,7 @@ import { Self } from '@plan98/types'
 import Vosk from 'vosk-browser'
 import translate from 'translate'
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js'
+import { getEnv, onEnvChange } from './plan98-env.js'
 
 translate.engine = 'libre'
 translate.url = '/api/translate'
@@ -9,12 +10,17 @@ translate.url = '/api/translate'
 const VOICE_ID = 'nPczCjzI2devNBz1zQrb'
 
 let _elevenlabs = null
+let _elevenlabsKey = null
 function getElevenLabs() {
-  if (!_elevenlabs) {
-    _elevenlabs = new ElevenLabsClient({ apiKey: plan98.env.ELEVEN_LABS_API_KEY || '' })
+  const apiKey = getEnv('ELEVEN_LABS_API_KEY', '')
+  // rebuild if the key rotated under us (real-time override)
+  if (!_elevenlabs || _elevenlabsKey !== apiKey) {
+    _elevenlabs = new ElevenLabsClient({ apiKey })
+    _elevenlabsKey = apiKey
   }
   return _elevenlabs
 }
+onEnvChange((key) => { if (key === 'ELEVEN_LABS_API_KEY') _elevenlabs = null })
 
 const VOSK_LANGUAGES = [
   { name: 'English (US)',    code: 'en', model: 'vosk-model-small-en-us-0.15.zip' },
