@@ -165,6 +165,9 @@ function buildEnvScript(isAdmin = false) {
     FALLBACK_LLM_KEY:    safeEnv('FALLBACK_LLM_KEY'),
     FALLBACK_LLM_MODEL:  safeEnv('FALLBACK_LLM_MODEL', 'qwen2.5-coder:7b'),
     ANTHROPIC_API_KEY:   safeEnv('ANTHROPIC_API_KEY'),
+    ACCESSIBILITY_MODE_LOCK: safeEnv('ACCESSIBILITY_MODE_LOCK'), // the lock: dedicated chat endpoint URL
+    ACCESSIBILITY_MODE_KEY:  safeEnv('ACCESSIBILITY_MODE_KEY'),  // the key that fits it
+    ACCESSIBILITY_MODE_DEFAULT_MODEL: safeEnv('ACCESSIBILITY_MODE_DEFAULT_MODEL'),
     LIBRE_TRANSLATE_URL:  safeEnv('LIBRE_TRANSLATE_URL'),
     ELEVEN_LABS_API_KEY:  safeEnv('ELEVEN_LABS_API_KEY'),
     PLAN98_WAS_HOST:     safeEnv('PLAN98_WAS_HOST', 'http://localhost:1088'),

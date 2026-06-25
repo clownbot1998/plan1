@@ -11,6 +11,7 @@ import {
 } from './my-sagas.js'
 import Vosk from 'vosk-browser'
 import { agent } from './clownbot-agent.js'
+import { getEnv } from './plan98-env.js'
 import { callTool as elfCallTool } from './elf-tools.js'
 
 const SL = 'https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.16.0/cdn/assets/icons'
@@ -690,11 +691,13 @@ let _sagaMessagesRef = null
 let _sagaHistoryHtml = ''
 
 async function agentChat(userMessage) {
-  const env = (typeof plan98 !== 'undefined' && plan98?.env) || {}
-  const apiUrl = env.FALLBACK_LLM_URL || env.OLLAMA_HOST || ''
-  const apiKey = env.FALLBACK_LLM_KEY || env.OLLAMA_KEY || 'ollama'
-  const model = env.FALLBACK_LLM_MODEL || env.OLLAMA_MODEL || 'qwen2.5-coder:7b'
-  if (!apiUrl) return addMessage({ body: 'no AI configured — set FALLBACK_LLM_URL in .env', author: 'assistant', system: true })
+  // accessibility-mode has its own dedicated config — the LOCK is the endpoint,
+  // the KEY fits it. Falls back to the shared FALLBACK_LLM / OLLAMA chain.
+  // All read live via getEnv so end-user overrides (plan98-env) take effect.
+  const apiUrl = getEnv('ACCESSIBILITY_MODE_LOCK') || getEnv('FALLBACK_LLM_URL') || getEnv('OLLAMA_HOST') || ''
+  const apiKey = getEnv('ACCESSIBILITY_MODE_KEY') || getEnv('FALLBACK_LLM_KEY') || getEnv('OLLAMA_KEY') || 'ollama'
+  const model = getEnv('ACCESSIBILITY_MODE_DEFAULT_MODEL') || getEnv('FALLBACK_LLM_MODEL') || getEnv('OLLAMA_MODEL') || 'qwen2.5-coder:7b'
+  if (!apiUrl) return addMessage({ body: 'no AI configured — set ACCESSIBILITY_MODE_LOCK (url) + ACCESSIBILITY_MODE_KEY, or open plan98-env to set one live', author: 'assistant', system: true })
 
   _agentAbort = new AbortController()
   let _thinkingRaf = null
