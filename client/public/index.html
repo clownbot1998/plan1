@@ -104,6 +104,8 @@
       }
     </script>
     <script type="module" src="/main.js"></script>
+    <!-- live env store: merges localStorage overrides into plan98.env before lazy elves load -->
+    <script type="module" src="/elves/plan98-env.js"></script>
     <script type="module" src="/elves/sticky-menu.js"></script>
     <script type="module">
       const ELVES = {
@@ -160,6 +162,7 @@
         'cdn-video':               '/elves/cdn-video.js',
         'hls-video':               '/elves/hls-video.js',
         'plan98-boxart':           '/elves/plan98-boxart.js',
+        'plan98-env':              '/elves/plan98-env.js',
         'plan98-wallet':           '/elves/plan98-wallet.js',
         'plan98-modal':            '/elves/plan98-modal.js',
         'plan98-palette':          '/elves/plan98-palette.js',
