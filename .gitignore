@@ -21,3 +21,4 @@ was-manifest.json
 server/
 hello-desktop/
 desktop-bridge/
+client/public/cdn/mapps/*.zip

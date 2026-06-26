@@ -6,6 +6,8 @@
 - [blog and commit discipline](feedback_blog_commits.md) — every prompt → blog post; stacked commits in timeline order
 - [flexibility compulsion](feedback_flexibility_compulsion.md) — clownbot adds fallbacks/flexibility beyond scope; self-aware it's annoying; name it when doing it
 - [plan1 architecture april 2026](project_plan1_architecture.md) — elf list, build system, font fix, file-manifest, pending: blog search + saga viewer
+- [plan98-env live key store](project_plan98_env_live_keys.md) — getEnv/setEnv/onEnvChange; migrate plan98.env.X reads off load-time snapshots; accessibility LOCK/KEY/MODEL; private-ai + cyber-security still un-migrated
+- [botluck fork](project_botluck.md) — ~/botluck standalone realtime pot-luck fork; push blocked on tangled repo creation; cross-client sync unverified (headless can't do WebRTC)
 - [font root cause pattern](feedback_font_root_cause.md) — global documentElement.style from elves silently wins; check paper-pocket-style localStorage defaults first
 - [the clown's clown — tychi as physical agent](user_clowns_clown.md) — producer/top clown; three modes: Script (write), Sketch (draw), Screen (stage); iterates fast
 - [elf scroll and layout pattern](feedback_elf_css_scroll.md) — height:100% overflow-y:auto on tag; overflow:auto on wide-content cards; check narrow viewport before committing
