@@ -1,6 +1,7 @@
 import elf from '@plan98/elf'
 import Cache from '@silly/cache'
-import { toolDefinitions, callTool } from './elf-tools.js'
+import { marked } from 'marked'
+import { toolDefinitions, callTool, approvePermission, denyPermission } from './elf-tools.js'
 
 const cache = Cache('private-ai')
 
@@ -19,6 +20,7 @@ const $ = elf('private-ai', {
   messages: [],
   streaming: false,
   thinking: '',
+  pendingApproval: null,
 })
 
 let systemPrompt = ''
@@ -44,8 +46,12 @@ let systemPrompt = ''
   })
 })()
 
+window.addEventListener('plan98-tool-permission', e => {
+  $.teach({ pendingApproval: e.detail })
+})
+
 $.draw(target => {
-  const { models, modelId, url, key, ready, error, draft, messages, streaming, thinking } = $.learn()
+  const { models, modelId, url, key, ready, error, draft, messages, streaming, thinking, pendingApproval } = $.learn()
 
   if (!ready) {
     return `
@@ -83,7 +89,7 @@ $.draw(target => {
     .map(msg => `
     <div class="message message--${msg.role}">
       <span class="message__role">${msg.role}</span>
-      <div class="message__content">${escapeHyperText(msg.content)}</div>
+      <div class="message__content">${msg.role === 'assistant' ? renderMd(msg.content) : escapeHyperText(msg.content)}</div>
     </div>
   `).join('')
 
@@ -118,6 +124,8 @@ $.draw(target => {
         ${thinkingHtml}
         ${streamHtml}
       </div>
+
+      ${pendingApproval ? permissionGateHtml(pendingApproval) : ''}
 
       <form name="chat" class="input-area">
         ${error ? `<div class="error">${error}</div>` : ''}
@@ -335,6 +343,52 @@ function escapeHyperText(text = '') {
   }[ch]))
 }
 
+function renderMd(text = '') {
+  return marked.parse(String(text), { gfm: true, breaks: true })
+}
+
+function permissionGateHtml({ toolName, args }) {
+  const path = escapeHyperText(args.path || '')
+  if (toolName === 'patch_file') {
+    return `
+      <div class="permission-gate">
+        <div class="perm-header">tool call: patch_file</div>
+        <div class="perm-path">${path}</div>
+        <div class="perm-diff">
+          <div class="perm-find"><span class="perm-label">find</span><pre>${escapeHyperText(args.find || '')}</pre></div>
+          <div class="perm-replace"><span class="perm-label">replace</span><pre>${escapeHyperText(args.replace || '')}</pre></div>
+        </div>
+        <div class="perm-actions">
+          <button name="deny-tool" class="standard-button secondary">Deny</button>
+          <button name="approve-tool" class="standard-button">Approve</button>
+        </div>
+      </div>
+    `
+  }
+  const preview = escapeHyperText((args.content || '').slice(0, 400))
+  return `
+    <div class="permission-gate">
+      <div class="perm-header">tool call: write_file</div>
+      <div class="perm-path">${path}</div>
+      <pre class="perm-preview">${preview}${(args.content || '').length > 400 ? '\n…' : ''}</pre>
+      <div class="perm-actions">
+        <button name="deny-tool" class="standard-button secondary">Deny</button>
+        <button name="approve-tool" class="standard-button">Approve</button>
+      </div>
+    </div>
+  `
+}
+
+$.when('click', '[name="approve-tool"]', () => {
+  $.teach({ pendingApproval: null })
+  approvePermission()
+})
+
+$.when('click', '[name="deny-tool"]', () => {
+  $.teach({ pendingApproval: null })
+  denyPermission()
+})
+
 $.style(`
   & {
     display: flex;
@@ -420,12 +474,81 @@ $.style(`
     padding: .5rem .75rem;
     border: 1px solid currentColor;
     border-radius: 4px;
-    white-space: pre-wrap;
     word-break: break-word;
   }
 
   & .message--user .message__content {
+    white-space: pre-wrap;
     opacity: .85;
+  }
+
+  & .message--assistant .message__content p { margin: 0 0 .5em; }
+  & .message--assistant .message__content p:last-child { margin-bottom: 0; }
+  & .message--assistant .message__content pre { overflow-x: auto; }
+  & .message--assistant .message__content iframe { width: 100%; border: none; border-radius: 4px; margin-top: .5rem; }
+
+  & .permission-gate {
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    padding: .75rem 1rem;
+    margin: 0 1rem .5rem;
+    flex-shrink: 0;
+  }
+
+  & .perm-header {
+    font-size: .75rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    opacity: .6;
+    margin-bottom: .35rem;
+  }
+
+  & .perm-path {
+    font-family: 'Recursive';
+    font-variation-settings: 'MONO' 1;
+    margin-bottom: .5rem;
+    word-break: break-all;
+  }
+
+  & .perm-diff {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .5rem;
+    margin-bottom: .5rem;
+  }
+
+  & .perm-label {
+    font-size: .7rem;
+    opacity: .6;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: .2rem;
+  }
+
+  & .perm-find pre,
+  & .perm-replace pre,
+  & .perm-preview {
+    font-family: 'Recursive';
+    font-variation-settings: 'MONO' 1;
+    font-size: .8em;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0;
+    max-height: 120px;
+    overflow-y: auto;
+    padding: .35rem .5rem;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    opacity: .85;
+  }
+
+  & .perm-find pre { opacity: .5; text-decoration: line-through; }
+  & .perm-preview { margin-bottom: .5rem; }
+
+  & .perm-actions {
+    display: flex;
+    gap: .5rem;
+    justify-content: flex-end;
   }
 
   & .streaming .message__content::after {
