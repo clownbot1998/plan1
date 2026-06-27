@@ -7,6 +7,7 @@
     "compile:server": "deno desktop server.js",
     "compile:desktop": "deno desktop scripts/desktop-bridge.js --backend webview",
     "desktop": "./scripts/laufey --runtime ./server/server.so",
-    "test": "deno test --no-check --allow-net --allow-env --env-file=.env debugging_utilities/test_was_e2e.ts"
+    "test": "deno test --no-check --allow-net --allow-env --env-file=.env debugging_utilities/test_was_e2e.ts",
+    "wallet-service": "./scripts/wallet-service.sh"
   }
 }
