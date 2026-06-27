@@ -84,8 +84,9 @@ function sessionCookieHeader(secure) {
 
 // prevent path traversal: resolve filePath relative to DIST and assert it stays inside
 function safeDistPath(filePath) {
-  const resolved = resolve(DIST, filePath.replace(/^\/+/, ''));
-  if (!resolved.startsWith(DIST.replace(/\/$/, ''))) return null;
+  const base     = resolve(DIST);
+  const resolved = resolve(base, filePath.replace(/^\/+/, ''));
+  if (!resolved.startsWith(base)) return null;
   return resolved;
 }
 
