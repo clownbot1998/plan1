@@ -372,6 +372,7 @@ const _humanCallbacks = {}
 
 function humanRPC(request) {
   const id = crypto.randomUUID()
+  pushLog({ kind: 'rpc', text: (request.action || 'permission') + (request.description ? ': ' + request.description : '') })
   return new Promise((resolve, reject) => {
     _humanCallbacks[id] = { resolve, reject }
     $.teach({ humanPrompt: { id, ...request } })
@@ -383,9 +384,20 @@ function humanRPCRespond(id, yes) {
   if (!cb) return
   delete _humanCallbacks[id]
   $.teach({ humanPrompt: null })
+  pushLog({ kind: 'rpc-response', text: yes ? 'approved' : 'declined' })
   if (yes) cb.resolve(true)
   else cb.reject(Object.assign(new Error('Declined.'), { declined: true }))
 }
+
+function pushLog(entry) {
+  const { agentLogs } = $.learn()
+  $.teach({ agentLogs: [...agentLogs, { ...entry, ts: Date.now() }] })
+}
+
+// any subsystem can dispatch plan98-log to surface into the panel
+window.addEventListener('plan98-log', (e) => {
+  pushLog({ kind: e.detail.kind || 'system', text: e.detail.text || String(e.detail) })
+})
 
 function addMessage(payload) {
   $.teach(payload, mergeMessage)
@@ -726,7 +738,8 @@ async function agentChat(userMessage) {
       $.teach({ thinkingFace: text })
     })
   }
-  $.teach({ thinking: true, agentLogs: [] })
+  const { agentLogs: prevLogs } = $.learn()
+  $.teach({ thinking: true, agentLogs: [...prevLogs, { kind: 'session', text: userMessage, ts: Date.now() }] })
 
   const { messages: history } = $.learn()
   const historyMessages = history
@@ -830,21 +843,22 @@ RULES:
         let args = {}
         try { args = JSON.parse(tc.function.arguments) } catch {}
 
-        const logText = tc.function.name + ' ' + JSON.stringify(args).slice(0, 120)
-        $.teach({ agentLogs: [...$.learn().agentLogs, { kind: 'tool', text: logText }] })
+        const logText = tc.function.name + ' ' + JSON.stringify(args)
+        pushLog({ kind: 'tool', text: logText })
 
         try {
           const result = await callToolGated(tc.function.name, args)
           messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) })
-          const rText = JSON.stringify(result)
-          $.teach({ agentLogs: [...$.learn().agentLogs, { kind: 'result', text: rText.length > 120 ? rText.slice(0, 120) + '…' : rText }] })
+          const isError = result && result.error
+          pushLog({ kind: isError ? 'error' : 'result', text: JSON.stringify(result) })
         } catch (e) {
           if (e.declined) {
+            pushLog({ kind: 'rpc-response', text: 'declined' })
             $.teach({ thinking: false, thinkingFace: null })
             addMessage({ body: 'declined.', author: 'assistant', system: true })
             return
           }
-          $.teach({ agentLogs: [...$.learn().agentLogs, { kind: 'result', text: 'error: ' + e.message }] })
+          pushLog({ kind: 'error', text: e.message })
           messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: e.message }) })
         }
       }
@@ -1265,18 +1279,33 @@ function embedStub({ tag, props, innerHTML, innerText }) {
 }
 
 function renderAgentLogs(logs, thinkingFace) {
+  const fmtTime = ts => {
+    if (!ts) return ''
+    const d = new Date(ts)
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+  const header = `
+    <div class="log-header">
+      <span class="log-header-title">logs (${logs.length})</span>
+      <button class="log-clear-btn" data-clear-logs>clear</button>
+    </div>`
   if (!logs.length && !thinkingFace) {
-    return '<div class="log-empty">no activity yet — ask the agent to edit a file to see tool calls here</div>'
+    return header + '<div class="log-empty">no activity yet — ask the agent to edit a file</div>'
   }
   const entries = logs.map(l => {
-    if (l.kind === 'tool') return `<div class="log-entry log-entry--tool">⚙ <code class="log-code">${escapeHyperText(l.text)}</code></div>`
-    if (l.kind === 'result') return `<div class="log-entry log-entry--result">← <span class="log-result">${escapeHyperText(l.text)}</span></div>`
-    return ''
+    const t = `<span class="log-ts">${fmtTime(l.ts)}</span>`
+    if (l.kind === 'session') return `<div class="log-entry log-entry--session">${t}<span class="log-session-text">${escapeHyperText(l.text.slice(0, 80))}</span></div>`
+    if (l.kind === 'tool')    return `<div class="log-entry log-entry--tool">${t}⚙ <code class="log-code">${escapeHyperText(l.text)}</code></div>`
+    if (l.kind === 'result')  return `<div class="log-entry log-entry--result">${t}← <span class="log-result">${escapeHyperText(l.text)}</span></div>`
+    if (l.kind === 'error')   return `<div class="log-entry log-entry--error">${t}✗ <span class="log-error">${escapeHyperText(l.text)}</span></div>`
+    if (l.kind === 'rpc')     return `<div class="log-entry log-entry--rpc">${t}? <span class="log-rpc">${escapeHyperText(l.text)}</span></div>`
+    if (l.kind === 'rpc-response') return `<div class="log-entry log-entry--rpc-response">${t}<span class="log-rpc-resp">${escapeHyperText(l.text)}</span></div>`
+    return `<div class="log-entry log-entry--system">${t}<span class="log-system">${escapeHyperText(l.text)}</span></div>`
   }).join('')
   const live = thinkingFace
     ? `<div class="log-entry log-entry--live"><pre class="log-stream">${escapeHyperText(thinkingFace)}</pre></div>`
     : ''
-  return entries + live
+  return header + entries + live
 }
 
 $.draw((target) => {
@@ -1967,18 +1996,63 @@ $.style(`
     text-align: left;
   }
 
+  & .log-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: .3rem .75rem;
+    border-bottom: 1px solid #eee;
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 2;
+  }
+  & .log-header-title {
+    font-family: Courier, monospace;
+    font-size: .7rem;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  & .log-clear-btn {
+    background: none;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    padding: 1px 8px;
+    font-family: Courier, monospace;
+    font-size: .7rem;
+    cursor: pointer;
+    color: #aaa;
+  }
+  & .log-clear-btn:hover { border-color: #aaa; color: #333; }
+
   & .log-entry {
     display: flex;
     align-items: flex-start;
-    gap: .5rem;
-    padding: .35rem .75rem;
+    gap: .4rem;
+    padding: .25rem .75rem;
     font-family: 'Recursive', Courier, monospace;
-    font-size: .8rem;
+    font-size: .75rem;
     border-bottom: 1px solid #f5f5f5;
     max-width: min(65ch, 100%);
     margin-inline: auto;
     box-sizing: border-box;
   }
+  & .log-ts {
+    flex-shrink: 0;
+    font-size: .65rem;
+    color: #bbb;
+    padding-top: .1em;
+    min-width: 6ch;
+  }
+  & .log-entry--session {
+    background: #f8f8f8;
+    border-left: 3px solid #ccc;
+    color: #666;
+    font-weight: bold;
+    padding-left: .5rem;
+  }
+  & .log-session-text { font-style: italic; }
   & .log-entry--tool { color: #1a6ef5; }
   & .log-entry .log-code {
     font-family: inherit;
@@ -1986,15 +2060,20 @@ $.style(`
     word-break: break-all;
     background: none;
   }
-  & .log-entry--result { color: #1a7a3c; opacity: .85; }
+  & .log-entry--result { color: #1a7a3c; }
   & .log-entry .log-result { word-break: break-all; }
-  & .log-entry--live { display: block; padding: .35rem .75rem; }
+  & .log-entry--error { color: #c0392b; background: #fff5f5; }
+  & .log-entry .log-error { word-break: break-all; font-weight: bold; }
+  & .log-entry--rpc { color: #e67e22; }
+  & .log-entry--rpc-response { color: #888; font-style: italic; }
+  & .log-entry--system { color: #888; }
+  & .log-entry--live { display: block; padding: .25rem .75rem; }
   & .log-entry--live .log-stream {
     margin: 0;
     white-space: pre-wrap;
     word-break: break-word;
-    font-size: .75rem;
-    opacity: .65;
+    font-size: .7rem;
+    opacity: .6;
     font-family: inherit;
     max-width: min(65ch, 100%);
     margin-inline: auto;
@@ -2472,6 +2551,11 @@ $.when('keydown', '[name="messageText"]', (event) => {
 
 $.when('click', '[data-toggle-logs]', () => {
   $.teach({ logsOpen: !$.learn().logsOpen })
+})
+
+$.when('click', '[data-clear-logs]', (e) => {
+  e.stopPropagation()
+  $.teach({ agentLogs: [] })
 })
 
 $.when('click', '[data-toggle-preview]', () => {

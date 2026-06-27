@@ -1,13 +1,20 @@
 // elf-tools: file I/O via the plan1 server (dist/ filesystem + braid layer)
 // reads: plain fetch → dist/; writes: PUT /save/<path> → disk + braid broadcast
 
+function log(kind, text) {
+  window.dispatchEvent(new CustomEvent('plan98-log', { detail: { kind, text } }))
+}
+
 async function read_file(path) {
   try {
     const res = await fetch(path)
-    if (res.status === 404) return { error: 'not found' }
-    if (!res.ok) return { error: `fetch failed: ${res.status}` }
-    return { content: await res.text() }
+    if (res.status === 404) { log('error', `read_file: not found — ${path}`); return { error: 'not found' } }
+    if (!res.ok) { log('error', `read_file: fetch failed ${res.status} — ${path}`); return { error: `fetch failed: ${res.status}` } }
+    const content = await res.text()
+    log('system', `read_file: ${path} (${content.length} bytes)`)
+    return { content }
   } catch (e) {
+    log('error', `read_file: ${e.message}`)
     return { error: e.message }
   }
 }
@@ -19,10 +26,12 @@ async function write_file(path, content) {
       headers: { 'content-type': 'text/plain' },
       body: content,
     })
-    if (res.status === 401) return { error: 'not authenticated — user must type "admin" in the shell to log in first' }
-    if (!res.ok) return { error: `save failed: ${res.status}` }
+    if (res.status === 401) { log('error', `write_file: not authenticated — type "admin" to log in`); return { error: 'not authenticated — user must type "admin" in the shell to log in first' } }
+    if (!res.ok) { log('error', `write_file: save failed ${res.status} — ${path}`); return { error: `save failed: ${res.status}` } }
+    log('result', `write_file: saved ${path} (${content.length} bytes)`)
     return { ok: true }
   } catch (e) {
+    log('error', `write_file: ${e.message}`)
     return { error: e.message }
   }
 }
@@ -30,19 +39,24 @@ async function write_file(path, content) {
 async function patch_file(path, find, replace) {
   try {
     const res = await fetch(path)
-    if (!res.ok) return { error: 'file not found' }
+    if (!res.ok) { log('error', `patch_file: file not found — ${path}`); return { error: 'file not found' } }
     const original = await res.text()
-    if (!original.includes(find)) return { error: 'find string not found in file' }
+    if (!original.includes(find)) {
+      log('error', `patch_file: find string not in file — looked for: ${find.slice(0, 60)}`)
+      return { error: 'find string not found in file' }
+    }
     const patched = original.replace(find, replace)
     const saveRes = await fetch('/save' + path, {
       method: 'PUT',
       headers: { 'content-type': 'text/plain' },
       body: patched,
     })
-    if (saveRes.status === 401) return { error: 'not authenticated — user must type "admin" in the shell to log in first' }
-    if (!saveRes.ok) return { error: `save failed: ${saveRes.status}` }
+    if (saveRes.status === 401) { log('error', `patch_file: not authenticated — type "admin" to log in`); return { error: 'not authenticated — user must type "admin" in the shell to log in first' } }
+    if (!saveRes.ok) { log('error', `patch_file: save failed ${saveRes.status} — ${path}`); return { error: `save failed: ${saveRes.status}` } }
+    log('result', `patch_file: patched ${path}`)
     return { ok: true }
   } catch (e) {
+    log('error', `patch_file: ${e.message}`)
     return { error: e.message }
   }
 }
