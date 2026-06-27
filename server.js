@@ -1189,6 +1189,27 @@ async function handleRequest(request) {
     return fetch(rewritten.toString());
   }
 
+  // WAS-first read for elves — the AI-editable layer.
+  // Writes go to disk + WAS via /save; reads come back from WAS so any node
+  // sharing the same space sees live edits without a local build step.
+  if (path.startsWith('/elves/') && _spaceId) {
+    const wasHost = safeEnv('PLAN98_WAS_HOST');
+    if (wasHost) {
+      try {
+        const storage = new StorageClient(new URL(wasHost));
+        const space   = storage.space({ signer: _signer, id: `urn:uuid:${_spaceId}` });
+        const wasRes  = await space.resource(path.slice(1)).get({ signer: _signer }).catch(() => null);
+        if (wasRes?.status === 200) {
+          const ct = getContentTypeByPath(path);
+          return new Response(await wasRes.blob(), {
+            status: 200,
+            headers: { 'content-type': ct, 'x-served-by': 'was' },
+          });
+        }
+      } catch { /* fall through to disk */ }
+    }
+  }
+
   const res = await serveDir(request, { fsRoot: DIST, quiet: true });
 
   // serveDir can return text/plain for files whose names contain URL-encoded chars
