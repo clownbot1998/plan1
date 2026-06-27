@@ -18,7 +18,8 @@ private-manifest.json
 was-manifest.json
 
 # deno-desktop experiment artifacts — multi-hundred-MB CEF bundles & compiled .so (not source)
-server/
+server/was/
+server/*.so
 hello-desktop/
 desktop-bridge/
 client/public/cdn/mapps/*.zip
