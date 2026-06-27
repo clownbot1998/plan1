@@ -329,6 +329,8 @@ const $ = Self('accessibility-mode', {
   exportOpen: false,
   metaSession: null,
   humanPrompt: null,
+  previewUrl: null,
+  previewOpen: false,
 })
 
 export function sh(message) {
@@ -669,9 +671,23 @@ const shellToolDefinitions = [
       parameters: { type: 'object', properties: { dir: { type: 'string', description: 'Directory path, use "/" for all' } }, required: ['dir'] },
     }
   },
+  {
+    type: 'function',
+    function: {
+      name: 'set_preview',
+      description: 'Open the preview panel to show a URL in an iframe. Call this after editing a file so the user can see the live result. Do not ask for permission — just call it.',
+      parameters: { type: 'object', properties: { url: { type: 'string', description: 'URL to preview, e.g. /app/pot-luck' } }, required: ['url'] },
+    }
+  },
 ]
 
 async function callToolGated(name, args) {
+  if (name === 'set_preview') {
+    const ts = Date.now()
+    const url = args.url.includes('?') ? `${args.url}&_v=${ts}` : `${args.url}?_v=${ts}`
+    $.teach({ previewUrl: url, previewOpen: true })
+    return { ok: true }
+  }
   const desc = Object.entries(args).map(([k, v]) => `${k}: ${String(v).slice(0, 100)}`).join(' | ')
   await humanRPC({ action: name, description: desc })
   if (name === 'shell') {
@@ -717,7 +733,7 @@ async function agentChat(userMessage) {
     .map(m => ({ role: m.author === 'human' ? 'user' : 'assistant', content: m.body }))
 
   const messages = [
-    { role: 'system', content: `You are clownbot, an AI that lives in a browser shell called plan1. You help the user navigate and query their system. You have shell and file tools. Use them to answer questions. Be concise. All tool calls require explicit user permission — the user will see a yes/no prompt before each one executes.` },
+    { role: 'system', content: `You are clownbot, an AI that lives in a browser shell called plan1. You help the user navigate and query their system. You have shell and file tools. All tool calls except set_preview require user approval — the user sees a yes/no prompt. After editing a file, always call set_preview with the relevant /app/<elf> URL so the user sees the live result. End your final response with: try it now` },
     ...historyMessages,
   ]
 
@@ -1047,6 +1063,18 @@ text: ls
     return { body: fmt('js.entering'), system: true }
   },
 
+  'preview': function(url) {
+    if (!url) {
+      const { previewOpen } = $.learn()
+      $.teach({ previewOpen: !previewOpen })
+      return null
+    }
+    const ts = Date.now()
+    const fullUrl = url.includes('?') ? `${url}&_v=${ts}` : `${url}?_v=${ts}`
+    $.teach({ previewUrl: fullUrl, previewOpen: true })
+    return { body: `preview: ${url}`, system: true }
+  },
+
   'git': async function(...args) {
     const [sub, ...rest] = args
     const { git, fs, pfs } = await getGit()
@@ -1214,7 +1242,7 @@ function embedStub({ tag, props, innerHTML, innerText }) {
 
 $.draw((target) => {
   mount(target)
-  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading, sidebarOpen, sagaFilter, sessions, boardCards, exportOpen, metaSession, humanPrompt } = $.learn()
+  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading, sidebarOpen, sagaFilter, sessions, boardCards, exportOpen, metaSession, humanPrompt, previewUrl, previewOpen } = $.learn()
 
   const toQuote = (body) =>
     (body || '').split('\n').map(l => l.trim() ? `> ${escapeHyperText(l)}` : '').join('\n')
@@ -1285,6 +1313,12 @@ $.draw((target) => {
   }
 
   return `
+      <div class="preview-wrap">
+        <button class="preview-handle" data-toggle-preview><span>= &nbsp;= &nbsp;= &nbsp;= &nbsp;=</span></button>
+        <div class="preview-panel" data-open="${previewOpen}">
+          ${previewUrl ? `<iframe src="${escapeHyperText(previewUrl)}" class="preview-frame"></iframe>` : ''}
+        </div>
+      </div>
       <div class="scroll-back">
         <button type="button" class="sidebar-toggle" data-toggle-sidebar title="sagas">${icon('journal-text')}</button>
         <div class="messages">
@@ -1741,12 +1775,56 @@ $.style(`
 
   & {
     display: grid;
-    grid-template-rows: 1fr auto;
+    grid-template-rows: auto 1fr auto;
     height: 100%;
     overflow: hidden;
     background: white;
     color: black;
     position: relative;
+  }
+
+  & .preview-wrap {
+    flex-shrink: 0;
+  }
+
+  & .preview-handle {
+    display: block;
+    width: 100%;
+    background: linear-gradient(90deg, #000 0%, #fff 100%);
+    border: none;
+    cursor: pointer;
+    padding: .35rem .5rem;
+    line-height: 1;
+  }
+
+  & .preview-handle span {
+    display: inline-block;
+    background: linear-gradient(90deg, #fff 0%, #000 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: .3em;
+    font-family: 'Recursive', Courier, monospace;
+    font-variation-settings: 'MONO' 1;
+    font-size: .85rem;
+    user-select: none;
+  }
+
+  & .preview-panel {
+    height: 0;
+    overflow: hidden;
+    transition: height 280ms cubic-bezier(.4,0,.2,1);
+  }
+
+  & .preview-panel[data-open="true"] {
+    height: 45vh;
+  }
+
+  & .preview-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: none;
   }
 
   & .icon {
@@ -2262,6 +2340,10 @@ $.when('keydown', '[name="messageText"]', (event) => {
   if (event.ctrlKey && (event.key === 'c' || event.key === 'C')) {
     interrupt()
   }
+})
+
+$.when('click', '[data-toggle-preview]', () => {
+  $.teach({ previewOpen: !$.learn().previewOpen })
 })
 
 $.when('click', '[data-toggle-sidebar]', async () => {

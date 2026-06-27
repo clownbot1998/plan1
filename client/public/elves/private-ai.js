@@ -1,9 +1,28 @@
 import elf from '@plan98/elf'
 import Cache from '@silly/cache'
 import { marked } from 'marked'
-import { toolDefinitions, callTool, approvePermission, denyPermission } from './elf-tools.js'
+import { toolDefinitions, callTool } from './elf-tools.js'
 
 const cache = Cache('private-ai')
+
+// permission bridge — write_file and patch_file pause here until the user
+// clicks Approve or Deny in the UI
+let _permResolve = null
+function approvePermission() { _permResolve?.(true);  _permResolve = null }
+function denyPermission()    { _permResolve?.(false); _permResolve = null }
+function requestPermission(toolName, args) {
+  return new Promise(resolve => {
+    _permResolve = resolve
+    window.dispatchEvent(new CustomEvent('plan98-tool-permission', { detail: { toolName, args } }))
+  })
+}
+async function callToolGated(name, args) {
+  if (name === 'write_file' || name === 'patch_file') {
+    const approved = await requestPermission(name, args)
+    if (!approved) return { error: `${name} denied by user` }
+  }
+  return callTool(name, args)
+}
 
 const envUrl = (typeof plan98 !== 'undefined' && plan98?.env?.OLLAMA_HOST) || ''
 const envKey = (typeof plan98 !== 'undefined' && plan98?.env?.OLLAMA_KEY) || ''
@@ -249,7 +268,7 @@ async function streamResponse(response, priorMessages, depth = 0) {
       const toolResults = await Promise.all(toolCalls.map(async tc => {
         let args = {}
         try { args = JSON.parse(tc.function.arguments) } catch {}
-        const result = await callTool(tc.function.name, args)
+        const result = await callToolGated(tc.function.name, args)
         return { role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) }
       }))
       const unknownTool = toolResults.find(r => { try { return JSON.parse(r.content)?.error?.startsWith('unknown tool') } catch { return false } })
@@ -670,7 +689,7 @@ export const openClown = {
       const toolResults = await Promise.all(toolCalls.map(async tc => {
         let args = {}
         try { args = JSON.parse(tc.function.arguments) } catch {}
-        const result = await callTool(tc.function.name, args)
+        const result = await callToolGated(tc.function.name, args)
         return { role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) }
       }))
       currentMessages = [...currentMessages, assistantMsg, ...toolResults]

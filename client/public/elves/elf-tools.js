@@ -1,22 +1,5 @@
 // elf-tools: file I/O via the plan1 server (dist/ filesystem + braid layer)
 // reads: plain fetch → dist/; writes: PUT /save/<path> → disk + braid broadcast
-// write_file and patch_file pause for user approval via a CustomEvent bridge
-
-// === permission bridge ===
-
-let _permResolve = null
-
-export function approvePermission() { _permResolve?.(true);  _permResolve = null }
-export function denyPermission()    { _permResolve?.(false); _permResolve = null }
-
-function requestPermission(toolName, args) {
-  return new Promise(resolve => {
-    _permResolve = resolve
-    window.dispatchEvent(new CustomEvent('plan98-tool-permission', { detail: { toolName, args } }))
-  })
-}
-
-// === tools ===
 
 async function read_file(path) {
   try {
@@ -30,8 +13,6 @@ async function read_file(path) {
 }
 
 async function write_file(path, content) {
-  const approved = await requestPermission('write_file', { path, content })
-  if (!approved) return { error: 'write denied by user' }
   try {
     const res = await fetch('/save' + path, {
       method: 'PUT',
@@ -46,8 +27,6 @@ async function write_file(path, content) {
 }
 
 async function patch_file(path, find, replace) {
-  const approved = await requestPermission('patch_file', { path, find, replace })
-  if (!approved) return { error: 'patch denied by user' }
   try {
     const res = await fetch(path)
     if (!res.ok) return { error: 'file not found' }
