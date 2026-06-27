@@ -331,6 +331,8 @@ const $ = Self('accessibility-mode', {
   humanPrompt: null,
   previewUrl: null,
   previewOpen: false,
+  logsOpen: false,
+  agentLogs: [],
 })
 
 export function sh(message) {
@@ -724,7 +726,7 @@ async function agentChat(userMessage) {
       $.teach({ thinkingFace: text })
     })
   }
-  $.teach({ thinking: true })
+  $.teach({ thinking: true, agentLogs: [] })
 
   const { messages: history } = $.learn()
   const historyMessages = history
@@ -747,7 +749,8 @@ RULES:
 - Never ask "shall I proceed?" in text — just call the tool, the permission prompt appears automatically
 - Always read_file before patching so your find string matches exactly what is in the file
 - Elves live at /elves/<name>.js — e.g. pot-luck is at /elves/pot-luck.js (NOT /public/elves/)
-- After patching, call set_preview /app/<name> immediately` },
+- After patching, call set_preview /app/<name> immediately
+- If a tool returns a 401 or "not logged in" error: tell the user to type "admin" to authenticate, then try again — do not tell them to edit files manually` },
     ...historyMessages,
   ]
 
@@ -826,15 +829,22 @@ RULES:
       for (const tc of toolCalls) {
         let args = {}
         try { args = JSON.parse(tc.function.arguments) } catch {}
+
+        const logText = tc.function.name + ' ' + JSON.stringify(args).slice(0, 120)
+        $.teach({ agentLogs: [...$.learn().agentLogs, { kind: 'tool', text: logText }] })
+
         try {
           const result = await callToolGated(tc.function.name, args)
           messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) })
+          const rText = JSON.stringify(result)
+          $.teach({ agentLogs: [...$.learn().agentLogs, { kind: 'result', text: rText.length > 120 ? rText.slice(0, 120) + '…' : rText }] })
         } catch (e) {
           if (e.declined) {
             $.teach({ thinking: false, thinkingFace: null })
             addMessage({ body: 'declined.', author: 'assistant', system: true })
             return
           }
+          $.teach({ agentLogs: [...$.learn().agentLogs, { kind: 'result', text: 'error: ' + e.message }] })
           messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: e.message }) })
         }
       }
@@ -1254,9 +1264,24 @@ function embedStub({ tag, props, innerHTML, innerText }) {
   return `<a class="am-embed-stub" href="javascript:;" data-embed-tag="${escapeHyperText(tag)}" data-embed-props="${escapeHyperText(JSON.stringify(props))}"><pre>${shorthand}</pre></a>`
 }
 
+function renderAgentLogs(logs, thinkingFace) {
+  if (!logs.length && !thinkingFace) {
+    return '<div class="log-empty">no activity yet — ask the agent to edit a file to see tool calls here</div>'
+  }
+  const entries = logs.map(l => {
+    if (l.kind === 'tool') return `<div class="log-entry log-entry--tool">⚙ <code class="log-code">${escapeHyperText(l.text)}</code></div>`
+    if (l.kind === 'result') return `<div class="log-entry log-entry--result">← <span class="log-result">${escapeHyperText(l.text)}</span></div>`
+    return ''
+  }).join('')
+  const live = thinkingFace
+    ? `<div class="log-entry log-entry--live"><pre class="log-stream">${escapeHyperText(thinkingFace)}</pre></div>`
+    : ''
+  return entries + live
+}
+
 $.draw((target) => {
   mount(target)
-  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading, sidebarOpen, sagaFilter, sessions, boardCards, exportOpen, metaSession, humanPrompt, previewUrl, previewOpen } = $.learn()
+  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading, sidebarOpen, sagaFilter, sessions, boardCards, exportOpen, metaSession, humanPrompt, previewUrl, previewOpen, logsOpen, agentLogs } = $.learn()
 
   const toQuote = (body) =>
     (body || '').split('\n').map(l => l.trim() ? `> ${escapeHyperText(l)}` : '').join('\n')
@@ -1336,10 +1361,13 @@ $.draw((target) => {
       <div class="scroll-back">
         <button type="button" class="sidebar-toggle" data-toggle-sidebar title="sagas">${icon('journal-text')}</button>
         <div class="messages">
-          ${sagaHtml}
-          <div class="thinking-disk" aria-hidden="${thinking ? 'false' : 'true'}"></div>
+          ${logsOpen ? renderAgentLogs(agentLogs, thinkingFace) : sagaHtml}
         </div>
       </div>
+      <button class="thinking-bar" data-toggle-logs title="${logsOpen ? 'back to chat' : 'view agent logs'}">
+        ${thinking ? '<div class="thinking-disk"></div>' : '<span class="thinking-bar-dot">◉</span>'}
+        <span class="thinking-bar-label">${logsOpen ? '← chat' : thinking ? 'thinking…' : agentLogs.length ? `logs (${agentLogs.length})` : '· · ·'}</span>
+      </button>
       <div class="sagas-sidebar" data-open="${sidebarOpen}">
         <div class="sagas-sidebar-resizer" data-sagas-resizer></div>
         <div class="sagas-sidebar-inner">
@@ -1445,7 +1473,7 @@ function beforeUpdate(target) {
 }
 
 function afterUpdate(target) {
-  const diskWrap = target.querySelector('.thinking-disk')
+  const diskWrap = target.querySelector('.thinking-bar .thinking-disk')
   if (diskWrap && !diskWrap.querySelector('flying-disk')) {
     diskWrap.appendChild(document.createElement('flying-disk'))
   }
@@ -1789,7 +1817,7 @@ $.style(`
 
   & {
     display: grid;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto 1fr auto auto;
     height: 100%;
     overflow: hidden;
     background: white;
@@ -1880,17 +1908,91 @@ $.style(`
 
   & .mic-btn.-loading { opacity: .5; }
 
-  & .thinking-disk[aria-hidden="true"] { display: none; }
-  & .thinking-disk {
-    padding: .5rem;
-  }
-  & .thinking-disk flying-disk {
+  & .thinking-bar {
     display: flex;
     align-items: center;
-    width: 48px;
-    height: 48px;
+    gap: .5rem;
+    padding: .2rem .75rem;
+    background: transparent;
+    border: none;
+    border-top: 1px solid color-mix(in srgb, var(--root-theme, mediumseagreen) 25%, transparent);
+    cursor: pointer;
+    width: 100%;
+    max-width: min(65ch, 100%);
+    margin-inline: auto;
+    box-sizing: border-box;
+    font-family: 'Recursive', Courier, monospace;
+    font-size: .75rem;
+    color: color-mix(in srgb, currentColor 55%, transparent);
+    text-align: left;
+    min-height: 32px;
+  }
+  & .thinking-bar:hover {
+    background: color-mix(in srgb, var(--root-theme, mediumseagreen) 8%, transparent);
+    color: currentColor;
+  }
+  & .thinking-bar .thinking-disk {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    padding: 0;
+  }
+  & .thinking-bar .thinking-disk flying-disk {
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     overflow: hidden;
+    display: flex;
+    align-items: center;
+  }
+  & .thinking-bar-dot {
+    font-size: .9rem;
+    opacity: .35;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+  & .thinking-bar-label {
+    font-variant-numeric: tabular-nums;
+  }
+
+  & .log-entry {
+    display: flex;
+    align-items: flex-start;
+    gap: .5rem;
+    padding: .35rem .75rem;
+    font-family: 'Recursive', Courier, monospace;
+    font-size: .8rem;
+    border-bottom: 1px solid #f5f5f5;
+    max-width: min(65ch, 100%);
+    margin-inline: auto;
+    box-sizing: border-box;
+  }
+  & .log-entry--tool { color: #1a6ef5; }
+  & .log-entry .log-code {
+    font-family: inherit;
+    font-size: inherit;
+    word-break: break-all;
+    background: none;
+  }
+  & .log-entry--result { color: #1a7a3c; opacity: .85; }
+  & .log-entry .log-result { word-break: break-all; }
+  & .log-entry--live { display: block; padding: .35rem .75rem; }
+  & .log-entry--live .log-stream {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: .75rem;
+    opacity: .65;
+    font-family: inherit;
+    max-width: min(65ch, 100%);
+    margin-inline: auto;
+  }
+  & .log-empty {
+    padding: 2rem 1rem;
+    font-family: Courier, monospace;
+    font-size: .8rem;
+    color: #aaa;
+    text-align: center;
   }
 
   & form,
@@ -2354,6 +2456,10 @@ $.when('keydown', '[name="messageText"]', (event) => {
   if (event.ctrlKey && (event.key === 'c' || event.key === 'C')) {
     interrupt()
   }
+})
+
+$.when('click', '[data-toggle-logs]', () => {
+  $.teach({ logsOpen: !$.learn().logsOpen })
 })
 
 $.when('click', '[data-toggle-preview]', () => {

@@ -19,6 +19,7 @@ async function write_file(path, content) {
       headers: { 'content-type': 'text/plain' },
       body: content,
     })
+    if (res.status === 401) return { error: 'not authenticated — user must type "admin" in the shell to log in first' }
     if (!res.ok) return { error: `save failed: ${res.status}` }
     return { ok: true }
   } catch (e) {
@@ -38,6 +39,7 @@ async function patch_file(path, find, replace) {
       headers: { 'content-type': 'text/plain' },
       body: patched,
     })
+    if (saveRes.status === 401) return { error: 'not authenticated — user must type "admin" in the shell to log in first' }
     if (!saveRes.ok) return { error: `save failed: ${saveRes.status}` }
     return { ok: true }
   } catch (e) {
