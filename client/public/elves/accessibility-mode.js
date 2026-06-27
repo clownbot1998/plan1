@@ -1367,6 +1367,7 @@ $.draw((target) => {
       <button class="thinking-bar" data-toggle-logs title="${logsOpen ? 'back to chat' : 'view agent logs'}">
         ${thinking ? '<div class="thinking-disk"></div>' : '<span class="thinking-bar-dot">◉</span>'}
         <span class="thinking-bar-label">${logsOpen ? '← chat' : thinking ? 'thinking…' : agentLogs.length ? `logs (${agentLogs.length})` : '· · ·'}</span>
+        ${thinking && thinkingFace ? `<span class="thinking-bar-stream">${escapeHyperText(thinkingFace.slice(-80))}</span>` : ''}
       </button>
       <div class="sagas-sidebar" data-open="${sidebarOpen}">
         <div class="sagas-sidebar-resizer" data-sagas-resizer></div>
@@ -1953,6 +1954,17 @@ $.style(`
   }
   & .thinking-bar-label {
     font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+  & .thinking-bar-stream {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: .65;
+    font-size: .7rem;
+    direction: rtl;
+    text-align: left;
   }
 
   & .log-entry {
