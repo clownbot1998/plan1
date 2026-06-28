@@ -276,7 +276,7 @@ $.draw(() => {
   return `
     <div class="po-shell">
       <div class="po-topbar">
-        <button class="po-home-btn" data-goto-index>↤ Potlucks</button>
+        <button class="po-home-btn" data-goto-index>Back</button>
         <button class="po-pl-title" data-screen="home">${esc(pl ? pl.name : 'Potluck')}</button>
         <nav class="po-nav">
           ${['offer','wish','match','settings'].map(s => `<button class="po-tab ${screen === s ? 'on' : ''}" data-screen="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
