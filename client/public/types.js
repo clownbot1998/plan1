@@ -72,7 +72,7 @@ export function Horizon(x) {
 }
 
 export function Text(x='') {
-  return String.fromCharCode(...new TextEncoder().encode(x.toString()))
+  return x.toString()
 }
 
 export function Add(a, b) {
