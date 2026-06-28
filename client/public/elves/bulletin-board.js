@@ -694,7 +694,8 @@ function renderCard(id, card, focused, linkSource) {
          style="left:${card.x}px; top:${card.y}px; --cw:${card.w}px; --ch:${card.h}px; z-index:${card.z || 3}; background:${card.color || 'lemonchiffon'}; --card-contrast:${contrastColor(card.color || 'lemonchiffon')};">
       <div class="card-title-bar" data-drag="${id}">
         <button class="card-pencil" data-pencil="${id}" title="inspect card">✎</button>
-        <button class="card-close" data-close-card="${id}" title="remove card">×</button>
+        <div class="card-title-grab"></div>
+        <button class="card-close" data-close-card="${id}" title="remove card"><sl-icon name="x-lg"></sl-icon></button>
       </div>
       <textarea class="card-body" data-card-id="${id}" ${isFocused ? '' : 'tabindex="-1"'}
         placeholder="...">${escapeHtml(card.text || '')}</textarea>
@@ -2880,25 +2881,25 @@ $.style(`
     outline-offset: 2px;
   }
 
-  /* adhesive strip — overlays the top of the card only when focused */
+  /* grab bar — full card width, height counter-scales to stay visually constant */
   & .card-title-bar {
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 1.5rem;
+    height: calc(1.5rem / var(--zoom, 1));
     display: none;
-    align-items: center;
+    align-items: flex-start;
     justify-content: flex-end;
-    padding: 0 .2rem;
     border-radius: 2px 2px 0 0;
-    background: inherit;
+    background: rgba(0,0,0,.05);
     cursor: grab;
     touch-action: none;
     user-select: none;
     z-index: 2;
   }
-
+  &[data-mode="manage"] .card-title-bar,
   & .card[data-focused="true"] .card-title-bar { display: flex; }
   & .card-title-bar:active { cursor: grabbing; }
+
 
   & .card-pencil,
   & .card-close {
@@ -2907,16 +2908,30 @@ $.style(`
     color: var(--card-contrast, #1a1a1a);
     opacity: .35;
     cursor: pointer;
-    font-size: .8rem;
+    font-size: 1rem;
     line-height: 1;
-    padding: 0 .25rem;
+    padding: .15rem .3rem;
     transition: opacity .1s;
     flex-shrink: 0;
     z-index: 3;
     position: relative;
+    display: flex;
+    align-items: center;
   }
 
-  & .card-pencil { margin-right: auto; }
+  & .card-title-grab {
+    flex: 1;
+    min-width: min(calc(1.5rem / var(--zoom, 1)), 33%);
+    cursor: grab;
+  }
+  & .card-pencil {
+    transform: scale(calc(1 / var(--zoom, 1)));
+    transform-origin: top left;
+  }
+  & .card-close {
+    transform: scale(calc(1 / var(--zoom, 1)));
+    transform-origin: top right;
+  }
   & .card-pencil:hover,
   & .card-close:hover { opacity: 1; }
 
@@ -2940,9 +2955,11 @@ $.style(`
     z-index: 1;
   }
 
-  /* When focused: title bar sits on top, textarea shifts down to avoid it */
+  &[data-mode="manage"] .card-body,
   & .card[data-focused="true"] .card-body {
-    top: 1.5rem;
+    top: calc(1.5rem / var(--zoom, 1));
+  }
+  & .card[data-focused="true"] .card-body {
     cursor: text;
     pointer-events: auto;
   }
