@@ -145,7 +145,6 @@ const $ = Self(tag, {
   inspectorOpen: true,
   attachmentsOpen: true,
   logsOpen: true,
-  sagasOpen: true,
   ops: [],
   _rejectedOps: [],
   edgeTypes: { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
@@ -737,7 +736,6 @@ function renderInspectorBody(id, cards, edgeTypes = {}) {
       <dt>Author</dt><dd><span class="sidebar-author" title="${escapeHtml(card.author || 'unknown')}">${card.author ? card.author.slice(-8) : '—'}</span></dd>
       <dt>Permalink</dt><dd><a class="sidebar-permalink" href="${permalink}" target="_blank">${id.slice(0,8)}…</a></dd>
     </dl>
-    <textarea class="sidebar-editor" data-edit-card="${id}" placeholder="type here...">${escapeHtml(card.text || '')}</textarea>
     <div class="sidebar-palette-section">
       <div class="sidebar-label">Color</div>
       <div class="sidebar-palette-wrap" data-palette-card="${id}">
@@ -851,19 +849,23 @@ function renderIoPanel(ioMode, ioEngine) {
   return ''
 }
 
-function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, sagasOpen, ops = []) {
+function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops = []) {
   const card = cards[id]
   if (!card) return '<p class="sidebar-empty">Card not found.</p>'
-  const accessibilityUrl = `${location.origin}/app/accessibility-mode?id=${id}`
+  const bg = card.color || 'lemonchiffon'
+  const fg = contrastColor(bg)
   return `
+    <div class="sidebar-editor-zone">
+      <textarea class="sidebar-editor" data-edit-card="${id}" placeholder="type here..."
+        style="background:${bg}; color:${fg};">${escapeHtml(card.text || '')}</textarea>
+    </div>
     <div class="sidebar-section">
-      <button class="section-toggle" data-toggle-section="sagas">
-        <sl-icon name="${sagasOpen ? 'chevron-down' : 'chevron-right'}" class="section-chevron"></sl-icon>
-        <span>Sagas</span>
+      <button class="section-toggle" data-toggle-section="attachments">
+        <sl-icon name="${attachmentsOpen ? 'chevron-down' : 'chevron-right'}" class="section-chevron"></sl-icon>
+        <span>Attachments</span>
       </button>
-      <div class="section-body${sagasOpen ? '' : ' section-collapsed'}">
-        <div class="saga-preview" data-saga-card="${id}"><span class="saga-preview-loading">loading…</span></div>
-        <a class="open-accessibility-link" href="${accessibilityUrl}" target="_blank">open accessibility ↗</a>
+      <div class="section-body${attachmentsOpen ? '' : ' section-collapsed'}">
+        ${renderAttachments(id, card)}
       </div>
     </div>
     <div class="sidebar-section">
@@ -873,15 +875,6 @@ function renderSidebarSections(id, cards, edgeTypes, inspectorOpen, attachmentsO
       </button>
       <div class="section-body${inspectorOpen ? '' : ' section-collapsed'}">
         ${renderInspectorBody(id, cards, edgeTypes)}
-      </div>
-    </div>
-    <div class="sidebar-section">
-      <button class="section-toggle" data-toggle-section="attachments">
-        <sl-icon name="${attachmentsOpen ? 'chevron-down' : 'chevron-right'}" class="section-chevron"></sl-icon>
-        <span>Attachments</span>
-      </button>
-      <div class="section-body${attachmentsOpen ? '' : ' section-collapsed'}">
-        ${renderAttachments(id, card)}
       </div>
     </div>
     <div class="sidebar-section">
@@ -1603,7 +1596,7 @@ function update(target) {
   const { panX, panY, zoom, cards, mode, menuOpen, beltOffsetX, beltOffsetY,
           focusedCard, linkSource, isDrawing, createStartX, createStartY, createX, createY,
           sidebarOpen, sidebarCard, grabbing, edgeTypes, launchHref, players,
-          inspectorOpen, attachmentsOpen, logsOpen, sagasOpen, ops, _rejectedOps } = $.learn()
+          inspectorOpen, attachmentsOpen, logsOpen, ops, _rejectedOps } = $.learn()
 
   const workspace = target.querySelector('.workspace')
   workspace.style.setProperty('--pan-x', panX + 'px')
@@ -1695,14 +1688,14 @@ function update(target) {
     const linkTypeSig = Object.entries(card?.links || {}).map(([k, v]) => `${k}:${v.typeId}`).join(',')
       + '|' + Object.keys(card?.backlinks || {}).join(',')
     const attachSig = Object.keys(card?.attachments || {}).join(',')
-    const sectionSig = `${inspectorOpen}|${attachmentsOpen}|${logsOpen}|${sagasOpen}`
+    const sectionSig = `${inspectorOpen}|${attachmentsOpen}|${logsOpen}`
     const cardSwitched = sidebarBody.dataset.card !== sidebarCard
       || sidebarBody.dataset.etSig !== etSig
       || sidebarBody.dataset.linkTypeSig !== linkTypeSig
       || sidebarBody.dataset.attachSig !== attachSig
       || sidebarBody.dataset.sectionSig !== sectionSig
     if (cardSwitched) {
-      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, sagasOpen, ops)
+      sidebarBody.innerHTML = renderSidebarSections(sidebarCard, cards, edgeTypes, inspectorOpen, attachmentsOpen, logsOpen, ops)
       sidebarBody.dataset.card = sidebarCard
       sidebarBody.dataset.etSig = etSig
       sidebarBody.dataset.linkTypeSig = linkTypeSig
@@ -1710,7 +1703,6 @@ function update(target) {
       sidebarBody.dataset.sectionSig = sectionSig
       queueThumbLoad(sidebarBody)
       attachThumbHoldListeners(sidebarBody)
-      if (sagasOpen) loadSagaInto(sidebarBody, sidebarCard)
     } else {
       // Patch live stats without destroying plan98-palette or editor focus
       if (card) {
@@ -2257,14 +2249,6 @@ $.when('click', '[data-toggle-section]', e => {
   if (section === 'inspector') $.teach({ inspectorOpen: !$.learn().inspectorOpen })
   else if (section === 'attachments') $.teach({ attachmentsOpen: !$.learn().attachmentsOpen })
   else if (section === 'logs') $.teach({ logsOpen: !$.learn().logsOpen })
-  else if (section === 'sagas') {
-    const { sagasOpen, sidebarCard } = $.learn()
-    $.teach({ sagasOpen: !sagasOpen })
-    if (!sagasOpen) {
-      const sidebarBody = document.querySelector('.sidebar-body')
-      if (sidebarBody) loadSagaInto(sidebarBody, sidebarCard)
-    }
-  }
 })
 
 $.when('change', '.op-check', e => {
@@ -3360,27 +3344,29 @@ $.style(`
     width: 100%;
   }
 
+  & .sidebar-editor-zone {
+    background: #000;
+    padding: .5rem;
+    flex-shrink: 0;
+  }
   & .sidebar-editor {
     display: block;
     width: 100%;
-    min-height: 8rem;
-    margin-top: .75rem;
+    max-width: 320px;
+    aspect-ratio: 1;
+    margin: 0 auto;
     padding: .5rem;
     box-sizing: border-box;
-    background: white;
-    border: 1px solid rgba(0,0,0,.12);
-    border-radius: 3px;
+    border: none;
+    border-radius: 2px;
     font-family: 'Recursive', sans-serif;
     font-size: .8rem;
     line-height: 1.5;
-    color: #3a3020;
-    resize: vertical;
+    resize: none;
     outline: none;
-    transition: border-color .1s;
   }
   & .sidebar-editor:focus {
-    border-color: dodgerblue;
-    box-shadow: 0 0 0 2px rgba(30,144,255,.15);
+    box-shadow: 0 0 0 2px dodgerblue;
   }
 
   & .sidebar-section {

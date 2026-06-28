@@ -28,6 +28,7 @@ const SECTIONS = {
       { label: 'Multi Task',   href: '/app/multi-task' },
       { label: 'Couch Coop',   href: '/app/couch-coop' },
       { label: 'Bulletin Board', href: '/app/bulletin-board' },
+      { label: 'Clown Map: Circus Mesh SF', href: '/app/clown-map' },
     ]
   },
   blog: {

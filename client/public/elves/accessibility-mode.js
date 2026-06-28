@@ -332,7 +332,7 @@ const $ = Self('accessibility-mode', {
   previewUrl: '/app/bulletin-board',
   previewOpen: false,
   tabs: [{ id: 'default', label: 'Chat' }],
-  activeTabId: 'sessions',
+  activeTabId: 'default',
   tabSnapshots: {},
   tabLive: {},
   logsOpen: false,
