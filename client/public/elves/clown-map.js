@@ -7,6 +7,8 @@ const $ = Self(tag)
 const SF_CENTER = [37.7749, -122.4194]
 const SF_ZOOM = 12
 const SL = 'https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.16.0/cdn/assets/icons'
+const AP_BASE = 'https://plan98.org'
+const TTL_PATH = '/cdn/sillyz.computer/clown-map.ttl'
 
 let _map = null
 let _expanded = false
@@ -63,6 +65,52 @@ function toggleExpand(target) {
   updateExpandIcon(target)
 }
 
+// Each intersection is an ActivityPub actor. Its bulletin-board is a directed
+// graph of cards+edges. Every valid path traversal through that graph is one
+// possible saga for that clown at that corner — a quantum feed: all paths
+// exist simultaneously, each observation collapses to one reading.
+function generateTTL(features) {
+  const lines = [
+    '@prefix as:     <https://www.w3.org/ns/activitystreams#> .',
+    '@prefix geo:    <http://www.w3.org/2003/01/geo/wgs84_pos#> .',
+    '@prefix sf:     <' + AP_BASE + '/clown-map/cnn/> .',
+    '@prefix schema: <https://schema.org/> .',
+    '',
+  ]
+  for (const f of features) {
+    const p = f.properties
+    const [lng, lat] = f.geometry.coordinates
+    const cnn = p.cnn || p.cnntext
+    const name = [p.st_name, p.st_type].filter(Boolean).join(' ') || cnn
+    const boardId = 'sf-cnn-' + cnn
+    lines.push(
+      'sf:' + cnn + ' a as:Person ;',
+      '    as:name       ' + JSON.stringify(name) + ' ;',
+      '    as:url        <' + AP_BASE + '/app/bulletin-board?id=' + boardId + '> ;',
+      '    as:outbox     <' + AP_BASE + '/ap/' + boardId + '/outbox> ;',
+      '    as:inbox      <' + AP_BASE + '/ap/' + boardId + '/inbox> ;',
+      '    geo:lat       ' + lat + ' ;',
+      '    geo:long      ' + lng + ' .',
+      '',
+    )
+  }
+  return lines.join('\n')
+}
+
+async function saveTTL(ttl) {
+  try {
+    const res = await fetch('/save' + TTL_PATH, {
+      method: 'PUT',
+      headers: { 'content-type': 'text/turtle' },
+      body: ttl,
+    })
+    if (res.status === 401) return // not logged in, skip silently
+    if (!res.ok) console.warn('clown-map: TTL save failed', res.status)
+  } catch (e) {
+    console.warn('clown-map: TTL save error', e.message)
+  }
+}
+
 async function initMap(mapEl, statusEl, target) {
   if (_map || !mapEl) return
   injectLeafletCss()
@@ -104,6 +152,9 @@ async function initMap(mapEl, statusEl, target) {
 
     setStatus(statusEl, data.features.length.toLocaleString() + ' noses', 'count')
     setTimeout(() => setStatus(statusEl, ''), 3000)
+
+    // generate + persist the actor graph; silently skips if not authenticated
+    saveTTL(generateTTL(data.features))
   } catch (e) {
     setStatus(statusEl, e.message, 'error')
   }
