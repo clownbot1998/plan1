@@ -329,10 +329,16 @@ const $ = Self('accessibility-mode', {
   exportOpen: false,
   metaSession: null,
   humanPrompt: null,
-  previewUrl: null,
+  previewUrl: '/app/bulletin-board',
   previewOpen: false,
+  tabs: [{ id: 'default', label: 'Chat' }],
+  activeTabId: 'sessions',
+  tabSnapshots: {},
+  tabLive: {},
   logsOpen: false,
   agentLogs: [],
+  availableModels: ['silly'],
+  selectedModel: 'silly',
 })
 
 export function sh(message) {
@@ -389,9 +395,30 @@ function humanRPCRespond(id, yes) {
   else cb.reject(Object.assign(new Error('Declined.'), { declined: true }))
 }
 
+// tracks which tab's agent is currently running — set at start of agentChat, cleared in finally
+let _currentAgentTabId = null
+
+function tabIdForWrite() {
+  const { activeTabId } = $.learn()
+  return _currentAgentTabId || activeTabId
+}
+
+function teachLive(updates) {
+  const tabId = _currentAgentTabId || $.learn().activeTabId
+  const { tabLive } = $.learn()
+  $.teach({ tabLive: { ...tabLive, [tabId]: { ...(tabLive[tabId] || {}), ...updates } } })
+}
+
 function pushLog(entry) {
-  const { agentLogs } = $.learn()
-  $.teach({ agentLogs: [...agentLogs, { ...entry, ts: Date.now() }] })
+  const tabId = tabIdForWrite()
+  const { activeTabId, agentLogs, tabSnapshots } = $.learn()
+  const log = { ...entry, ts: Date.now() }
+  if (tabId === activeTabId) {
+    $.teach({ agentLogs: [...agentLogs, log] })
+  } else {
+    const snap = tabSnapshots[tabId] || { messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }
+    $.teach({ tabSnapshots: { ...tabSnapshots, [tabId]: { ...snap, agentLogs: [...(snap.agentLogs || []), log] } } })
+  }
 }
 
 // any subsystem can dispatch plan98-log to surface into the panel
@@ -400,7 +427,14 @@ window.addEventListener('plan98-log', (e) => {
 })
 
 function addMessage(payload) {
-  $.teach(payload, mergeMessage)
+  const tabId = tabIdForWrite()
+  const { activeTabId, tabSnapshots } = $.learn()
+  if (tabId === activeTabId) {
+    $.teach(payload, mergeMessage)
+  } else {
+    const snap = tabSnapshots[tabId] || { messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }
+    $.teach({ tabSnapshots: { ...tabSnapshots, [tabId]: { ...snap, messages: [...snap.messages, payload] } } })
+  }
   wasSave()
 }
 
@@ -547,11 +581,11 @@ function normalMode() {
 }
 
 function partial(response) {
-  $.teach({ thinkingFace: response })
+  teachLive({ thinkingFace: response })
 }
 
 function done(response) {
-  $.teach({ thinkingFace: null, thinking: false })
+  teachLive({ thinkingFace: null, thinking: false })
   addMessage({ body: response, author: 'assistant' })
 }
 
@@ -582,12 +616,12 @@ const modalities = {
       await agent(null)
       return { body: fmt('agent.exit'), system: true }
     }
-    $.teach({ thinking: true })
+    teachLive({ thinking: true })
     const message = await agent(program, {
-      partial: (text) => $.teach({ thinkingFace: text }),
-      done: () => $.teach({ thinkingFace: null }),
+      partial: (text) => teachLive({ thinkingFace: text }),
+      done: () => teachLive({ thinkingFace: null }),
     })
-    $.teach({ thinking: false })
+    teachLive({ thinking: false })
     return message
   },
 
@@ -720,13 +754,40 @@ let _agentAbort = null
 let _sagaMessagesRef = null
 let _sagaHistoryHtml = ''
 
+async function loadModels() {
+  const apiUrl = getEnv('ACCESSIBILITY_MODE_LOCK') || getEnv('FALLBACK_LLM_URL') || getEnv('OLLAMA_HOST') || ''
+  const apiKey = getEnv('ACCESSIBILITY_MODE_KEY') || getEnv('FALLBACK_LLM_KEY') || getEnv('OLLAMA_KEY') || 'ollama'
+  const envModel = getEnv('ACCESSIBILITY_MODE_DEFAULT_MODEL') || getEnv('FALLBACK_LLM_MODEL') || getEnv('OLLAMA_MODEL') || ''
+  if (!apiUrl) return
+  try {
+    const res = await fetch(apiUrl + '/models', { headers: { 'Authorization': `Bearer ${apiKey}` } })
+    if (!res.ok) return
+    const data = await res.json()
+    const ids = (data.data || data.models || []).map(m => m.id || m.name).filter(Boolean)
+    if (!ids.length) return
+    const models = ['silly', ...ids]
+    const current = $.learn().selectedModel
+    const selected = current !== 'silly' ? current : (envModel && ids.includes(envModel) ? envModel : 'silly')
+    $.teach({ availableModels: models, selectedModel: selected })
+  } catch { /* silent — server may not be running */ }
+}
+
 async function agentChat(userMessage) {
+  const { selectedModel, activeTabId } = $.learn()
+  _currentAgentTabId = activeTabId
+
+  if (selectedModel === 'silly') {
+    addMessage({ body: 'silly — no AI active. select a model above to enable the agent.', author: 'assistant', system: true })
+    _currentAgentTabId = null
+    return
+  }
+
   // accessibility-mode has its own dedicated config — the LOCK is the endpoint,
   // the KEY fits it. Falls back to the shared FALLBACK_LLM / OLLAMA chain.
   // All read live via getEnv so end-user overrides (plan98-env) take effect.
   const apiUrl = getEnv('ACCESSIBILITY_MODE_LOCK') || getEnv('FALLBACK_LLM_URL') || getEnv('OLLAMA_HOST') || ''
   const apiKey = getEnv('ACCESSIBILITY_MODE_KEY') || getEnv('FALLBACK_LLM_KEY') || getEnv('OLLAMA_KEY') || 'ollama'
-  const model = getEnv('ACCESSIBILITY_MODE_DEFAULT_MODEL') || getEnv('FALLBACK_LLM_MODEL') || getEnv('OLLAMA_MODEL') || 'qwen2.5-coder:7b'
+  const model = selectedModel
   if (!apiUrl) return addMessage({ body: 'no AI configured — set ACCESSIBILITY_MODE_LOCK (url) + ACCESSIBILITY_MODE_KEY, or open plan98-env to set one live', author: 'assistant', system: true })
 
   _agentAbort = new AbortController()
@@ -735,11 +796,12 @@ async function agentChat(userMessage) {
     if (_thinkingRaf) return
     _thinkingRaf = requestAnimationFrame(() => {
       _thinkingRaf = null
-      $.teach({ thinkingFace: text })
+      teachLive({ thinkingFace: text })
     })
   }
   const { agentLogs: prevLogs } = $.learn()
-  $.teach({ thinking: true, agentLogs: [...prevLogs, { kind: 'session', text: userMessage, ts: Date.now() }] })
+  teachLive({ thinking: true })
+  $.teach({ agentLogs: [...prevLogs, { kind: 'session', text: userMessage, ts: Date.now() }] })
 
   const { messages: history } = $.learn()
   const historyMessages = history
@@ -751,19 +813,22 @@ async function agentChat(userMessage) {
     { role: 'system', content: `You are clownbot, an AI agent that lives in a browser shell called plan1. You have tools and you USE them — you never tell the user to edit files themselves.
 
 CORE SKILL — request → edit → preview:
-1. read_file the relevant file first to understand the current code
-2. patch_file to make the change (find the EXACT text string, replace with new text)
+1. read_file the relevant file to see the EXACT current text
+2. patch_file to make the change — the find argument must be EXACT TEXT copied from the file, not a description
 3. set_preview with the /app/<elf-name> URL so the user sees the live result
-4. Say "try it now" as your final line
+4. Say "try it now" as your final line — ONLY after a SUCCESSFUL patch_file or write_file
 
-RULES:
-- Never say "I can't edit files" or "you'll need to change..." — you have patch_file and write_file, use them
+CRITICAL RULES:
+- "try it now" must NEVER appear unless the previous tool call was a SUCCESSFUL patch_file or write_file
+- If read_file shows the text already matches what was requested: say "I see X in the file already — did you mean something else?" — do NOT say "try it now"
+- The find argument must be EXACT TEXT from the file — not the user's words, not a description. If you can't find the right string, read the file again and quote it precisely
+- Button/label text should be SHORT — if user says "make it say Back", insert "Back", not their full sentence
+- If the user says "still nothing": do NOT give up — read the file again, check what's there, patch the right string
+- Never say "I can't edit files" — you have patch_file and write_file, use them
 - Never describe edits for the user to make manually — just call the tool
-- Never ask "shall I proceed?" in text — just call the tool, the permission prompt appears automatically
-- Always read_file before patching so your find string matches exactly what is in the file
+- Never ask "shall I proceed?" — just call the tool
 - Elves live at /elves/<name>.js — e.g. pot-luck is at /elves/pot-luck.js (NOT /public/elves/)
-- After patching, call set_preview /app/<name> immediately
-- If a tool returns a 401 or "not logged in" error: tell the user to type "admin" to authenticate, then try again — do not tell them to edit files manually` },
+- If a tool returns 401: tell user to type "admin" in the shell to authenticate, then retry` },
     ...historyMessages,
   ]
 
@@ -830,13 +895,13 @@ RULES:
       }
 
       if (!toolCalls.length) {
-        $.teach({ thinking: false, thinkingFace: null })
+        teachLive({ thinking: false, thinkingFace: null })
         addMessage({ body: accumulated || '(no response)', author: 'assistant' })
         return
       }
 
       if (accumulated) addMessage({ body: accumulated, author: 'assistant' })
-      $.teach({ thinkingFace: null })
+      teachLive({ thinkingFace: null })
       messages.push({ role: 'assistant', content: accumulated || null, tool_calls: toolCalls })
 
       for (const tc of toolCalls) {
@@ -854,7 +919,7 @@ RULES:
         } catch (e) {
           if (e.declined) {
             pushLog({ kind: 'rpc-response', text: 'declined' })
-            $.teach({ thinking: false, thinkingFace: null })
+            teachLive({ thinking: false, thinkingFace: null })
             addMessage({ body: 'declined.', author: 'assistant', system: true })
             return
           }
@@ -864,12 +929,13 @@ RULES:
       }
     }
   } catch (e) {
-    $.teach({ thinking: false, thinkingFace: null })
+    teachLive({ thinking: false, thinkingFace: null })
     if (e.name !== 'AbortError') {
       addMessage({ body: `agent error: ${e.message}`, author: 'assistant', system: true })
     }
   } finally {
     _agentAbort = null
+    _currentAgentTabId = null
   }
 }
 
@@ -1103,8 +1169,7 @@ text: ls
 
   'preview': function(url) {
     if (!url) {
-      const { previewOpen } = $.learn()
-      $.teach({ previewOpen: !previewOpen })
+      $.teach({ previewOpen: !$.learn().previewOpen })
       return null
     }
     const ts = Date.now()
@@ -1310,7 +1375,8 @@ function renderAgentLogs(logs, thinkingFace) {
 
 $.draw((target) => {
   mount(target)
-  const { secureEntry, messages, messageText, messageHeight, thinking, thinkingFace, ttyLive, ttyConnected, listening, voskLoading, sidebarOpen, sagaFilter, sessions, boardCards, exportOpen, metaSession, humanPrompt, previewUrl, previewOpen, logsOpen, agentLogs } = $.learn()
+  const { secureEntry, messages, messageText, messageHeight, ttyLive, ttyConnected, listening, voskLoading, sagaFilter, sessions, boardCards, exportOpen, metaSession, humanPrompt, previewUrl, previewOpen, tabs, activeTabId, tabLive, logsOpen, agentLogs, availableModels, selectedModel } = $.learn()
+  const { thinking = false, thinkingFace = null } = tabLive[activeTabId] || {}
 
   const toQuote = (body) =>
     (body || '').split('\n').map(l => l.trim() ? `> ${escapeHyperText(l)}` : '').join('\n')
@@ -1380,75 +1446,50 @@ $.draw((target) => {
     `
   }
 
-  return `
-      <div class="preview-wrap">
-        <button class="preview-handle" data-toggle-preview><span>= &nbsp;= &nbsp;= &nbsp;= &nbsp;=</span></button>
-        <div class="preview-panel" data-open="${previewOpen}">
-          ${previewUrl ? `<iframe src="${escapeHyperText(previewUrl)}" class="preview-frame"></iframe>` : ''}
+  const topbar = `
+      <div class="am-topbar">
+        <select class="am-model-select" data-model-select>
+          ${availableModels.map(m => `<option value="${escapeHyperText(m)}"${m === selectedModel ? ' selected' : ''}>${escapeHyperText(m)}</option>`).join('')}
+        </select>
+        <div class="am-chat-tabs">
+          ${tabs.map(t => `<button class="am-chat-tab${activeTabId === t.id ? ' -active' : ''}" data-tab-drag="${escapeHyperText(t.id)}">${escapeHyperText(t.label)}</button>`).join('')}
+          <button class="am-sessions-btn${activeTabId === 'sessions' ? ' -active' : ''}" data-sessions-tab title="new / open">+</button>
         </div>
-      </div>
+        <button class="am-preview-toggle${previewOpen ? ' -active' : ''}" data-toggle-preview title="${previewOpen ? 'close preview' : 'open preview'}">⧉</button>
+      </div>`
+
+  if (activeTabId === 'sessions') {
+    const filtered = sagaFilter ? sessions.filter(s => (s.title || s.id).toLowerCase().includes(sagaFilter.toLowerCase())) : sessions
+    return topbar + `
+      <div class="am-sessions-view">
+        <div class="am-sessions-inner">
+          <button class="am-new-chat-hero" data-new-chat>New Chat</button>
+          ${filtered.length ? `
+            <div class="am-sessions-list">
+              ${filtered.map(s => `
+                <button class="am-session-item" data-open-session="${escapeHyperText(s.id)}">${escapeHyperText(s.title || s.id.slice(0, 8))}</button>
+              `).join('')}
+            </div>
+          ` : '<div class="am-sessions-empty">no saved chats yet</div>'}
+        </div>
+      </div>`
+  }
+
+  if (previewOpen) {
+    return topbar + `<iframe src="${escapeHyperText(previewUrl || '/app/bulletin-board')}" class="am-preview-inframe"></iframe>`
+  }
+
+  const chatContent = `
       <div class="scroll-back">
-        <button type="button" class="sidebar-toggle" data-toggle-sidebar title="sagas">${icon('journal-text')}</button>
         <div class="messages">
           ${logsOpen ? renderAgentLogs(agentLogs, thinkingFace) : sagaHtml}
         </div>
       </div>
       <button class="thinking-bar" data-toggle-logs title="${logsOpen ? 'back to chat' : 'view agent logs'}">
-        ${thinking ? '<div class="thinking-disk"></div>' : '<span class="thinking-bar-dot">◉</span>'}
+        ${thinking ? '<div class="thinking-disk"></div>' : '<span class="thinking-bar-dot">&#9673;</span>'}
         <span class="thinking-bar-label">${logsOpen ? '← chat' : thinking ? 'thinking…' : agentLogs.length ? `logs (${agentLogs.length})` : '· · ·'}</span>
         ${thinking && thinkingFace ? `<span class="thinking-bar-stream">${escapeHyperText(thinkingFace.slice(-80))}</span>` : ''}
       </button>
-      <div class="sagas-sidebar" data-open="${sidebarOpen}">
-        <div class="sagas-sidebar-resizer" data-sagas-resizer></div>
-        <div class="sagas-sidebar-inner">
-          <div class="sagas-sidebar-actions">
-            <button class="sb-action-btn" data-sb-new>New</button>
-            <button class="sb-action-btn" data-sb-load>Import</button>
-            <div class="sb-export-wrap">
-              <button class="sb-action-btn${exportOpen ? ' -active' : ''}" data-sb-export-toggle>Export</button>
-              ${exportOpen ? `
-                <div class="sb-export-menu">
-                  <button class="sb-action-btn" data-sb-print>Print</button>
-                  <button class="sb-action-btn" data-sb-save>Download</button>
-                </div>
-              ` : ''}
-            </div>
-            <button class="sb-action-btn" data-sb-share>Share</button>
-            <button class="sb-action-btn" data-close-sidebar>✕</button>
-          </div>
-          <div class="sagas-sidebar-filter">
-            <input class="sagas-filter-input" type="text" placeholder="filter..." value="${escapeHyperText(sagaFilter)}" data-saga-filter>
-          </div>
-          <div class="sagas-list">
-            ${sessions.length ? `
-              <div class="sagas-list-label">saved</div>
-              ${(sagaFilter
-                ? sessions.filter(s => (s.title || s.id).toLowerCase().includes(sagaFilter.toLowerCase()))
-                : sessions
-              ).map(s => `
-                <div class="saga-item -session">
-                  <button class="saga-item-load" data-switch-session="${escapeHyperText(s.id)}">${escapeHyperText(s.title || s.id.slice(0, 8))}</button>
-                  <button class="saga-item-meta" data-meta-session="${escapeHyperText(s.id)}">ⓘ</button>
-                </div>
-              `).join('')}
-            ` : ''}
-            <div class="sagas-list-label">cards <a class="sagas-open-board" href="/app/bulletin-board?id=${escapeHyperText(_shellSessionId)}" target="_blank">open board ↗</a></div>
-            ${boardCards.length ? (sagaFilter
-              ? boardCards.filter(c => c.label.toLowerCase().includes(sagaFilter.toLowerCase()))
-              : boardCards
-            ).map(c => `
-              <button class="saga-item" data-switch-session="${escapeHyperText(c.id)}">${escapeHyperText(c.label)}</button>
-            `).join('') : `<div class="sagas-list-empty">no cards yet</div>`}
-            <div class="sagas-list-label">sagas</div>
-            ${(sagaFilter
-              ? sagaDocs.filter(s => s.name.includes(sagaFilter.toLowerCase()))
-              : sagaDocs
-            ).map(s => `
-              <button class="saga-item" data-load-saga="${escapeHyperText(s.path)}">${escapeHyperText(s.name)}</button>
-            `).join('')}
-          </div>
-        </div>
-      </div>
       <form>
         ${humanPrompt ? `
           <div class="human-prompt">
@@ -1480,8 +1521,9 @@ $.draw((target) => {
           `}
           <button type="submit" class="compose-btn send-btn">${icon('send')}</button>
         </div>
-      </form>
-  `
+      </form>`
+
+  return topbar + chatContent
 }, {
   beforeUpdate,
   afterUpdate
@@ -1855,49 +1897,155 @@ $.style(`
     position: relative;
   }
 
-  & .preview-wrap {
+  & .am-topbar {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    padding: .3rem .5rem;
+    background: #f0f0f0;
+    border-bottom: 1px solid #ddd;
+    min-width: 0;
+  }
+
+  & .am-model-select {
+    font-size: .75rem;
+    padding: .2rem .35rem;
+    border: 1px solid #bbb;
+    border-radius: 3px;
+    background: white;
+    max-width: 160px;
     flex-shrink: 0;
   }
 
-  & .preview-handle {
+  & .am-chat-tabs {
+    display: flex;
+    gap: .2rem;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    margin: 0 .25rem;
+  }
+
+  & .am-chat-tab {
+    font-size: .75rem;
+    padding: .2rem .6rem;
+    border: 1px solid #bbb;
+    border-radius: 3px;
+    background: white;
+    cursor: pointer;
+    color: #555;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  & .am-chat-tab.-active {
+    background: var(--root-theme, mediumseagreen);
+    border-color: var(--root-theme, mediumseagreen);
+    color: var(--compose-btn-contrast, #1a1a1a);
+    font-weight: bold;
+  }
+
+  & .am-sessions-btn {
+    font-size: .85rem;
+    padding: .2rem .5rem;
+    border: 1px solid #bbb;
+    border-radius: 3px;
+    background: white;
+    cursor: pointer;
+    color: #555;
+    flex-shrink: 0;
+  }
+
+  & .am-sessions-btn.-active {
+    background: #222;
+    border-color: #222;
+    color: white;
+  }
+
+  & .am-preview-toggle {
+    font-size: .8rem;
+    padding: .2rem .5rem;
+    border: 1px solid #bbb;
+    border-radius: 3px;
+    background: white;
+    cursor: pointer;
+    color: #555;
+    flex-shrink: 0;
+  }
+
+  & .am-preview-toggle.-active {
+    background: var(--root-theme, mediumseagreen);
+    border-color: var(--root-theme, mediumseagreen);
+    color: var(--compose-btn-contrast, #1a1a1a);
+  }
+
+  & .am-sessions-view {
+    display: flex;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 2rem 1rem;
+    grid-row: 2 / -1;
+  }
+
+  & .am-sessions-inner {
+    width: 100%;
+    max-width: 320px;
+  }
+
+  & .am-new-chat-hero {
     display: block;
     width: 100%;
-    background: linear-gradient(90deg, #000 0%, #fff 100%);
+    padding: 1.25rem;
+    font-size: 1.1rem;
+    font-weight: bold;
+    background: var(--root-theme, mediumseagreen);
+    color: var(--compose-btn-contrast, #1a1a1a);
     border: none;
+    border-radius: 8px;
     cursor: pointer;
-    padding: .35rem .5rem;
-    line-height: 1;
+    margin-bottom: 1.5rem;
+    font-family: inherit;
   }
 
-  & .preview-handle span {
-    display: inline-block;
-    background: linear-gradient(90deg, #fff 0%, #000 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    letter-spacing: .3em;
-    font-family: 'Recursive', Courier, monospace;
-    font-variation-settings: 'MONO' 1;
+  & .am-sessions-list {
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+  }
+
+  & .am-session-item {
+    display: block;
+    width: 100%;
+    padding: .7rem 1rem;
+    text-align: left;
+    font-size: .9rem;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  & .am-session-item:hover {
+    background: #f5f5f5;
+  }
+
+  & .am-sessions-empty {
+    text-align: center;
+    color: #999;
     font-size: .85rem;
-    user-select: none;
+    padding: 2rem 0;
   }
 
-  & .preview-panel {
-    height: 0;
-    overflow: hidden;
-    transition: height 280ms cubic-bezier(.4,0,.2,1);
-  }
-
-  & .preview-panel[data-open="true"] {
-    height: 45vh;
-  }
-
-  & .preview-frame {
+  & .am-preview-inframe {
     display: block;
     width: 100%;
     height: 100%;
     border: none;
+    grid-row: 2 / -1;
   }
+
 
   & .icon {
     display: inline-block;
@@ -2539,7 +2687,8 @@ function isLastLine(textarea) {
 function interrupt() {
   if (_agentAbort) { _agentAbort.abort(); _agentAbort = null }
   normalMode()
-  $.teach({ secureEntry: false, messageHeight: null, messageText: '', messageDraft: '', thinking: false, thinkingFace: null })
+  $.teach({ secureEntry: false, messageHeight: null, messageText: '', messageDraft: '' })
+  teachLive({ thinking: false, thinkingFace: null })
   addMessage({ body: fmt('sagas.interrupted'), author: 'assistant' })
 }
 
@@ -2547,6 +2696,10 @@ $.when('keydown', '[name="messageText"]', (event) => {
   if (event.ctrlKey && (event.key === 'c' || event.key === 'C')) {
     interrupt()
   }
+})
+
+$.when('change', '[data-model-select]', (e) => {
+  $.teach({ selectedModel: e.target.value })
 })
 
 $.when('click', '[data-toggle-logs]', () => {
@@ -2562,50 +2715,124 @@ $.when('click', '[data-toggle-preview]', () => {
   $.teach({ previewOpen: !$.learn().previewOpen })
 })
 
-$.when('click', '[data-toggle-sidebar]', async () => {
-  const opening = !$.learn().sidebarOpen
-  $.teach({ sidebarOpen: opening })
-  if (opening) {
-    const sessions = await listSessions()
-    $.teach({ sessions })
-    loadBoardCards()
-  }
+$.when('click', '[data-sessions-tab]', async () => {
+  const sessions = await listSessions()
+  $.teach({ sessions, activeTabId: 'sessions' })
+  loadBoardCards()
 })
 
-$.when('click', '[data-close-sidebar]', () => {
-  $.teach({ sidebarOpen: false, exportOpen: false })
-})
+function snapshotCurrentTab() {
+  const { activeTabId, tabs, tabSnapshots, messages, history, agentLogs, previewUrl } = $.learn()
+  if (activeTabId === 'sessions') return tabSnapshots
+  return { ...tabSnapshots, [activeTabId]: { messages, history, agentLogs, previewUrl } }
+}
 
+function restoreTab(tabId, snapshots) {
+  const snap = snapshots[tabId] || { messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }
+  $.teach({ activeTabId: tabId, tabSnapshots: snapshots, messages: snap.messages, history: snap.history, agentLogs: snap.agentLogs, previewUrl: snap.previewUrl })
+}
+
+// tab drag-to-reorder + tap-to-switch (flip-book pattern)
 document.addEventListener('pointerdown', e => {
-  if (!e.target.closest('[data-sagas-resizer]')) return
-  const sidebar = e.target.closest('.sagas-sidebar')
-  const host = e.target.closest('accessibility-mode')
-  if (!sidebar || !host) return
+  const tab = e.target.closest('[data-tab-drag]')
+  if (!tab) return
   e.preventDefault()
-  function onMove(ev) {
-    const rect = host.getBoundingClientRect()
-    sidebar.style.width = Math.max(200, rect.right - ev.clientX) + 'px'
+  tab.setPointerCapture(e.pointerId)
+
+  const tabId = tab.dataset.tabDrag
+  const startX = e.clientX
+  let moved = false, ghost = null, indicator = null, dropIdx = null
+  const strip = tab.closest('.am-chat-tabs')
+
+  const onMove = ev => {
+    const dx = Math.abs(ev.clientX - startX)
+    if (!moved && dx > 6) {
+      moved = true
+      const rect = tab.getBoundingClientRect()
+      ghost = document.createElement('div')
+      ghost.textContent = tab.textContent
+      ghost.style.cssText = `position:fixed;pointer-events:none;z-index:9999;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;font-size:.75rem;padding:.2rem .6rem;border:2px solid var(--root-theme,mediumseagreen);border-radius:3px;background:white;opacity:.85;`
+      document.body.appendChild(ghost)
+      indicator = document.createElement('div')
+      const sr = strip.getBoundingClientRect()
+      indicator.style.cssText = `position:fixed;pointer-events:none;z-index:9998;width:3px;border-radius:2px;background:var(--root-theme,mediumseagreen);top:${sr.top}px;height:${sr.height}px;display:none;`
+      document.body.appendChild(indicator)
+    }
+    if (!moved) return
+    ghost.style.left = (ev.clientX - tab.offsetWidth / 2) + 'px'
+    const allTabs = [...strip.querySelectorAll('[data-tab-drag]')]
+    dropIdx = allTabs.length
+    for (let i = 0; i < allTabs.length; i++) {
+      const r = allTabs[i].getBoundingClientRect()
+      if (ev.clientX < r.left + r.width / 2) {
+        dropIdx = i
+        indicator.style.display = 'block'
+        indicator.style.left = (r.left - 2) + 'px'
+        break
+      }
+      if (i === allTabs.length - 1) {
+        indicator.style.display = 'block'
+        indicator.style.left = (r.right + 2) + 'px'
+      }
+    }
   }
-  function onUp() {
-    document.removeEventListener('pointermove', onMove)
-    document.removeEventListener('pointerup', onUp)
+
+  const onUp = () => {
+    tab.removeEventListener('pointermove', onMove)
+    tab.removeEventListener('pointerup', onUp)
+    tab.removeEventListener('pointercancel', onUp)
+    if (ghost) ghost.remove()
+    if (indicator) indicator.remove()
+    if (moved && dropIdx !== null) {
+      const { tabs: allTabs } = $.learn()
+      const fromIdx = allTabs.findIndex(t => t.id === tabId)
+      let toIdx = dropIdx > fromIdx ? dropIdx - 1 : dropIdx
+      if (fromIdx !== -1 && fromIdx !== toIdx) {
+        const next = [...allTabs]
+        const [removed] = next.splice(fromIdx, 1)
+        next.splice(toIdx, 0, removed)
+        $.teach({ tabs: next })
+      }
+    } else if (!moved) {
+      const snapshots = snapshotCurrentTab()
+      restoreTab(tabId, snapshots)
+    }
   }
-  document.addEventListener('pointermove', onMove)
-  document.addEventListener('pointerup', onUp)
+
+  tab.addEventListener('pointermove', onMove)
+  tab.addEventListener('pointerup', onUp)
+  tab.addEventListener('pointercancel', onUp)
 }, { capture: true })
 
-$.when('click', '[data-switch-session]', (event) => {
-  switchSession(event.target.dataset.switchSession)
+$.when('click', '[data-new-chat]', () => {
+  const { tabs } = $.learn()
+  const id = 'tab-' + tabs.length
+  const snapshots = snapshotCurrentTab()
+  $.teach({ tabs: [...tabs, { id, label: 'Chat ' + (tabs.length + 1) }] })
+  restoreTab(id, snapshots)
+  newSession()
+  showPreroll()
+})
+
+$.when('click', '[data-open-session]', async (e) => {
+  const sessionId = e.target.dataset.openSession
+  const { tabs } = $.learn()
+  const existing = tabs.find(t => t.id === sessionId)
+  if (existing) {
+    const snapshots = snapshotCurrentTab()
+    restoreTab(sessionId, snapshots)
+    return
+  }
+  const snapshots = snapshotCurrentTab()
+  const session = await loadSession(sessionId)
+  if (!session) return
+  const newTabs = [...tabs, { id: sessionId, label: session.title || sessionId.slice(0, 8) }]
+  $.teach({ tabs: newTabs, tabSnapshots: { ...snapshots, [sessionId]: { messages: session.messages || [], history: session.history || [], agentLogs: [], previewUrl: '/app/bulletin-board' } } })
+  restoreTab(sessionId, { ...snapshots, [sessionId]: { messages: session.messages || [], history: session.history || [], agentLogs: [], previewUrl: '/app/bulletin-board' } })
 })
 
 $.when('input', '[data-saga-filter]', (event) => {
   $.teach({ sagaFilter: event.target.value })
-})
-
-$.when('click', '[data-sb-new]', () => {
-  newSession()
-  $.teach({ history: [], historyCursor: null, sidebarOpen: false, exportOpen: false })
-  showPreroll()
 })
 
 $.when('click', '[data-sb-export-toggle]', () => {
@@ -2621,7 +2848,6 @@ $.when('click', '[data-load-saga]', async (event) => {
   } catch {
     $.teach({ messages: [{ body: `could not load ${path}`, author: 'unassigned', system: true, id: Date.now() }] })
   }
-  $.teach({ sidebarOpen: false, exportOpen: false })
 })
 
 $.when('click', '[data-sb-print]', () => {
@@ -2695,6 +2921,8 @@ $.when('click', '.human-prompt-yes', (event) => {
 $.when('click', '.human-prompt-no', (event) => {
   humanRPCRespond(event.target.dataset.rpcId, false)
 })
+
+loadModels()
 
 $.when('click', '.am-embed-stub', (event) => {
   const a = event.target.closest('.am-embed-stub')
