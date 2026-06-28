@@ -141,6 +141,9 @@ document.addEventListener('pointerdown', e => {
   const sidebar = host && host.querySelector('.cm-sidebar')
   if (!sidebar || _expanded) return
   e.preventDefault()
+  e.target.setPointerCapture(e.pointerId)
+
+  sidebar.style.transition = 'transform .22s ease'
 
   function onMove(ev) {
     const rect = host.getBoundingClientRect()
@@ -148,12 +151,13 @@ document.addEventListener('pointerdown', e => {
     sidebar.style.width = w + 'px'
   }
   function onUp() {
-    document.removeEventListener('pointermove', onMove)
-    document.removeEventListener('pointerup', onUp)
+    sidebar.style.transition = ''
+    e.target.removeEventListener('pointermove', onMove)
+    e.target.removeEventListener('pointerup', onUp)
   }
-  document.addEventListener('pointermove', onMove)
-  document.addEventListener('pointerup', onUp)
-}, { capture: true })
+  e.target.addEventListener('pointermove', onMove)
+  e.target.addEventListener('pointerup', onUp)
+})
 
 $.style(`
   & {
