@@ -13,6 +13,7 @@ import Vosk from 'vosk-browser'
 import { agent } from './clownbot-agent.js'
 import { getEnv } from './plan98-env.js'
 import { callTool as elfCallTool } from './elf-tools.js'
+import { checkPhysicalButton } from './debug-gamepads.js'
 
 const SL = 'https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.16.0/cdn/assets/icons'
 const sagaDocs = [
@@ -183,6 +184,10 @@ const _urlParams = new URLSearchParams(location.search)
 let _shellSessionId = _urlParams.get('id') || 'default'
 // Optional override: when embedded in another elf that owns a different WAS path
 const _overrideSagaPath = _urlParams.get('saga-path') || null
+
+let _gamepadRaf = null
+const _prevPhysGpad = {}
+const _gpadButtons = { a:0, b:1, x:3, y:2, lb:4, rb:5, lt:6, rt:7, select:8, start:9, ls:10, rs:11, up:12, down:13, left:14, right:15, os:16 }
 
 function newSession() {
   _shellSessionId = crypto.randomUUID()
@@ -403,21 +408,21 @@ function tabIdForWrite() {
   return _currentAgentTabId || activeTabId
 }
 
-function teachLive(updates) {
-  const tabId = _currentAgentTabId || $.learn().activeTabId
+function teachLive(updates, tabId) {
+  const id = tabId || _currentAgentTabId || $.learn().activeTabId
   const { tabLive } = $.learn()
-  $.teach({ tabLive: { ...tabLive, [tabId]: { ...(tabLive[tabId] || {}), ...updates } } })
+  $.teach({ tabLive: { ...tabLive, [id]: { ...(tabLive[id] || {}), ...updates } } })
 }
 
-function pushLog(entry) {
-  const tabId = tabIdForWrite()
+function pushLog(entry, tabId) {
+  const id = tabId || tabIdForWrite()
   const { activeTabId, agentLogs, tabSnapshots } = $.learn()
   const log = { ...entry, ts: Date.now() }
-  if (tabId === activeTabId) {
+  if (id === activeTabId) {
     $.teach({ agentLogs: [...agentLogs, log] })
   } else {
-    const snap = tabSnapshots[tabId] || { messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }
-    $.teach({ tabSnapshots: { ...tabSnapshots, [tabId]: { ...snap, agentLogs: [...(snap.agentLogs || []), log] } } })
+    const snap = tabSnapshots[id] || { messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }
+    $.teach({ tabSnapshots: { ...tabSnapshots, [id]: { ...snap, agentLogs: [...(snap.agentLogs || []), log] } } })
   }
 }
 
@@ -426,14 +431,14 @@ window.addEventListener('plan98-log', (e) => {
   pushLog({ kind: e.detail.kind || 'system', text: e.detail.text || String(e.detail) })
 })
 
-function addMessage(payload) {
-  const tabId = tabIdForWrite()
+function addMessage(payload, tabId) {
+  const id = tabId || tabIdForWrite()
   const { activeTabId, tabSnapshots } = $.learn()
-  if (tabId === activeTabId) {
+  if (id === activeTabId) {
     $.teach(payload, mergeMessage)
   } else {
-    const snap = tabSnapshots[tabId] || { messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }
-    $.teach({ tabSnapshots: { ...tabSnapshots, [tabId]: { ...snap, messages: [...snap.messages, payload] } } })
+    const snap = tabSnapshots[id] || { messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }
+    $.teach({ tabSnapshots: { ...tabSnapshots, [id]: { ...snap, messages: [...snap.messages, payload] } } })
   }
   wasSave()
 }
@@ -774,11 +779,10 @@ async function loadModels() {
 
 async function agentChat(userMessage) {
   const { selectedModel, activeTabId } = $.learn()
-  _currentAgentTabId = activeTabId
+  const myTabId = activeTabId  // closed over — concurrent calls each track their own tab
 
   if (selectedModel === 'silly') {
-    addMessage({ body: 'silly — no AI active. select a model above to enable the agent.', author: 'assistant', system: true })
-    _currentAgentTabId = null
+    addMessage({ body: 'silly — no AI active. select a model above to enable the agent.', author: 'assistant', system: true }, myTabId)
     return
   }
 
@@ -788,7 +792,7 @@ async function agentChat(userMessage) {
   const apiUrl = getEnv('ACCESSIBILITY_MODE_LOCK') || getEnv('FALLBACK_LLM_URL') || getEnv('OLLAMA_HOST') || ''
   const apiKey = getEnv('ACCESSIBILITY_MODE_KEY') || getEnv('FALLBACK_LLM_KEY') || getEnv('OLLAMA_KEY') || 'ollama'
   const model = selectedModel
-  if (!apiUrl) return addMessage({ body: 'no AI configured — set ACCESSIBILITY_MODE_LOCK (url) + ACCESSIBILITY_MODE_KEY, or open plan98-env to set one live', author: 'assistant', system: true })
+  if (!apiUrl) return addMessage({ body: 'no AI configured — set ACCESSIBILITY_MODE_LOCK (url) + ACCESSIBILITY_MODE_KEY, or open plan98-env to set one live', author: 'assistant', system: true }, myTabId)
 
   _agentAbort = new AbortController()
   let _thinkingRaf = null
@@ -796,11 +800,11 @@ async function agentChat(userMessage) {
     if (_thinkingRaf) return
     _thinkingRaf = requestAnimationFrame(() => {
       _thinkingRaf = null
-      teachLive({ thinkingFace: text })
+      teachLive({ thinkingFace: text }, myTabId)
     })
   }
   const { agentLogs: prevLogs } = $.learn()
-  teachLive({ thinking: true })
+  teachLive({ thinking: true }, myTabId)
   $.teach({ agentLogs: [...prevLogs, { kind: 'session', text: userMessage, ts: Date.now() }] })
 
   const { messages: history } = $.learn()
@@ -895,13 +899,13 @@ CRITICAL RULES:
       }
 
       if (!toolCalls.length) {
-        teachLive({ thinking: false, thinkingFace: null })
-        addMessage({ body: accumulated || '(no response)', author: 'assistant' })
+        teachLive({ thinking: false, thinkingFace: null }, myTabId)
+        addMessage({ body: accumulated || '(no response)', author: 'assistant' }, myTabId)
         return
       }
 
-      if (accumulated) addMessage({ body: accumulated, author: 'assistant' })
-      teachLive({ thinkingFace: null })
+      if (accumulated) addMessage({ body: accumulated, author: 'assistant' }, myTabId)
+      teachLive({ thinkingFace: null }, myTabId)
       messages.push({ role: 'assistant', content: accumulated || null, tool_calls: toolCalls })
 
       for (const tc of toolCalls) {
@@ -909,33 +913,32 @@ CRITICAL RULES:
         try { args = JSON.parse(tc.function.arguments) } catch {}
 
         const logText = tc.function.name + ' ' + JSON.stringify(args)
-        pushLog({ kind: 'tool', text: logText })
+        pushLog({ kind: 'tool', text: logText }, myTabId)
 
         try {
           const result = await callToolGated(tc.function.name, args)
           messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) })
           const isError = result && result.error
-          pushLog({ kind: isError ? 'error' : 'result', text: JSON.stringify(result) })
+          pushLog({ kind: isError ? 'error' : 'result', text: JSON.stringify(result) }, myTabId)
         } catch (e) {
           if (e.declined) {
-            pushLog({ kind: 'rpc-response', text: 'declined' })
-            teachLive({ thinking: false, thinkingFace: null })
-            addMessage({ body: 'declined.', author: 'assistant', system: true })
+            pushLog({ kind: 'rpc-response', text: 'declined' }, myTabId)
+            teachLive({ thinking: false, thinkingFace: null }, myTabId)
+            addMessage({ body: 'declined.', author: 'assistant', system: true }, myTabId)
             return
           }
-          pushLog({ kind: 'error', text: e.message })
+          pushLog({ kind: 'error', text: e.message }, myTabId)
           messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: e.message }) })
         }
       }
     }
   } catch (e) {
-    teachLive({ thinking: false, thinkingFace: null })
+    teachLive({ thinking: false, thinkingFace: null }, myTabId)
     if (e.name !== 'AbortError') {
-      addMessage({ body: `agent error: ${e.message}`, author: 'assistant', system: true })
+      addMessage({ body: `agent error: ${e.message}`, author: 'assistant', system: true }, myTabId)
     }
   } finally {
     _agentAbort = null
-    _currentAgentTabId = null
   }
 }
 
@@ -1314,6 +1317,50 @@ function showPreroll() {
   ]})
 }
 
+// ── Gamepad loop ─────────────────────────────────────────────────────────────
+
+function gamepadLoop() {
+  const p = {}
+  for (const name of Object.keys(_gpadButtons)) {
+    const val = checkPhysicalButton(0, _gpadButtons[name]) || 0
+    const prev = _prevPhysGpad[name] || 0
+    _prevPhysGpad[name] = val
+    p[name] = val > 0.5 && prev <= 0.5
+  }
+
+  const { previewOpen, tabs, activeTabId, availableModels, selectedModel } = $.learn()
+
+  if (p['a']) { const text = $.learn().messageText; if (text.trim()) execute(text) }
+  if (p['b']) $.teach({ messageText: '' })
+  if (p['x']) $.teach({ previewOpen: !previewOpen })
+  if (p['y']) {
+    const idx = availableModels.indexOf(selectedModel)
+    $.teach({ selectedModel: availableModels[(idx + 1) % availableModels.length] })
+  }
+  if (p['start']) listSessions().then(sessions => $.teach({ sessions, activeTabId: 'sessions' }))
+  if (p['lb']) {
+    const idx = tabs.findIndex(t => t.id === activeTabId)
+    if (idx > 0) { const s = snapshotCurrentTab(); restoreTab(tabs[idx - 1].id, s) }
+  }
+  if (p['rb']) {
+    const idx = tabs.findIndex(t => t.id === activeTabId)
+    if (idx !== -1 && idx < tabs.length - 1) { const s = snapshotCurrentTab(); restoreTab(tabs[idx + 1].id, s) }
+  }
+  if (p['lt']) { if (tabs.length) { const s = snapshotCurrentTab(); restoreTab(tabs[0].id, s) } }
+  if (p['rt']) { if (tabs.length) { const s = snapshotCurrentTab(); restoreTab(tabs[tabs.length - 1].id, s) } }
+
+  if (previewOpen) {
+    const iframe = document.querySelector('.am-preview-inframe')
+    if (iframe?.contentWindow) {
+      for (const name of ['a', 'b', 'lb', 'rb', 'lt', 'rt']) {
+        if (p[name]) iframe.contentWindow.postMessage({ type: 'gamepad-button', button: name }, '*')
+      }
+    }
+  }
+
+  _gamepadRaf = requestAnimationFrame(gamepadLoop)
+}
+
 function mount(target) {
   if(target.mounted) return
   target.mounted = true
@@ -1321,6 +1368,8 @@ function mount(target) {
   const message = target.getAttribute('message')
   const src = target.getAttribute('src')
   const rom = target.getAttribute('rom')
+
+  gamepadLoop()
   loadStrings().then(() => wasLoad()).then(hadHistory => {
     if (!hadHistory) showPreroll()
     if(command) execute(command)
@@ -1377,19 +1426,20 @@ $.draw((target) => {
   mount(target)
   const { secureEntry, messages, messageText, messageHeight, ttyLive, ttyConnected, listening, voskLoading, sagaFilter, sessions, boardCards, exportOpen, metaSession, humanPrompt, previewUrl, previewOpen, tabs, activeTabId, tabLive, logsOpen, agentLogs, availableModels, selectedModel } = $.learn()
   const { thinking = false, thinkingFace = null } = tabLive[activeTabId] || {}
+  const displayMessages = messages
 
   const toQuote = (body) =>
     (body || '').split('\n').map(l => l.trim() ? `> ${escapeHyperText(l)}` : '').join('\n')
 
-  if (messages !== _sagaMessagesRef) {
-    _sagaMessagesRef = messages
-    const historyScript = messages.map((m, i) => {
+  if (displayMessages !== _sagaMessagesRef) {
+    _sagaMessagesRef = displayMessages
+    const historyScript = displayMessages.map((m, i) => {
       if (m.saga) return m.body
       if (m.author === 'unassigned') return escapeHyperText(m.body)
       if (m.tty || m.system) return escapeHyperText(m.body)
       if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
       const actor = m.actor || 'Sagas'
-      const prev = messages[i - 1]
+      const prev = displayMessages[i - 1]
       const continuingSagas = prev && prev.author === 'assistant' && !prev.saga && !prev.tty && !prev.system && (prev.actor || 'Sagas') === actor
       return continuingSagas ? toQuote(m.body) : `@ ${actor}\n${toQuote(m.body)}`
     }).filter(Boolean).join('\n\n')
@@ -1400,7 +1450,7 @@ $.draw((target) => {
     if (!thinkingFace && !ttyLive) return null
     const text = thinkingFace || ttyLive
     if (ttyLive) return escapeHyperText(text)
-    const lastMsg = messages[messages.length - 1]
+    const lastMsg = displayMessages[displayMessages.length - 1]
     const continuingSagas = lastMsg && lastMsg.author === 'assistant' && !lastMsg.saga && !lastMsg.tty && !lastMsg.system
     return continuingSagas ? toQuote(text) : `@ Sagas\n${toQuote(text)}`
   })()
@@ -1660,15 +1710,13 @@ $.when('click', '[data-mic]', async () => {
 $.when('keypress', 'form [name="messageText"]', (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
-    const message = event.target.value
-    execute(message)
+    execute(event.target.value)
   }
 })
 
 $.when('submit', 'form', (event) => {
   event.preventDefault()
-  const message = event.target.messageText.value
-  execute(message)
+  execute(event.target.messageText.value)
 })
 
 const imports = {}

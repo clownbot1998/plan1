@@ -140,6 +140,14 @@ export function checkButton(slot, button) {
   return overrides[`button:${slot}:${button}`] || gamepads[slot].buttons[button]
 }
 
+// Like checkButton but ignores keyboard overrides — only real gamepad hardware.
+// Use this when you want physical button presses to work even while a text input is focused.
+export function checkPhysicalButton(slot, button) {
+  const { gamepads } = $.learn()
+  if(!gamepads[slot]) return 0
+  return gamepads[slot].buttons[button] || 0
+}
+
 export function overrideAxis(slot, axis, value) {
   overrides[`axis:${slot}:${button}`] = value
 }
