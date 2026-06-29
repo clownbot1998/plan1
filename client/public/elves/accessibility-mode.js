@@ -386,7 +386,7 @@ function humanRPC(request) {
   pushLog({ kind: 'rpc', text: (request.action || 'permission') + (request.description ? ': ' + request.description : '') })
   return new Promise((resolve, reject) => {
     _humanCallbacks[id] = { resolve, reject }
-    $.teach({ humanPrompt: { id, ...request } })
+    $.teach({ humanPrompt: { id, tabId: tabIdForWrite(), ...request } })
   })
 }
 
@@ -755,7 +755,7 @@ async function callToolGated(name, args) {
   return elfCallTool(name, args)
 }
 
-let _agentAbort = null
+const _tabAborts = {}  // per-tab abort controllers — one in-flight request per tab max
 let _sagaMessagesRef = null
 let _sagaHistoryHtml = ''
 
@@ -794,7 +794,9 @@ async function agentChat(userMessage) {
   const model = selectedModel
   if (!apiUrl) return addMessage({ body: 'no AI configured — set ACCESSIBILITY_MODE_LOCK (url) + ACCESSIBILITY_MODE_KEY, or open plan98-env to set one live', author: 'assistant', system: true }, myTabId)
 
-  _agentAbort = new AbortController()
+  if (_tabAborts[myTabId]) _tabAborts[myTabId].abort()
+  const _abort = new AbortController()
+  _tabAborts[myTabId] = _abort
   let _thinkingRaf = null
   function flushThinking(text) {
     if (_thinkingRaf) return
@@ -842,7 +844,7 @@ CRITICAL RULES:
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({ model, messages, stream: true, tools: shellToolDefinitions }),
-        signal: _agentAbort.signal,
+        signal: _abort.signal,
       })
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}))
@@ -938,7 +940,7 @@ CRITICAL RULES:
       addMessage({ body: `agent error: ${e.message}`, author: 'assistant', system: true }, myTabId)
     }
   } finally {
-    _agentAbort = null
+    if (_tabAborts[myTabId] === _abort) delete _tabAborts[myTabId]
   }
 }
 
@@ -1328,10 +1330,16 @@ function gamepadLoop() {
     p[name] = val > 0.5 && prev <= 0.5
   }
 
-  const { previewOpen, tabs, activeTabId, availableModels, selectedModel } = $.learn()
+  const { previewOpen, tabs, activeTabId, availableModels, selectedModel, humanPrompt } = $.learn()
+  const activePrompt = humanPrompt?.tabId === activeTabId ? humanPrompt : null
 
-  if (p['a']) { const text = $.learn().messageText; if (text.trim()) execute(text) }
-  if (p['b']) $.teach({ messageText: '' })
+  if (activePrompt) {
+    if (p['a']) humanRPCRespond(activePrompt.id, true)
+    if (p['b']) humanRPCRespond(activePrompt.id, false)
+  } else {
+    if (p['a']) { const text = $.learn().messageText; if (text.trim()) execute(text) }
+    if (p['b']) $.teach({ messageText: '' })
+  }
   if (p['x']) $.teach({ previewOpen: !previewOpen })
   if (p['y']) {
     const idx = availableModels.indexOf(selectedModel)
@@ -1541,14 +1549,14 @@ $.draw((target) => {
         ${thinking && thinkingFace ? `<span class="thinking-bar-stream">${escapeHyperText(thinkingFace.slice(-80))}</span>` : ''}
       </button>
       <form>
-        ${humanPrompt ? `
+        ${humanPrompt && humanPrompt.tabId === activeTabId ? `
           <div class="human-prompt">
             <span class="human-prompt-label">permission request</span>
             <span class="human-prompt-action">${escapeHyperText(humanPrompt.action || '')}</span>
             ${humanPrompt.description ? `<span class="human-prompt-desc">${escapeHyperText(humanPrompt.description)}</span>` : ''}
             <div class="human-prompt-btns">
-              <button class="human-prompt-yes" data-rpc-id="${humanPrompt.id}">yes</button>
-              <button class="human-prompt-no" data-rpc-id="${humanPrompt.id}">no</button>
+              <button class="human-prompt-yes" data-rpc-id="${humanPrompt.id}">yes (A)</button>
+              <button class="human-prompt-no" data-rpc-id="${humanPrompt.id}">no (B)</button>
             </div>
           </div>
         ` : ''}
@@ -2733,7 +2741,8 @@ function isLastLine(textarea) {
 }
 
 function interrupt() {
-  if (_agentAbort) { _agentAbort.abort(); _agentAbort = null }
+  const { activeTabId } = $.learn()
+  if (_tabAborts[activeTabId]) { _tabAborts[activeTabId].abort(); delete _tabAborts[activeTabId] }
   normalMode()
   $.teach({ secureEntry: false, messageHeight: null, messageText: '', messageDraft: '' })
   teachLive({ thinking: false, thinkingFace: null })
