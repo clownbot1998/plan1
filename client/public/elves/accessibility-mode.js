@@ -190,6 +190,10 @@ const _prevPhysGpad = {}
 const _gpadButtons = { a:0, b:1, x:3, y:2, lb:4, rb:5, lt:6, rt:7, select:8, start:9, ls:10, rs:11, up:12, down:13, left:14, right:15, os:16 }
 
 function newSession() {
+  _unsubscribeSaga?.()
+  _unsubscribeSession?.()
+  _unsubscribeSaga = null
+  _unsubscribeSession = null
   _shellSessionId = crypto.randomUUID()
   window.history.replaceState(null, '', `?id=${_shellSessionId}`)
 }
@@ -224,25 +228,38 @@ function wasSave() {
 let _unsubscribeSaga = null
 let _unsubscribeSession = null
 
-function _applyIncomingSaga(text) {
-  if (!text || !text.trim()) return
-  const { messages } = $.learn()
-  const sagaIdx = messages.findIndex(m => m.author === 'unassigned' && m.saga)
-  if (sagaIdx !== -1) {
-    const updated = [...messages]
-    updated[sagaIdx] = { ...updated[sagaIdx], body: text }
-    $.teach({ messages: updated })
-  } else if (!messages.some(m => m.author === 'human')) {
-    $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
+function writeToTab(tabId, updates) {
+  const { activeTabId, tabSnapshots } = $.learn()
+  if (tabId === activeTabId) {
+    $.teach(updates)
+  } else {
+    const snap = tabSnapshots[tabId] || { messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }
+    $.teach({ tabSnapshots: { ...tabSnapshots, [tabId]: { ...snap, ...updates } } })
+  }
+}
+
+function makeApplySaga(tabId) {
+  return function(text) {
+    if (!text || !text.trim()) return
+    const { activeTabId, tabSnapshots, messages } = $.learn()
+    const src = tabId === activeTabId ? messages : (tabSnapshots[tabId]?.messages || [])
+    const sagaIdx = src.findIndex(m => m.author === 'unassigned' && m.saga)
+    if (sagaIdx !== -1) {
+      const updated = [...src]
+      updated[sagaIdx] = { ...updated[sagaIdx], body: text }
+      writeToTab(tabId, { messages: updated })
+    } else if (!src.some(m => m.author === 'human')) {
+      writeToTab(tabId, { messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
+    }
   }
 }
 
 async function wasLoad() {
   _unsubscribeSaga?.()
   _unsubscribeSession?.()
+  const myTabId = $.learn().activeTabId
 
   if (_overrideSagaPath) {
-    // Embedded by an external elf (e.g. drop-saga) — read directly from its WAS path
     await ensureSpace().catch(() => null)
     let text = ''
     try {
@@ -250,10 +267,10 @@ async function wasLoad() {
       text = blob ? await blob.text() : ''
     } catch {}
     if (text && text.trim()) {
-      $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
+      writeToTab(myTabId, { messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
     }
     const es = new EventSource(`/sync${_overrideSagaPath}`)
-    es.onmessage = e => { if (e.data) _applyIncomingSaga(e.data) }
+    es.onmessage = e => { if (e.data) makeApplySaga(myTabId)(e.data) }
     es.onerror = () => {}
     _unsubscribeSaga = () => es.close()
     return !!(text && text.trim())
@@ -261,18 +278,18 @@ async function wasLoad() {
 
   const session = await loadSession(_shellSessionId)
   if (session) {
-    $.teach({ messages: session.messages, history: session.history })
+    writeToTab(myTabId, { messages: session.messages, history: session.history })
     _unsubscribeSession = subscribeSession(_shellSessionId, s => {
-      $.teach({ messages: s.messages, history: s.history })
+      writeToTab(myTabId, { messages: s.messages, history: s.history })
     })
     return true
   }
 
   const text = await getSaga(_shellSessionId)
   if (text && text.trim()) {
-    $.teach({ messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
+    writeToTab(myTabId, { messages: [{ body: text, author: 'unassigned', saga: true, id: Date.now() }] })
   }
-  _unsubscribeSaga = subscribeSaga(_shellSessionId, _applyIncomingSaga)
+  _unsubscribeSaga = subscribeSaga(_shellSessionId, makeApplySaga(myTabId))
   return !!(text && text.trim())
 }
 
@@ -359,34 +376,16 @@ export function update(message) {
 fileSystem = {}
 $.teach({ cwd: '/' })
 
-function history(state, payload) {
-  return {
-    ...state,
-    history: [
-      ...state.history,
-      payload
-    ]
-  }
-}
-
-function mergeMessage(state, payload) {
-  return {
-    ...state,
-    messages: [
-      ...state.messages,
-      payload
-    ]
-  }
-}
 
 const _humanCallbacks = {}
 
-function humanRPC(request) {
+function humanRPC(request, tabId) {
   const id = crypto.randomUUID()
-  pushLog({ kind: 'rpc', text: (request.action || 'permission') + (request.description ? ': ' + request.description : '') })
+  const tid = tabId || tabIdForWrite()
+  pushLog({ kind: 'rpc', text: (request.action || 'permission') + (request.description ? ': ' + request.description : '') }, tid)
   return new Promise((resolve, reject) => {
     _humanCallbacks[id] = { resolve, reject }
-    $.teach({ humanPrompt: { id, tabId: tabIdForWrite(), ...request } })
+    $.teach({ humanPrompt: { id, tabId: tid, ...request } })
   })
 }
 
@@ -401,15 +400,14 @@ function humanRPCRespond(id, yes) {
 }
 
 // tracks which tab's agent is currently running — set at start of agentChat, cleared in finally
-let _currentAgentTabId = null
 
 function tabIdForWrite() {
   const { activeTabId } = $.learn()
-  return _currentAgentTabId || activeTabId
+  return activeTabId
 }
 
 function teachLive(updates, tabId) {
-  const id = tabId || _currentAgentTabId || $.learn().activeTabId
+  const id = tabId || $.learn().activeTabId
   const { tabLive } = $.learn()
   $.teach({ tabLive: { ...tabLive, [id]: { ...(tabLive[id] || {}), ...updates } } })
 }
@@ -433,9 +431,9 @@ window.addEventListener('plan98-log', (e) => {
 
 function addMessage(payload, tabId) {
   const id = tabId || tabIdForWrite()
-  const { activeTabId, tabSnapshots } = $.learn()
+  const { activeTabId, tabSnapshots, messages } = $.learn()
   if (id === activeTabId) {
-    $.teach(payload, mergeMessage)
+    $.teach({ messages: [...messages, payload] })
   } else {
     const snap = tabSnapshots[id] || { messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }
     $.teach({ tabSnapshots: { ...tabSnapshots, [id]: { ...snap, messages: [...snap.messages, payload] } } })
@@ -444,7 +442,8 @@ function addMessage(payload, tabId) {
 }
 
 function pushHistory(message) {
-  $.teach(message, history)
+  const { history } = $.learn()
+  $.teach({ history: [...history, message] })
   wasSave()
 }
 
@@ -734,7 +733,7 @@ const shellToolDefinitions = [
   },
 ]
 
-async function callToolGated(name, args) {
+async function callToolGated(name, args, tabId) {
   if (name === 'set_preview') {
     const ts = Date.now()
     const url = args.url.includes('?') ? `${args.url}&_v=${ts}` : `${args.url}?_v=${ts}`
@@ -742,7 +741,7 @@ async function callToolGated(name, args) {
     return { ok: true }
   }
   const desc = Object.entries(args).map(([k, v]) => `${k}: ${String(v).slice(0, 100)}`).join(' | ')
-  await humanRPC({ action: name, description: desc })
+  await humanRPC({ action: name, description: desc }, tabId)
   if (name === 'shell') {
     const parts = args.command.trim().split(/\s+/)
     const [cmd, ...rest] = parts
@@ -756,8 +755,6 @@ async function callToolGated(name, args) {
 }
 
 const _tabAborts = {}  // per-tab abort controllers — one in-flight request per tab max
-let _sagaMessagesRef = null
-let _sagaHistoryHtml = ''
 
 async function loadModels() {
   const apiUrl = getEnv('ACCESSIBILITY_MODE_LOCK') || getEnv('FALLBACK_LLM_URL') || getEnv('OLLAMA_HOST') || ''
@@ -918,7 +915,7 @@ CRITICAL RULES:
         pushLog({ kind: 'tool', text: logText }, myTabId)
 
         try {
-          const result = await callToolGated(tc.function.name, args)
+          const result = await callToolGated(tc.function.name, args, myTabId)
           messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) })
           const isError = result && result.error
           pushLog({ kind: isError ? 'error' : 'result', text: JSON.stringify(result) }, myTabId)
@@ -1345,7 +1342,10 @@ function gamepadLoop() {
     const idx = availableModels.indexOf(selectedModel)
     $.teach({ selectedModel: availableModels[(idx + 1) % availableModels.length] })
   }
-  if (p['start']) listSessions().then(sessions => $.teach({ sessions, activeTabId: 'sessions' }))
+  if (p['start']) {
+    $.teach({ tabSnapshots: snapshotCurrentTab() })
+    listSessions().then(sessions => $.teach({ sessions, activeTabId: 'sessions' }))
+  }
   if (p['lb']) {
     const idx = tabs.findIndex(t => t.id === activeTabId)
     if (idx > 0) { const s = snapshotCurrentTab(); restoreTab(tabs[idx - 1].id, s) }
@@ -1439,20 +1439,17 @@ $.draw((target) => {
   const toQuote = (body) =>
     (body || '').split('\n').map(l => l.trim() ? `> ${escapeHyperText(l)}` : '').join('\n')
 
-  if (displayMessages !== _sagaMessagesRef) {
-    _sagaMessagesRef = displayMessages
-    const historyScript = displayMessages.map((m, i) => {
-      if (m.saga) return m.body
-      if (m.author === 'unassigned') return escapeHyperText(m.body)
-      if (m.tty || m.system) return escapeHyperText(m.body)
-      if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
-      const actor = m.actor || 'Sagas'
-      const prev = displayMessages[i - 1]
-      const continuingSagas = prev && prev.author === 'assistant' && !prev.saga && !prev.tty && !prev.system && (prev.actor || 'Sagas') === actor
-      return continuingSagas ? toQuote(m.body) : `@ ${actor}\n${toQuote(m.body)}`
-    }).filter(Boolean).join('\n\n')
-    _sagaHistoryHtml = historyScript ? Saga(historyScript, { actor: embedStub }) : ''
-  }
+  const historyScript = displayMessages.map((m, i) => {
+    if (m.saga) return m.body
+    if (m.author === 'unassigned') return escapeHyperText(m.body)
+    if (m.tty || m.system) return escapeHyperText(m.body)
+    if (m.author === 'human') return `@ Me\n${toQuote(m.body)}`
+    const actor = m.actor || 'Sagas'
+    const prev = displayMessages[i - 1]
+    const continuingSagas = prev && prev.author === 'assistant' && !prev.saga && !prev.tty && !prev.system && (prev.actor || 'Sagas') === actor
+    return continuingSagas ? toQuote(m.body) : `@ ${actor}\n${toQuote(m.body)}`
+  }).filter(Boolean).join('\n\n')
+  const sagaHistoryHtml = historyScript ? Saga(historyScript, { actor: embedStub }) : ''
 
   const streamScript = (() => {
     if (!thinkingFace && !ttyLive) return null
@@ -1463,7 +1460,7 @@ $.draw((target) => {
     return continuingSagas ? toQuote(text) : `@ Sagas\n${toQuote(text)}`
   })()
 
-  const sagaHtml = _sagaHistoryHtml + (streamScript ? Saga(streamScript, { actor: embedStub }) : '')
+  const sagaHtml = sagaHistoryHtml + (streamScript ? Saga(streamScript, { actor: embedStub }) : '')
 
   const allSagas = [
     ...sagaDocs,
@@ -1732,24 +1729,25 @@ const imports = {}
 async function execute(message, options={}) {
   if(!message) return
 
-  const { secureEntry } = $.learn()
+  const { secureEntry, activeTabId } = $.learn()
+  const myTabId = activeTabId  // closed over — responses go back to this tab regardless of switches
 
   if(!secureEntry) {
     pushHistory(message)
-    addMessage({ body: message, author: 'human' })
+    addMessage({ body: message, author: 'human' }, myTabId)
   }
 
   _voskCommitted = ''
   $.teach({ historyCursor: null, messageText: '', messageDraft: '' })
 
   if(message.startsWith('<')) {
-    addMessage({ body: fmt('load.module'), author: 'assistant', system: true })
+    addMessage({ body: fmt('load.module'), author: 'assistant', system: true }, myTabId)
     loadModule(message, options)
     return
   }
 
   if(message.startsWith('/')) {
-    addMessage({ body: fmt('load.path'), author: 'assistant', system: true })
+    addMessage({ body: fmt('load.path'), author: 'assistant', system: true }, myTabId)
     loadPath(message, options)
     return
   }
@@ -1772,7 +1770,7 @@ async function execute(message, options={}) {
     const result = await modalities[modality](message)
     if(result) {
       const msg = typeof result === 'object' ? result : { body: result }
-      addMessage({ ...msg, author: 'assistant' })
+      addMessage({ ...msg, author: 'assistant' }, myTabId)
     }
     return
   }
@@ -1784,13 +1782,13 @@ async function execute(message, options={}) {
       const result = await program.apply($, args)
       if(result) {
         const msg = typeof result === 'object' ? result : { body: result }
-        addMessage({ ...msg, author: 'assistant' })
+        addMessage({ ...msg, author: 'assistant' }, myTabId)
       }
     } catch(e) {
       if (e.declined) {
-        addMessage({ body: 'declined.', author: 'assistant', system: true })
+        addMessage({ body: 'declined.', author: 'assistant', system: true }, myTabId)
       } else {
-        addMessage({ body: `Error. Inspect Logs.<br><a href="${window.location.origin + window.location.pathname}?q=${message}&debug=true">Reload in debug mode</a>`, author: 'assistant' })
+        addMessage({ body: `Error. Inspect Logs.<br><a href="${window.location.origin + window.location.pathname}?q=${message}&debug=true">Reload in debug mode</a>`, author: 'assistant' }, myTabId)
         console.error(e)
       }
     }
@@ -2773,6 +2771,7 @@ $.when('click', '[data-toggle-preview]', () => {
 })
 
 $.when('click', '[data-sessions-tab]', async () => {
+  $.teach({ tabSnapshots: snapshotCurrentTab() }) // save current tab before leaving
   const sessions = await listSessions()
   $.teach({ sessions, activeTabId: 'sessions' })
   loadBoardCards()
@@ -2781,11 +2780,17 @@ $.when('click', '[data-sessions-tab]', async () => {
 function snapshotCurrentTab() {
   const { activeTabId, tabs, tabSnapshots, messages, history, agentLogs, previewUrl } = $.learn()
   if (activeTabId === 'sessions') return tabSnapshots
-  return { ...tabSnapshots, [activeTabId]: { messages, history, agentLogs, previewUrl } }
+  if (!tabs.find(t => t.id === activeTabId)) return tabSnapshots // unknown tab — don't corrupt
+  return { ...tabSnapshots, [activeTabId]: { messages, history, agentLogs, previewUrl, sessionId: _shellSessionId } }
 }
 
 function restoreTab(tabId, snapshots) {
   const snap = snapshots[tabId] || { messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }
+  if (snap.sessionId) _shellSessionId = snap.sessionId
+  // Clear message container before state update so diffHTML renders from a blank
+  // slate instead of patching over stale saga DOM from the previous tab.
+  const msgEl = document.querySelector('accessibility-mode .messages')
+  if (msgEl) msgEl.innerHTML = ''
   $.teach({ activeTabId: tabId, tabSnapshots: snapshots, messages: snap.messages, history: snap.history, agentLogs: snap.agentLogs, previewUrl: snap.previewUrl })
 }
 
@@ -2863,9 +2868,10 @@ document.addEventListener('pointerdown', e => {
 
 $.when('click', '[data-new-chat]', () => {
   const { tabs } = $.learn()
-  const id = 'tab-' + tabs.length
+  const id = crypto.randomUUID()
+  const label = 'Chat ' + (tabs.length + 1)
   const snapshots = snapshotCurrentTab()
-  $.teach({ tabs: [...tabs, { id, label: 'Chat ' + (tabs.length + 1) }] })
+  $.teach({ tabs: [...tabs, { id, label }] })
   restoreTab(id, snapshots)
   newSession()
   showPreroll()
