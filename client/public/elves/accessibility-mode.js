@@ -1390,18 +1390,20 @@ function gamepadLoop() {
       if (cur.section === 'workspaces') {
         if (cur.wsIdx > 0) $.teach({ sessionsCursor: { ...cur, wsIdx: cur.wsIdx - 1 } })
       } else if (cur.section === 'list' && filtered.length) {
+        // left = demote to bottom
         const sess = filtered[cur.listIdx]
         const rest = sessions.filter(s => s.id !== sess.id)
-        $.teach({ sessions: [sess, ...rest], sessionsCursor: { ...cur, listIdx: Math.min(cur.listIdx, filtered.length - 1) } })
+        $.teach({ sessions: [...rest, sess], sessionsCursor: { ...cur, listIdx: Math.min(cur.listIdx, filtered.length - 1) } })
       }
     }
     if (p['right']) {
       if (cur.section === 'workspaces') {
         if (cur.wsIdx < wsCount - 1) $.teach({ sessionsCursor: { ...cur, wsIdx: cur.wsIdx + 1 } })
       } else if (cur.section === 'list' && filtered.length) {
+        // right = promote to top
         const sess = filtered[cur.listIdx]
         const rest = sessions.filter(s => s.id !== sess.id)
-        $.teach({ sessions: [...rest, sess], sessionsCursor: { ...cur, listIdx: Math.min(cur.listIdx, filtered.length - 1) } })
+        $.teach({ sessions: [sess, ...rest], sessionsCursor: { ...cur, listIdx: Math.min(cur.listIdx, filtered.length - 1) } })
       }
     }
     if (p['a']) {
@@ -1730,6 +1732,12 @@ function afterUpdate(target) {
         })
       }
     }
+  }
+
+  {
+    // scroll focused gamepad item into view on sessions screen
+    const gpadEl = target.querySelector('.-gpad')
+    if (gpadEl) gpadEl.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }
 
   {
