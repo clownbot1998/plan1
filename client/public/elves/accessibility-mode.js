@@ -312,6 +312,8 @@ let ttyBuffer = ''
 let ttyFlushTimer = null
 let ttyLastSent = null   // track last sent command to strip echo
 
+const WORKSPACES_PATH = '/my-sagas/workspaces.json'
+
 // vosk voice
 const VOSK_MODEL_URL = '/cdn/sillyz.computer/models/vosk-model-small-en-us-0.15.zip'
 const VOSK_WORKLET = '/cdn/sillyz.computer/models/vosk-browser/recognizer-processor.js'
@@ -361,6 +363,8 @@ const $ = Self('accessibility-mode', {
   agentLogs: [],
   availableModels: ['silly'],
   selectedModel: 'silly',
+  workspaces: [{ id: 'ws-default', label: 'Workspace 1', updatedAt: 0, tabs: [{ id: 'default', label: 'Chat' }], tabSnapshots: {}, activeTabId: 'default', messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }],
+  activeWorkspaceId: 'ws-default',
 })
 
 export function sh(message) {
@@ -1378,13 +1382,15 @@ function mount(target) {
   const rom = target.getAttribute('rom')
 
   gamepadLoop()
-  loadStrings().then(() => wasLoad()).then(hadHistory => {
-    if (!hadHistory) showPreroll()
-    if(command) execute(command)
-    else if(src) execute(src, { suppressBack: true })
-    else if(rom) execute('<'+rom, { suppressBack: true })
-    else if(message) sh(message)
-  })
+  loadWorkspaces().then(() =>
+    loadStrings().then(() => wasLoad()).then(hadHistory => {
+      if (!hadHistory && !$.learn().messages.length) showPreroll()
+      if(command) execute(command)
+      else if(src) execute(src, { suppressBack: true })
+      else if(rom) execute('<'+rom, { suppressBack: true })
+      else if(message) sh(message)
+    })
+  )
   loadBoardCards()
 }
 
@@ -1432,7 +1438,7 @@ function renderAgentLogs(logs, thinkingFace) {
 
 $.draw((target) => {
   mount(target)
-  const { secureEntry, messages, messageText, messageHeight, ttyLive, ttyConnected, listening, voskLoading, sagaFilter, sessions, boardCards, exportOpen, metaSession, humanPrompt, previewUrl, previewOpen, tabs, activeTabId, tabLive, logsOpen, agentLogs, availableModels, selectedModel } = $.learn()
+  const { secureEntry, messages, messageText, messageHeight, ttyLive, ttyConnected, listening, voskLoading, sagaFilter, sessions, boardCards, exportOpen, metaSession, humanPrompt, previewUrl, previewOpen, tabs, activeTabId, tabLive, logsOpen, agentLogs, availableModels, selectedModel, workspaces, activeWorkspaceId } = $.learn()
   const { thinking = false, thinkingFace = null } = tabLive[activeTabId] || {}
   const displayMessages = messages
 
@@ -1470,10 +1476,22 @@ $.draw((target) => {
     ? allSagas.filter(s => s.name.includes(sagaFilter.toLowerCase()))
     : allSagas
 
+  const topbar = `
+      <div class="am-topbar">
+        <select class="am-model-select" data-model-select>
+          ${availableModels.map(m => `<option value="${escapeHyperText(m)}"${m === selectedModel ? ' selected' : ''}>${escapeHyperText(m)}</option>`).join('')}
+        </select>
+        <div class="am-chat-tabs">
+          ${tabs.map(t => `<button class="am-chat-tab${activeTabId === t.id ? ' -active' : ''}" data-tab-drag="${escapeHyperText(t.id)}">${escapeHyperText(t.label)}</button>`).join('')}
+          <button class="am-sessions-btn${activeTabId === 'sessions' ? ' -active' : ''}" data-sessions-tab title="new / open">+</button>
+        </div>
+        <button class="am-preview-toggle${previewOpen ? ' -active' : ''}" data-toggle-preview title="${previewOpen ? 'close preview' : 'open preview'}">⧉</button>
+      </div>`
+
   if (metaSession) {
     const s = sessions.find(x => x.id === metaSession) || { id: metaSession }
     const fmtTs = ts => ts ? new Date(ts).toLocaleString() : '—'
-    return `
+    return topbar + `
       <div class="meta-screen">
         <div class="meta-screen-header">
           <button class="meta-back-btn" data-close-meta>${icon('arrow-left')} Back</button>
@@ -1501,23 +1519,19 @@ $.draw((target) => {
     `
   }
 
-  const topbar = `
-      <div class="am-topbar">
-        <select class="am-model-select" data-model-select>
-          ${availableModels.map(m => `<option value="${escapeHyperText(m)}"${m === selectedModel ? ' selected' : ''}>${escapeHyperText(m)}</option>`).join('')}
-        </select>
-        <div class="am-chat-tabs">
-          ${tabs.map(t => `<button class="am-chat-tab${activeTabId === t.id ? ' -active' : ''}" data-tab-drag="${escapeHyperText(t.id)}">${escapeHyperText(t.label)}</button>`).join('')}
-          <button class="am-sessions-btn${activeTabId === 'sessions' ? ' -active' : ''}" data-sessions-tab title="new / open">+</button>
-        </div>
-        <button class="am-preview-toggle${previewOpen ? ' -active' : ''}" data-toggle-preview title="${previewOpen ? 'close preview' : 'open preview'}">⧉</button>
-      </div>`
-
   if (activeTabId === 'sessions') {
     const filtered = sagaFilter ? sessions.filter(s => (s.title || s.id).toLowerCase().includes(sagaFilter.toLowerCase())) : sessions
     return topbar + `
       <div class="am-sessions-view">
         <div class="am-sessions-inner">
+          <div class="am-workspace-bar">
+            <div class="am-workspace-strip">
+              ${[...(workspaces || [])].sort((a, b) => b.updatedAt - a.updatedAt).map(w => `
+                <button class="am-workspace-btn${w.id === activeWorkspaceId ? ' -active' : ''}" data-switch-workspace="${escapeHyperText(w.id)}">${escapeHyperText(w.label)}</button>
+              `).join('')}
+            </div>
+            <button class="am-new-workspace-btn" data-new-workspace>+ workspace</button>
+          </div>
           <button class="am-new-chat-hero" data-new-chat>New Chat</button>
           ${filtered.length ? `
             <div class="am-sessions-list">
@@ -1950,6 +1964,49 @@ $.style(`
     color: black;
     position: relative;
   }
+
+  & .am-workspace-bar {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid rgba(0,0,0,.1);
+  }
+  & .am-workspace-strip {
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
+    gap: .25rem;
+    padding: .25rem .5rem 0;
+  }
+  & .am-workspace-strip::-webkit-scrollbar { display: none; }
+  & .am-workspace-btn {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 3px 3px 0 0;
+    padding: .2rem .6rem;
+    font-size: .7rem;
+    cursor: pointer;
+    white-space: nowrap;
+    color: inherit;
+    opacity: .6;
+  }
+  & .am-workspace-btn.-active {
+    border-bottom-color: var(--root-theme, mediumseagreen);
+    opacity: 1;
+    font-weight: 600;
+  }
+  & .am-new-workspace-btn {
+    background: transparent;
+    border: none;
+    font-size: .65rem;
+    padding: .15rem .5rem .25rem;
+    cursor: pointer;
+    opacity: .5;
+    text-align: left;
+    color: inherit;
+  }
+  & .am-new-workspace-btn:hover { opacity: .8; }
 
   & .am-topbar {
     display: flex;
@@ -2794,6 +2851,100 @@ function restoreTab(tabId, snapshots) {
   $.teach({ activeTabId: tabId, tabSnapshots: snapshots, messages: snap.messages, history: snap.history, agentLogs: snap.agentLogs, previewUrl: snap.previewUrl })
 }
 
+function snapshotCurrentWorkspace() {
+  const { activeWorkspaceId, workspaces, tabs, tabSnapshots, activeTabId, messages, history, agentLogs, previewUrl } = $.learn()
+  const ws = workspaces.find(w => w.id === activeWorkspaceId) || {}
+  return { ...ws, tabs, tabSnapshots, activeTabId, messages, history, agentLogs, previewUrl, updatedAt: Date.now() }
+}
+
+async function saveWorkspaces() {
+  const { workspaces, activeWorkspaceId } = $.learn()
+  await ensureSpace().catch(() => null)
+  await put(WORKSPACES_PATH, JSON.stringify({ workspaces, activeWorkspaceId }), { type: 'application/json' }).catch(() => null)
+}
+
+async function loadWorkspaces() {
+  await ensureSpace().catch(() => null)
+  try {
+    const blob = await wasGet(WORKSPACES_PATH)
+    if (!blob) return
+    const { workspaces, activeWorkspaceId } = JSON.parse(await blob.text())
+    if (!workspaces?.length) return
+    const active = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0]
+    // Clear message DOM for fresh render
+    const msgEl = document.querySelector('accessibility-mode .messages')
+    if (msgEl) msgEl.innerHTML = ''
+    $.teach({
+      workspaces,
+      activeWorkspaceId: active.id,
+      tabs: active.tabs || [{ id: 'default', label: 'Chat' }],
+      tabSnapshots: active.tabSnapshots || {},
+      activeTabId: active.activeTabId || 'default',
+      messages: active.messages || [],
+      history: active.history || [],
+      agentLogs: active.agentLogs || [],
+      previewUrl: active.previewUrl || '/app/bulletin-board',
+    })
+    if (active.sessionId) _shellSessionId = active.sessionId
+  } catch {}
+}
+
+function switchWorkspace(id) {
+  const { workspaces, activeWorkspaceId } = $.learn()
+  if (id === activeWorkspaceId) return
+  // Snapshot current workspace into array
+  const current = snapshotCurrentWorkspace()
+  const updated = workspaces.map(w => w.id === activeWorkspaceId ? current : w)
+  const target = updated.find(w => w.id === id) || updated[0]
+  const targetSnap = { ...target, updatedAt: Date.now() }
+  const final = updated.map(w => w.id === id ? targetSnap : w)
+  // Clear message DOM before state swap
+  const msgEl = document.querySelector('accessibility-mode .messages')
+  if (msgEl) msgEl.innerHTML = ''
+  $.teach({
+    workspaces: final,
+    activeWorkspaceId: id,
+    tabs: targetSnap.tabs || [{ id: 'default', label: 'Chat' }],
+    tabSnapshots: targetSnap.tabSnapshots || {},
+    activeTabId: targetSnap.activeTabId || 'default',
+    messages: targetSnap.messages || [],
+    history: targetSnap.history || [],
+    agentLogs: targetSnap.agentLogs || [],
+    previewUrl: targetSnap.previewUrl || '/app/bulletin-board',
+  })
+  if (targetSnap.sessionId) _shellSessionId = targetSnap.sessionId
+  // Persist async
+  saveWorkspaces()
+}
+
+function newWorkspace() {
+  const { workspaces, activeWorkspaceId } = $.learn()
+  // Snapshot current
+  const current = snapshotCurrentWorkspace()
+  const updated = workspaces.map(w => w.id === activeWorkspaceId ? current : w)
+  const id = crypto.randomUUID()
+  const label = 'Workspace ' + (workspaces.length + 1)
+  const freshTab = { id: 'default', label: 'Chat' }
+  const ws = { id, label, updatedAt: Date.now(), tabs: [freshTab], tabSnapshots: {}, activeTabId: freshTab.id, messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }
+  const final = [...updated, ws]
+  const msgEl = document.querySelector('accessibility-mode .messages')
+  if (msgEl) msgEl.innerHTML = ''
+  $.teach({
+    workspaces: final,
+    activeWorkspaceId: id,
+    tabs: [freshTab],
+    tabSnapshots: {},
+    activeTabId: freshTab.id,
+    messages: [],
+    history: [],
+    agentLogs: [],
+    previewUrl: '/app/bulletin-board',
+  })
+  newSession()
+  showPreroll()
+  saveWorkspaces()
+}
+
 // tab drag-to-reorder + tap-to-switch (flip-book pattern)
 document.addEventListener('pointerdown', e => {
   const tab = e.target.closest('[data-tab-drag]')
@@ -2986,6 +3137,14 @@ $.when('click', '.human-prompt-no', (event) => {
 })
 
 loadModels()
+
+$.when('click', '[data-switch-workspace]', (e) => {
+  switchWorkspace(e.target.dataset.switchWorkspace)
+})
+
+$.when('click', '[data-new-workspace]', () => {
+  newWorkspace()
+})
 
 $.when('click', '.am-embed-stub', (event) => {
   const a = event.target.closest('.am-embed-stub')
