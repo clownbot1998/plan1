@@ -365,6 +365,7 @@ const $ = Self('accessibility-mode', {
   selectedModel: 'silly',
   workspaces: [{ id: 'ws-default', label: 'Workspace 1', updatedAt: 0, tabs: [{ id: 'default', label: 'Chat' }], tabSnapshots: {}, activeTabId: 'default', messages: [], history: [], agentLogs: [], previewUrl: '/app/bulletin-board' }],
   activeWorkspaceId: 'ws-default',
+  sessionsCursor: { section: 'workspaces', wsIdx: 0, listIdx: 0 },
 })
 
 export function sh(message) {
@@ -1361,6 +1362,75 @@ function gamepadLoop() {
   if (p['lt']) { if (tabs.length) { const s = snapshotCurrentTab(); restoreTab(tabs[0].id, s) } }
   if (p['rt']) { if (tabs.length) { const s = snapshotCurrentTab(); restoreTab(tabs[tabs.length - 1].id, s) } }
 
+  if (activeTabId === 'sessions') {
+    const { sessions, workspaces, sagaFilter, sessionsCursor } = $.learn()
+    const filtered = sagaFilter ? sessions.filter(s => (s.title || s.id).toLowerCase().includes(sagaFilter.toLowerCase())) : sessions
+    const sortedWs = [...(workspaces || [])].sort((a, b) => b.updatedAt - a.updatedAt)
+    const wsCount = 1 + sortedWs.length // 0 = new-workspace btn, 1+ = workspace buttons
+    const cur = sessionsCursor || { section: 'workspaces', wsIdx: 0, listIdx: 0 }
+
+    if (p['up']) {
+      if (cur.section === 'newchat') {
+        $.teach({ sessionsCursor: { ...cur, section: 'workspaces' } })
+      } else if (cur.section === 'list') {
+        if (cur.listIdx > 0) $.teach({ sessionsCursor: { ...cur, listIdx: cur.listIdx - 1 } })
+        else $.teach({ sessionsCursor: { ...cur, section: 'newchat' } })
+      }
+    }
+    if (p['down']) {
+      if (cur.section === 'workspaces') {
+        $.teach({ sessionsCursor: { ...cur, section: 'newchat' } })
+      } else if (cur.section === 'newchat') {
+        if (filtered.length) $.teach({ sessionsCursor: { ...cur, section: 'list', listIdx: 0 } })
+      } else if (cur.section === 'list') {
+        if (cur.listIdx < filtered.length - 1) $.teach({ sessionsCursor: { ...cur, listIdx: cur.listIdx + 1 } })
+      }
+    }
+    if (p['left']) {
+      if (cur.section === 'workspaces') {
+        if (cur.wsIdx > 0) $.teach({ sessionsCursor: { ...cur, wsIdx: cur.wsIdx - 1 } })
+      } else if (cur.section === 'list' && filtered.length) {
+        const sess = filtered[cur.listIdx]
+        const rest = sessions.filter(s => s.id !== sess.id)
+        $.teach({ sessions: [sess, ...rest], sessionsCursor: { ...cur, listIdx: Math.min(cur.listIdx, filtered.length - 1) } })
+      }
+    }
+    if (p['right']) {
+      if (cur.section === 'workspaces') {
+        if (cur.wsIdx < wsCount - 1) $.teach({ sessionsCursor: { ...cur, wsIdx: cur.wsIdx + 1 } })
+      } else if (cur.section === 'list' && filtered.length) {
+        const sess = filtered[cur.listIdx]
+        const rest = sessions.filter(s => s.id !== sess.id)
+        $.teach({ sessions: [...rest, sess], sessionsCursor: { ...cur, listIdx: Math.min(cur.listIdx, filtered.length - 1) } })
+      }
+    }
+    if (p['a']) {
+      if (cur.section === 'workspaces') {
+        if (cur.wsIdx === 0) {
+          newWorkspace()
+        } else {
+          const w = sortedWs[cur.wsIdx - 1]
+          if (w) switchWorkspace(w.id)
+        }
+      } else if (cur.section === 'newchat') {
+        $.teach({ tabSnapshots: snapshotCurrentTab() })
+        const freshTab = { id: crypto.randomUUID(), label: 'Chat' }
+        $.teach({ tabs: [...$.learn().tabs, freshTab] })
+        restoreTab(freshTab.id, $.learn().tabSnapshots)
+        newSession()
+        showPreroll()
+      } else if (cur.section === 'list') {
+        const sess = filtered[cur.listIdx]
+        if (sess) switchSession(sess.id)
+      }
+    }
+    if (p['b']) {
+      // back to chat
+      const firstTab = $.learn().tabs[0]
+      if (firstTab) restoreTab(firstTab.id, snapshotCurrentTab())
+    }
+  }
+
   if (previewOpen) {
     const iframe = document.querySelector('.am-preview-inframe')
     if (iframe?.contentWindow) {
@@ -1438,7 +1508,7 @@ function renderAgentLogs(logs, thinkingFace) {
 
 $.draw((target) => {
   mount(target)
-  const { secureEntry, messages, messageText, messageHeight, ttyLive, ttyConnected, listening, voskLoading, sagaFilter, sessions, boardCards, exportOpen, metaSession, humanPrompt, previewUrl, previewOpen, tabs, activeTabId, tabLive, logsOpen, agentLogs, availableModels, selectedModel, workspaces, activeWorkspaceId } = $.learn()
+  const { secureEntry, messages, messageText, messageHeight, ttyLive, ttyConnected, listening, voskLoading, sagaFilter, sessions, boardCards, exportOpen, metaSession, humanPrompt, previewUrl, previewOpen, tabs, activeTabId, tabLive, logsOpen, agentLogs, availableModels, selectedModel, workspaces, activeWorkspaceId, sessionsCursor } = $.learn()
   const { thinking = false, thinkingFace = null } = tabLive[activeTabId] || {}
   const displayMessages = messages
 
@@ -1521,25 +1591,29 @@ $.draw((target) => {
 
   if (activeTabId === 'sessions') {
     const filtered = sagaFilter ? sessions.filter(s => (s.title || s.id).toLowerCase().includes(sagaFilter.toLowerCase())) : sessions
+    const sortedWs = [...(workspaces || [])].sort((a, b) => b.updatedAt - a.updatedAt)
+    const cur = sessionsCursor || { section: 'workspaces', wsIdx: 0, listIdx: 0 }
     return topbar + `
       <div class="am-sessions-view">
-        <div class="am-sessions-inner">
-          <div class="am-workspace-bar">
-            <div class="am-workspace-strip">
-              ${[...(workspaces || [])].sort((a, b) => b.updatedAt - a.updatedAt).map(w => `
-                <button class="am-workspace-btn${w.id === activeWorkspaceId ? ' -active' : ''}" data-switch-workspace="${escapeHyperText(w.id)}">${escapeHyperText(w.label)}</button>
-              `).join('')}
-            </div>
-            <button class="am-new-workspace-btn" data-new-workspace>+ workspace</button>
+        <div class="am-workspace-bar">
+          <button class="am-new-workspace-btn${cur.section === 'workspaces' && cur.wsIdx === 0 ? ' -gpad' : ''}" data-new-workspace>+ workspace</button>
+          <div class="am-workspace-strip">
+            ${sortedWs.map((w, i) => `
+              <button class="am-workspace-btn${w.id === activeWorkspaceId ? ' -active' : ''}${cur.section === 'workspaces' && cur.wsIdx === i + 1 ? ' -gpad' : ''}" data-switch-workspace="${escapeHyperText(w.id)}">${escapeHyperText(w.label)}</button>
+            `).join('')}
           </div>
-          <button class="am-new-chat-hero" data-new-chat>New Chat</button>
-          ${filtered.length ? `
-            <div class="am-sessions-list">
-              ${filtered.map(s => `
-                <button class="am-session-item" data-open-session="${escapeHyperText(s.id)}">${escapeHyperText(s.title || s.id.slice(0, 8))}</button>
-              `).join('')}
-            </div>
-          ` : '<div class="am-sessions-empty">no saved chats yet</div>'}
+        </div>
+        <div class="am-sessions-scroll">
+          <div class="am-sessions-inner">
+            <button class="am-new-chat-hero${cur.section === 'newchat' ? ' -gpad' : ''}" data-new-chat>New Chat</button>
+            ${filtered.length ? `
+              <div class="am-sessions-list">
+                ${filtered.map((s, i) => `
+                  <button class="am-session-item${cur.section === 'list' && cur.listIdx === i ? ' -gpad' : ''}" data-open-session="${escapeHyperText(s.id)}">${escapeHyperText(s.title || s.id.slice(0, 8))}</button>
+                `).join('')}
+              </div>
+            ` : '<div class="am-sessions-empty">no saved chats yet</div>'}
+          </div>
         </div>
       </div>`
   }
@@ -1967,15 +2041,19 @@ $.style(`
 
   & .am-workspace-bar {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    align-items: center;
     border-bottom: 1px solid rgba(0,0,0,.1);
+    flex-shrink: 0;
+    background: #f8f8f8;
   }
   & .am-workspace-strip {
+    flex: 1;
     display: flex;
     overflow-x: auto;
     scrollbar-width: none;
     gap: .25rem;
-    padding: .25rem .5rem 0;
+    padding: .25rem .5rem;
   }
   & .am-workspace-strip::-webkit-scrollbar { display: none; }
   & .am-workspace-btn {
@@ -1996,17 +2074,25 @@ $.style(`
     opacity: 1;
     font-weight: 600;
   }
+  & .am-workspace-btn.-gpad {
+    outline: 2px solid var(--root-theme, mediumseagreen);
+    outline-offset: 1px;
+    opacity: 1;
+  }
   & .am-new-workspace-btn {
+    flex-shrink: 0;
     background: transparent;
     border: none;
-    font-size: .65rem;
-    padding: .15rem .5rem .25rem;
+    border-right: 1px solid rgba(0,0,0,.1);
+    font-size: .7rem;
+    padding: .3rem .7rem;
     cursor: pointer;
-    opacity: .5;
-    text-align: left;
+    opacity: .6;
     color: inherit;
+    white-space: nowrap;
   }
-  & .am-new-workspace-btn:hover { opacity: .8; }
+  & .am-new-workspace-btn:hover,
+  & .am-new-workspace-btn.-gpad { opacity: 1; outline: 2px solid var(--root-theme, mediumseagreen); outline-offset: 1px; }
 
   & .am-topbar {
     display: flex;
@@ -2093,10 +2179,17 @@ $.style(`
 
   & .am-sessions-view {
     display: flex;
-    justify-content: center;
-    overflow-y: auto;
-    padding: 2rem 1rem;
+    flex-direction: column;
     grid-row: 2 / -1;
+    overflow: hidden;
+  }
+
+  & .am-sessions-scroll {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1rem;
   }
 
   & .am-sessions-inner {
@@ -2117,6 +2210,10 @@ $.style(`
     cursor: pointer;
     margin-bottom: 1.5rem;
     font-family: inherit;
+  }
+  & .am-new-chat-hero.-gpad {
+    outline: 3px solid currentColor;
+    outline-offset: 2px;
   }
 
   & .am-sessions-list {
@@ -2140,6 +2237,11 @@ $.style(`
 
   & .am-session-item:hover {
     background: #f5f5f5;
+  }
+  & .am-session-item.-gpad {
+    outline: 2px solid var(--root-theme, mediumseagreen);
+    outline-offset: 1px;
+    background: color-mix(in srgb, var(--root-theme, mediumseagreen) 8%, white);
   }
 
   & .am-sessions-empty {
