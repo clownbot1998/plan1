@@ -1362,7 +1362,7 @@ function gamepadLoop() {
   if (activePrompt) {
     if (p['a']) humanRPCRespond(activePrompt.id, true)
     if (p['b']) humanRPCRespond(activePrompt.id, false)
-  } else {
+  } else if (activeTabId !== 'sessions') {
     if (p['a']) { const text = $.learn().messageText; if (text.trim()) { playA(); execute(text) } else { playB() } }
     if (p['b']) { playB(); $.teach({ messageText: '' }) }
   }
@@ -1778,6 +1778,11 @@ function afterUpdate(target) {
     // scroll focused gamepad item into view on sessions screen
     const gpadEl = target.querySelector('.-gpad')
     if (gpadEl) gpadEl.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    // also scroll active workspace button into view when no gpad cursor is on it
+    if (!gpadEl) {
+      const activeWs = target.querySelector('.am-workspace-btn.-active')
+      if (activeWs) activeWs.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    }
   }
 
   {
