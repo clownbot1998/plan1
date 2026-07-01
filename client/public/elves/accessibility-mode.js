@@ -314,6 +314,28 @@ let ttyLastSent = null   // track last sent command to strip echo
 
 const WORKSPACES_PATH = '/my-sagas/workspaces.json'
 
+// ui audio
+let _audioCtx = null
+function _getAudioCtx() {
+  if (!_audioCtx) _audioCtx = new AudioContext()
+  return _audioCtx
+}
+function _audioFactory(url) {
+  let buffer = null
+  fetch(url).then(r => r.arrayBuffer()).then(ab => _getAudioCtx().decodeAudioData(ab)).then(b => { buffer = b }).catch(() => {})
+  return function play() {
+    if (!buffer) return
+    const ctx = _getAudioCtx()
+    if (ctx.state === 'suspended') ctx.resume()
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    src.connect(ctx.destination)
+    src.start(0)
+  }
+}
+const playA = _audioFactory('/cdn/sillyz.computer/beat-tape-extractor/output/a.mp3')
+const playB = _audioFactory('/cdn/sillyz.computer/beat-tape-extractor/output/b.mp3')
+
 // vosk voice
 const VOSK_MODEL_URL = '/cdn/sillyz.computer/models/vosk-model-small-en-us-0.15.zip'
 const VOSK_WORKLET = '/cdn/sillyz.computer/models/vosk-browser/recognizer-processor.js'
@@ -1341,36 +1363,39 @@ function gamepadLoop() {
     if (p['a']) humanRPCRespond(activePrompt.id, true)
     if (p['b']) humanRPCRespond(activePrompt.id, false)
   } else {
-    if (p['a']) { const text = $.learn().messageText; if (text.trim()) execute(text) }
-    if (p['b']) $.teach({ messageText: '' })
+    if (p['a']) { const text = $.learn().messageText; if (text.trim()) { playA(); execute(text) } else { playB() } }
+    if (p['b']) { playB(); $.teach({ messageText: '' }) }
   }
-  if (p['x']) $.teach({ previewOpen: !previewOpen })
+  if (p['x']) { playA(); $.teach({ previewOpen: !previewOpen }) }
   if (p['y']) {
+    playA()
     const idx = availableModels.indexOf(selectedModel)
     $.teach({ selectedModel: availableModels[(idx + 1) % availableModels.length] })
   }
   if (p['start']) {
+    playA()
     $.teach({ tabSnapshots: snapshotCurrentTab() })
     listSessions().then(sessions => $.teach({ sessions, activeTabId: 'sessions' }))
   }
   if (p['select']) {
+    playA()
     startVosk()
   }
   if (r['select']) {
     stopVosk()
     const { messageText } = $.learn()
-    if (messageText.trim()) execute(messageText)
+    if (messageText.trim()) { playA(); execute(messageText) } else { playB() }
   }
   if (p['lb']) {
     const idx = tabs.findIndex(t => t.id === activeTabId)
-    if (idx > 0) { const s = snapshotCurrentTab(); restoreTab(tabs[idx - 1].id, s) }
+    if (idx > 0) { playA(); const s = snapshotCurrentTab(); restoreTab(tabs[idx - 1].id, s) } else { playB() }
   }
   if (p['rb']) {
     const idx = tabs.findIndex(t => t.id === activeTabId)
-    if (idx !== -1 && idx < tabs.length - 1) { const s = snapshotCurrentTab(); restoreTab(tabs[idx + 1].id, s) }
+    if (idx !== -1 && idx < tabs.length - 1) { playA(); const s = snapshotCurrentTab(); restoreTab(tabs[idx + 1].id, s) } else { playB() }
   }
-  if (p['lt']) { if (tabs.length) { const s = snapshotCurrentTab(); restoreTab(tabs[0].id, s) } }
-  if (p['rt']) { if (tabs.length) { const s = snapshotCurrentTab(); restoreTab(tabs[tabs.length - 1].id, s) } }
+  if (p['lt']) { if (tabs.length) { playA(); const s = snapshotCurrentTab(); restoreTab(tabs[0].id, s) } }
+  if (p['rt']) { if (tabs.length) { playA(); const s = snapshotCurrentTab(); restoreTab(tabs[tabs.length - 1].id, s) } }
 
   if (activeTabId === 'sessions') {
     const { sessions, workspaces, sagaFilter, sessionsCursor } = $.learn()
@@ -1381,26 +1406,29 @@ function gamepadLoop() {
 
     if (p['up']) {
       if (cur.section === 'newchat') {
-        $.teach({ sessionsCursor: { ...cur, section: 'workspaces' } })
+        playA(); $.teach({ sessionsCursor: { ...cur, section: 'workspaces' } })
       } else if (cur.section === 'list') {
-        if (cur.listIdx > 0) $.teach({ sessionsCursor: { ...cur, listIdx: cur.listIdx - 1 } })
-        else $.teach({ sessionsCursor: { ...cur, section: 'newchat' } })
-      }
+        if (cur.listIdx > 0) { playA(); $.teach({ sessionsCursor: { ...cur, listIdx: cur.listIdx - 1 } }) }
+        else { playB(); $.teach({ sessionsCursor: { ...cur, section: 'newchat' } }) }
+      } else { playB() }
     }
     if (p['down']) {
       if (cur.section === 'workspaces') {
-        $.teach({ sessionsCursor: { ...cur, section: 'newchat' } })
+        playA(); $.teach({ sessionsCursor: { ...cur, section: 'newchat' } })
       } else if (cur.section === 'newchat') {
-        if (filtered.length) $.teach({ sessionsCursor: { ...cur, section: 'list', listIdx: 0 } })
+        if (filtered.length) { playA(); $.teach({ sessionsCursor: { ...cur, section: 'list', listIdx: 0 } }) }
+        else { playB() }
       } else if (cur.section === 'list') {
-        if (cur.listIdx < filtered.length - 1) $.teach({ sessionsCursor: { ...cur, listIdx: cur.listIdx + 1 } })
+        if (cur.listIdx < filtered.length - 1) { playA(); $.teach({ sessionsCursor: { ...cur, listIdx: cur.listIdx + 1 } }) }
+        else { playB() }
       }
     }
     if (p['left']) {
       if (cur.section === 'workspaces') {
-        if (cur.wsIdx > 0) $.teach({ sessionsCursor: { ...cur, wsIdx: cur.wsIdx - 1 } })
+        if (cur.wsIdx > 0) { playA(); $.teach({ sessionsCursor: { ...cur, wsIdx: cur.wsIdx - 1 } }) } else { playB() }
       } else if (cur.section === 'list' && filtered.length) {
         // left = demote to bottom
+        playA()
         const sess = filtered[cur.listIdx]
         const rest = sessions.filter(s => s.id !== sess.id)
         $.teach({ sessions: [...rest, sess], sessionsCursor: { ...cur, listIdx: Math.min(cur.listIdx, filtered.length - 1) } })
@@ -1408,15 +1436,17 @@ function gamepadLoop() {
     }
     if (p['right']) {
       if (cur.section === 'workspaces') {
-        if (cur.wsIdx < wsCount - 1) $.teach({ sessionsCursor: { ...cur, wsIdx: cur.wsIdx + 1 } })
+        if (cur.wsIdx < wsCount - 1) { playA(); $.teach({ sessionsCursor: { ...cur, wsIdx: cur.wsIdx + 1 } }) } else { playB() }
       } else if (cur.section === 'list' && filtered.length) {
         // right = promote to top
+        playA()
         const sess = filtered[cur.listIdx]
         const rest = sessions.filter(s => s.id !== sess.id)
         $.teach({ sessions: [sess, ...rest], sessionsCursor: { ...cur, listIdx: Math.min(cur.listIdx, filtered.length - 1) } })
       }
     }
     if (p['a']) {
+      playA()
       if (cur.section === 'workspaces') {
         if (cur.wsIdx === 0) {
           newWorkspace()
@@ -1437,7 +1467,7 @@ function gamepadLoop() {
       }
     }
     if (p['b']) {
-      // back to chat
+      playB()
       const firstTab = $.learn().tabs[0]
       if (firstTab) restoreTab(firstTab.id, snapshotCurrentTab())
     }
@@ -1812,8 +1842,10 @@ function clearCursor(target) {
 $.when('click', '[data-mic]', async () => {
   const { listening } = $.learn()
   if (listening) {
+    playB()
     stopVosk()
   } else {
+    playA()
     await startVosk()
   }
 })
@@ -1827,7 +1859,9 @@ $.when('keypress', 'form [name="messageText"]', (event) => {
 
 $.when('submit', 'form', (event) => {
   event.preventDefault()
-  execute(event.target.messageText.value)
+  const text = event.target.messageText.value
+  if (text.trim()) playA()
+  execute(text)
 })
 
 const imports = {}
