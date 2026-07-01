@@ -1325,11 +1325,13 @@ function showPreroll() {
 
 function gamepadLoop() {
   const p = {}
+  const r = {}
   for (const name of Object.keys(_gpadButtons)) {
     const val = checkPhysicalButton(0, _gpadButtons[name]) || 0
     const prev = _prevPhysGpad[name] || 0
     _prevPhysGpad[name] = val
     p[name] = val > 0.5 && prev <= 0.5
+    r[name] = val <= 0.5 && prev > 0.5
   }
 
   const { previewOpen, tabs, activeTabId, availableModels, selectedModel, humanPrompt } = $.learn()
@@ -1350,6 +1352,14 @@ function gamepadLoop() {
   if (p['start']) {
     $.teach({ tabSnapshots: snapshotCurrentTab() })
     listSessions().then(sessions => $.teach({ sessions, activeTabId: 'sessions' }))
+  }
+  if (p['select']) {
+    startVosk()
+  }
+  if (r['select']) {
+    stopVosk()
+    const { messageText } = $.learn()
+    if (messageText.trim()) execute(messageText)
   }
   if (p['lb']) {
     const idx = tabs.findIndex(t => t.id === activeTabId)
