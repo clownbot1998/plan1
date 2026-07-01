@@ -2067,6 +2067,7 @@ $.style(`
   }
   & .am-workspace-strip {
     flex: 1;
+    min-width: 0;
     display: flex;
     overflow-x: auto;
     scrollbar-width: none;
