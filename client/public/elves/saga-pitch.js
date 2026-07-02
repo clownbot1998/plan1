@@ -386,6 +386,7 @@ $.style(`
     overflow: auto;
     opacity: 1;
     z-index: 2;
+    width: 100%;
     max-height: 100%;
   }
 
