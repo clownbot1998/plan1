@@ -6,12 +6,21 @@ import { BUTTON_CODES, overrideButton, checkButton, checkAxis } from './debug-ga
 const hiddenChildren = ['style','script','hypertext-blankline','hypertext-comment']
 const notHiddenChildren = `:not(${hiddenChildren})`
 
-function countShots(instructions) {
+// mode="media" strips every hypertext-* text beat, leaving only the embedded elves —
+// the saga parser only ever emits hypertext-* tags for #/@/>/etc runes, so anything else is a real widget.
+function isShot(x, mediaOnly) {
+  const tag = x.tagName.toLowerCase()
+  if (hiddenChildren.includes(tag)) return false
+  if (mediaOnly && tag.startsWith('hypertext-')) return false
+  return true
+}
+
+function countShots(instructions, mediaOnly) {
   const wrapper = document.createElement('div')
   wrapper.innerHTML = hyperSanitizer(instructions)
   const xmlHtml = wrapper.querySelector('xml-html')
   if (!xmlHtml) return 0
-  const shotList = Array.from(xmlHtml.children).filter(x => !hiddenChildren.includes(x.tagName.toLowerCase()))
+  const shotList = Array.from(xmlHtml.children).filter(x => isShot(x, mediaOnly))
   return shotList.length - 1
 }
 
@@ -46,7 +55,8 @@ $.draw((target) => {
   const forwards = lastAction !== 'back'
   const html = hyperSanitizer(file)
   if(!html) return ''
-  const motion = getMotion(html, { active: activeShot, forwards, start, end })
+  const mediaOnly = isMediaOnly(target)
+  const motion = getMotion(html, { active: activeShot, forwards, start, end, mediaOnly })
   const view = `
     <div name="perform">
       <div name="theater">
@@ -102,8 +112,13 @@ function source(target) {
   return `${remote}${explicit || implicit}`
 }
 
+function isMediaOnly(target) {
+  return target.closest($.link).getAttribute('mode') === 'media'
+}
+
 function sourceFile(target) {
   const src = source(target)
+  const mediaOnly = isMediaOnly(target)
 
   const file = $.learn()[src]
   if(target.initialized) return file
@@ -119,7 +134,7 @@ function sourceFile(target) {
           const file = atob(decodeURIComponent(encodedData))
           $.teach({
             [src]: file,
-            shotCount: countShots(file),
+            shotCount: countShots(file, mediaOnly),
           })
         } else {
           let file = ''
@@ -135,7 +150,7 @@ function sourceFile(target) {
           }).finally(() => {
             $.teach({
               [src]: file,
-              shotCount: countShots(file),
+              shotCount: countShots(file, mediaOnly),
             })
           })
         }
@@ -274,11 +289,42 @@ function slideNext (event) {
 
 $.when('click', '[data-next]', slideNext)
 
-function getMotion(html, { active = 0, forwards, start, end }) {
+// swipe-to-navigate — $.when only delegates via exact matches(), not closest(),
+// so touches landing on embedded slide content (video, cards, buttons) never match
+// a selector scoped to [name="screen"]. raw document listeners + closest() instead.
+const SWIPE_THRESHOLD = 40
+let swipeStart = null
+
+document.addEventListener('pointerdown', (event) => {
+  const screen = event.target.closest('[name="screen"]')
+  if(!screen || !screen.closest($.link)) return
+  swipeStart = { x: event.clientX, y: event.clientY }
+})
+
+document.addEventListener('pointerup', (event) => {
+  if(!swipeStart) return
+  const { x, y } = swipeStart
+  swipeStart = null
+
+  const dx = event.clientX - x
+  const dy = event.clientY - y
+  if(Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) < Math.abs(dy)) return
+  if(!event.target.closest($.link)) return
+
+  if(dx < 0) {
+    slideNext()
+  } else {
+    slideBack()
+  }
+})
+
+document.addEventListener('pointercancel', () => { swipeStart = null })
+
+function getMotion(html, { active = 0, forwards, start, end, mediaOnly }) {
   const wrapper= document.createElement('div');
   wrapper.innerHTML = html;
   const children = Array.from(wrapper.querySelector('xml-html').children)
-    .filter(x => !hiddenChildren.includes(x.tagName.toLowerCase()))
+    .filter(x => isShot(x, mediaOnly))
 
   if(children[active]) {
     children[active].dataset.active = true
