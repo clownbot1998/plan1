@@ -20,6 +20,18 @@ was-manifest.json
 # deno-desktop experiment artifacts — multi-hundred-MB CEF bundles & compiled .so (not source)
 server/was/
 server/*.so
+server/laufey
+server/laufey_webview
+server/server
+server/*.pak
+server/*.dat
+server/*.bin
+server/*.desktop
+server/.downloaded
+server/chrome-sandbox
+server/libvulkan.so.1
+server/vk_swiftshader_icd.json
+server/locales/
 hello-desktop/
 desktop-bridge/
 client/public/cdn/mapps/*.zip
