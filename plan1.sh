@@ -156,6 +156,13 @@ case "$CMD" in
     deno run --allow-run --allow-net --allow-env --allow-read --allow-write $ENV_FLAG "$SCRIPT_DIR/debugging_utilities/was_gallery.ts" "${@:2}"
     "$0" build
     ;;
+  test)
+    ENV_FLAG=""
+    [ -f "$SCRIPT_DIR/.env" ] && ENV_FLAG="--env-file=$SCRIPT_DIR/.env"
+    # --node-modules-dir=none: repo's node_modules/ (vendor.js/desktop deps) doesn't
+    # contain puppeteer-core, and its presence otherwise forces byonm resolution.
+    deno run --node-modules-dir=none --allow-net --allow-read --allow-write --allow-env --allow-run --allow-sys $ENV_FLAG "$SCRIPT_DIR/debugging_utilities/e2e_test.ts" "${@:2}"
+    ;;
   deploy)
     PROD_HOST="${2:-local.tychi.me}"
     PROD_DIR="${3:-~/plan1}"
@@ -326,6 +333,6 @@ ENDSSH
     echo "  gallery  — screenshot gallery items → private/screenshots/<id>/ then build"
     echo "  watch    — rebuilds dist/ on any change to client/"
     echo "  serve  — serves dist/ on port $PORT"
-    echo "  test   — run test suites (default: test/*.test.js)"
+    echo "  test   — headless e2e flow(s) w/ screenshot per step → private/screenshots/e2e/<flow>/ (arg: flow name, default: all)"
     ;;
 esac
