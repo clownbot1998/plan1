@@ -246,6 +246,61 @@ async function upsertBayunGroup(groupId) {
   } catch {}
 }
 
+// board id "elf-map" builds itself from the static graph.json build artifact
+// (./plan1.sh build regenerates it, no server/WAS needed) rather than
+// requiring a manual elf_map_to_board.ts push into WAS first — same layout
+// math as that script, ported to the browser. this is a read-only seed: it
+// only fires when WAS genuinely has nothing yet, and the instant someone
+// touches a card the normal wasSave() path takes over from there.
+const ELF_MAP_EDGE_COLOR = {
+  imports: '#4a7ac9', embeds: '#3a9d5c', 'saga-embeds': '#c97a2e', renders: '#c94a8a',
+}
+
+async function loadElfMapFromGraph() {
+  const res = await fetch('/private/elf-map/graph.json', { cache: 'no-store' }).catch(() => null)
+  if (!res?.ok) return false
+  const graph = await res.json().catch(() => null)
+  if (!graph?.nodes?.length) return false
+
+  const W = 150, H = 60
+  const R = Math.min(900, Math.max(500, graph.nodes.length * 10))
+  const CX = 2500, CY = 2500
+
+  const cards = {}
+  graph.nodes.forEach((node, i) => {
+    const angle = (i / graph.nodes.length) * Math.PI * 2 - Math.PI / 2
+    const cx = CX + R * Math.cos(angle), cy = CY + R * Math.sin(angle)
+    cards[node.id] = {
+      x: Math.round(cx - W / 2), y: Math.round(cy - H / 2), w: W, h: H, z: 1,
+      text: node.id,
+      color: node.kind === 'elf' ? '#dce8ff' : '#fff3d6',
+      saga: '',
+      href: node.kind === 'elf' ? `/app/${node.id}` : '',
+      createdAt: Date.now(),
+      links: {},
+      backlinks: {},
+      author: null,
+    }
+  })
+
+  const edgeTypes = {}
+  for (const type of new Set(graph.edges.map(e => e.type))) {
+    edgeTypes[type] = { name: type, color: ELF_MAP_EDGE_COLOR[type] || '#888888' }
+  }
+
+  for (const edge of graph.edges) {
+    const from = cards[edge.from], to = cards[edge.to]
+    if (!from || !to) continue
+    const [fromDir, toDir] = bestCompassPair(from, to)
+    const linkId = crypto.randomUUID()
+    from.links[linkId] = { from: edge.from, to: edge.to, fromDir, toDir, typeId: edge.type }
+    to.backlinks[linkId] = edge.from
+  }
+
+  $.teach({ cards, edgeTypes })
+  return true
+}
+
 async function wasLoad() {
   await ensureSpace().catch(() => null)
   // TTL is canonical — fall back to JSON for boards not yet migrated
@@ -261,15 +316,18 @@ async function wasLoad() {
   } catch {}
   try {
     const blob = await wasGet(wasJsonPath(_boardId))
-    if (!blob) return
-    const data = JSON.parse(await blob.text())
-    if (data?.cards) {
-      $.teach({
-        cards: data.cards,
-        edgeTypes: data.edgeTypes || { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
-      })
+    if (blob) {
+      const data = JSON.parse(await blob.text())
+      if (data?.cards) {
+        $.teach({
+          cards: data.cards,
+          edgeTypes: data.edgeTypes || { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' } },
+        })
+        return
+      }
     }
   } catch {}
+  if (_boardId === 'elf-map') await loadElfMapFromGraph().catch(() => null)
 }
 
 let _wasSaveTimer = null
