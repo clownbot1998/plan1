@@ -7,6 +7,7 @@ const EDGE_COLOR = {
   imports: '#4a7ac9',
   embeds: '#3a9d5c',
   'saga-embeds': '#c97a2e',
+  renders: '#c94a8a',
 }
 
 async function loadGraph() {
@@ -94,16 +95,22 @@ $.draw(target => {
     `
   }).join('')
 
+  const hasRenders = edges.some(e => e.type === 'renders')
+  const noteText = hasRenders
+    ? `${note} — a runtime crawl (pink 'renders' edges) has since filled in some of that gap by visiting every route and recording what actually mounted.`
+    : note
+
   return `
     <div class="em-shell">
       <div class="em-header">
         <h2 class="em-title">elf map</h2>
-        <div class="em-meta">${nodes.length} nodes · ${edges.length} edges · generated ${new Date(generatedAt).toLocaleString()}</div>
-        <div class="em-note">${note}</div>
+        <div class="em-meta">${nodes.length} nodes · ${edges.length} edges · generated ${new Date(generatedAt).toLocaleString()}${graph.crawledAt ? ` · crawled ${new Date(graph.crawledAt).toLocaleString()}` : ''}</div>
+        <div class="em-note">${noteText}</div>
         <div class="em-legend">
           <span><i style="background:${EDGE_COLOR.imports}"></i> imports</span>
           <span><i style="background:${EDGE_COLOR.embeds}"></i> embeds</span>
           <span><i style="background:${EDGE_COLOR['saga-embeds']}"></i> saga-embeds</span>
+          ${graph.edges.some(e => e.type === 'renders') ? `<span><i style="background:${EDGE_COLOR.renders}"></i> renders</span>` : ''}
           ${focusId ? `<button class="em-clear" data-clear>clear focus (${focusId})</button>` : ''}
         </div>
       </div>

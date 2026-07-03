@@ -166,6 +166,11 @@ case "$CMD" in
   elf-map)
     deno run --node-modules-dir=none --allow-read --allow-write "$SCRIPT_DIR/debugging_utilities/elf_map.ts"
     ;;
+  elf-map-crawl)
+    ENV_FLAG=""
+    [ -f "$SCRIPT_DIR/.env" ] && ENV_FLAG="--env-file=$SCRIPT_DIR/.env"
+    deno run --node-modules-dir=none --allow-net --allow-read --allow-write --allow-env --allow-run --allow-sys $ENV_FLAG "$SCRIPT_DIR/debugging_utilities/elf_map_crawl.ts"
+    ;;
   deploy)
     PROD_HOST="${2:-local.tychi.me}"
     PROD_DIR="${3:-~/plan1}"
@@ -338,5 +343,6 @@ ENDSSH
     echo "  serve  — serves dist/ on port $PORT"
     echo "  test   — headless e2e flow(s) w/ screenshot per step → private/screenshots/e2e/<flow>/ (arg: flow name, default: all)"
     echo "  elf-map  — static hypergraph of elf imports/embeds/saga-embeds → private/elf-map/graph.json"
+    echo "  elf-map-crawl — headless-visits every elf route, merges 'renders' edges into graph.json (needs serve running)"
     ;;
 esac
