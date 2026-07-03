@@ -1293,12 +1293,44 @@ function patchPeerArrows() {
 
 // Patch cards layer without destroying live DOM — preserves focused textareas and
 // active pointer capture during drag/resize.
-function patchCardsLayer(cardsLayer, cards, focused, linkSource, grabbing) {
+// screen px of slack around the viewport before a card is culled — keeps cards
+// that are about to be panned into view from popping in, same overscan idea as
+// flip-book.js's REEL_OVERSCAN, just in world coordinates instead of frame indices
+const CULL_OVERSCAN_PX = 400
+
+function visibleWorldRect({ panX, panY, zoom, viewportW, viewportH }) {
+  // .workspace does transform: translate(panX,panY) scale(zoom), so
+  // screenX = worldX * zoom + panX  =>  worldX = (screenX - panX) / zoom
+  const pad = CULL_OVERSCAN_PX / zoom
+  return {
+    left:   (0 - panX) / zoom - pad,
+    top:    (0 - panY) / zoom - pad,
+    right:  (viewportW - panX) / zoom + pad,
+    bottom: (viewportH - panY) / zoom + pad,
+  }
+}
+
+function cardInRect(card, rect) {
+  return card.x < rect.right && card.x + card.w > rect.left &&
+         card.y < rect.bottom && card.y + card.h > rect.top
+}
+
+function patchCardsLayer(cardsLayer, cards, focused, linkSource, grabbing, viewport) {
   const seen = new Set()
+  // viewport is optional so callers (e.g. tests) can skip culling by omitting it
+  const rect = viewport ? visibleWorldRect(viewport) : null
 
   for (const [id, card] of Object.entries(cards)) {
     seen.add(id)
     let el = cardsLayer.querySelector(`.card[data-id="${id}"]`)
+
+    // never cull the card someone's actively focused on or dragging, even if
+    // fast panning has momentarily pushed its coordinates outside the rect
+    const exempt = focused === id || grabbing === id
+    if (rect && !exempt && !cardInRect(card, rect)) {
+      el?.remove()
+      continue
+    }
 
     if (!el) {
       const tmp = document.createElement('div')
@@ -1639,7 +1671,9 @@ function update(target) {
   }
 
   const cardsLayer = target.querySelector('.cards-layer')
-  patchCardsLayer(cardsLayer, cards, focusedCard, linkSource, grabbing)
+  patchCardsLayer(cardsLayer, cards, focusedCard, linkSource, grabbing, {
+    panX, panY, zoom, viewportW: target.clientWidth, viewportH: target.clientHeight,
+  })
   applyPeerPositions(cardsLayer, players)
 
   const cardsJson = JSON.stringify(cards)
