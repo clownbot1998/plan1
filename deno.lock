@@ -15,7 +15,8 @@
     "jsr:@std/path@^1.1.4": "1.1.4",
     "jsr:@std/streams@^1.1.0": "1.1.0",
     "npm:@did.coop/did-key-ed25519@0.0.14": "0.0.14",
-    "npm:@wallet.storage/fetch-client@^1.1.3": "1.3.0",
+    "npm:@wallet.storage/fetch-client@1.1.3": "1.1.3",
+    "npm:@wallet.storage/fetch-client@^1.1.3": "1.1.3",
     "npm:crypto-js@*": "4.2.0",
     "npm:puppeteer-core@23": "23.11.1"
   },
@@ -166,8 +167,8 @@
         "@types/node"
       ]
     },
-    "@wallet.storage/fetch-client@1.3.0": {
-      "integrity": "sha512-/JBLH9xYHY1hnHKR0osLegmqmBY/mn02xqMsGhPJXKzDgelXFCpyEooiKAwa8mJ5HCghRt44VdLDEjMilnyu8A==",
+    "@wallet.storage/fetch-client@1.1.3": {
+      "integrity": "sha512-3JtdC3LPuyDTaCCGqLxRX0RVUjEmvUzfSzRYSFLijtlpI+ZHx+/NyZejBjoFm8OPqklR4VOIY85Iz/LSWui9/w==",
       "dependencies": [
         "authorization-signature",
         "zod@3.25.76"
