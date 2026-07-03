@@ -16,6 +16,9 @@ let _terrainGeoData   = null  // filled by buildTerrainMesh each rebuild
 let _cloudBodies      = []    // rapier bodies for cloud platforms, rebuilt with cards
 let _portals          = []    // { x, y, z, toCardId } — rebuilt with tunnel mesh
 let _teleportCooldown = 0     // one teleport per world per 2s — good lore, good for multiplayer
+let _lastPlayerPos    = { x: 0, y: 0, z: 0 }
+let _lastCloudBuildPos = null // player pos at last cloud rebuild — gates re-culling to real movement
+let _lastRenderDistance = null // cached so the underwater<->surface fog toggle can restore world fog
 
 // ── multiplayer — rides plan98 geckos kernel, same room as bulletin-board ─────
 const _boardId = new URLSearchParams(window.location.search).get('id') || 'default'
@@ -63,6 +66,42 @@ const WORLD      = 7500          // 5000 * SPREAD
 const SEA        = 2500          // sea surface Y
 const CLOUD      = 3000          // cloud platform base Y
 const CLIFF_FLOOR = 2000         // cliff base / sea floor Y
+
+// distance-based de-rez for cloud platforms/labels — unlike the terrain mesh
+// (one global surface, has to exist everywhere) each card's box+label is a
+// discrete entity that's pointless to keep live GPU-side when the player is
+// nowhere near it. labels are cut off closer than boxes since a canvas-texture
+// sprite is unreadable at distance anyway and is by far the most expensive
+// per-card cost here (512x128 canvas + 5 fillText passes each).
+//
+// a fixed distance doesn't generalize across boards — a tightly packed board
+// and a sprawling one need very different cutoffs. instead derive it from the
+// current layout's own footprint: half the bounding diameter of all card
+// centers, i.e. "see out to the far edge of the ring, not past it."
+const LABEL_DISTANCE_RATIO = 0.55  // labels cut off closer than boxes
+// how far the player has to move before it's worth re-running the distance
+// check and rebuilding — every physics frame would be wasted work otherwise.
+// has to be tighter than NEAR_FADE_DISTANCE (defined below) or a player could
+// walk right up to and through a platform between checks and never trigger
+// the near-fade at all.
+const CLOUD_REBUILD_MOVE_THRESHOLD = 100
+
+function computeLayoutRenderDistance(cards) {
+  const entries = Object.values(cards)
+  if (!entries.length) return { cloud: WORLD / 4, label: WORLD / 8 }
+  const points = entries.map(cardBounds)
+  const centroidX = points.reduce((s, b) => s + b.cx, 0) / points.length
+  const centroidZ = points.reduce((s, b) => s + b.cz, 0) / points.length
+  // max distance from centroid to any card == the layout's true radius. NOT
+  // the bounding-box diagonal — for a ring/circular layout a bbox diagonal is
+  // diameter*sqrt(2) (~41% too generous), which is why the first version of
+  // this showed the entire ring instead of half of it.
+  let radius = 0
+  for (const b of points) radius = Math.max(radius, Math.hypot(b.cx - centroidX, b.cz - centroidZ))
+  const diameter = radius * 2
+  const cloud = diameter / 2  // "halfway through the diameter" = the layout's own true radius
+  return { cloud, label: cloud * LABEL_DISTANCE_RATIO }
+}
 
 // ── card coordinate helper ────────────────────────────────────────────────────
 
@@ -250,63 +289,273 @@ function buildTerrainMesh(cards) {
   return mesh
 }
 
-// ── cloud platforms ───────────────────────────────────────────────────────────
+// ── cloud platforms + labels — progressive reveal ─────────────────────────────
+//
+// two things "de-rez" alone didn't give: (1) a big movement-triggered refresh
+// could bring a dozen platforms into range at once and pop them all in
+// together — queued instead, one card revealed every REVEAL_INTERVAL_MS as
+// the player actually walks, so it reads as discovery, not a batch load.
+// (2) visibility is a BAND, not just a far cutoff — closer than
+// NEAR_FADE_DISTANCE fades out the same way distance does, so walking up to
+// or through a platform doesn't leave it filling the whole view.
+//
+// a box+label share one queue entry so they always appear together. exits
+// (far OR near) are immediate per-card animations, not queued — only entries
+// are paced, since the ask was "reveal them as I walk," not "hide them slowly."
 
-function renderCloudPlatforms(cards) {
-  const entries = Object.entries(cards)
-  return entries.map(([, card]) => {
-    const b = cardBounds(card)
-    const h = computeHeight(b.cx, b.cz, entries)
-    const cloudY = CLOUD + h
-    const color = card.color || 'lemonchiffon'
-    return `<a-box position="${b.cx} ${cloudY} ${b.cz}"
-                   width="${b.w}" height="10" depth="${b.h}"
-                   color="${color}"></a-box>`
-  }).join('')
+const DEREZ_ENTER_MS      = 400
+const DEREZ_EXIT_MS       = 300
+const NEAR_FADE_DISTANCE  = 220   // closer than this = fades out, same as leaving far range
+const REVEAL_INTERVAL_MS  = 180   // one card's box+label revealed per tick, not all at once
+const LABEL_FADE_RATE     = 1 / (DEREZ_ENTER_MS / 1000) // opacity units/sec
+
+let _revealQueue  = []      // card ids waiting their turn
+let _revealQueued = new Set()
+let _revealTimer  = 0       // ms accumulated since last drain
+
+function withinVisibilityBand(dist, farDistance) {
+  return dist > NEAR_FADE_DISTANCE && dist <= farDistance
 }
 
-// ── cloud labels (sprites — always face camera) ───────────────────────────────
+// physics colliders (rebuildCloudColliders) exist for every card unconditionally,
+// so a box scaling into existence at its final position — especially right
+// under a player who's already standing there — reads as a teleport, not an
+// arrival. rising up from below into place looks like solid ground forming,
+// which is what's actually happening physics-wise the whole time anyway.
+const RISE_DISTANCE = 150
 
-function buildCloudLabels(cards) {
+function riseBoxIn(el, cloudY) {
+  el.setAttribute('position', `${el.object3D.position.x} ${cloudY - RISE_DISTANCE} ${el.object3D.position.z}`)
+  el.setAttribute('animation__derez', `property: position; to: ${el.object3D.position.x} ${cloudY} ${el.object3D.position.z}; dur: ${DEREZ_ENTER_MS}; easing: easeOutQuad`)
+}
+function sinkBoxOut(el, cloudY) {
+  if (el.dataset.exiting) return
+  el.dataset.exiting = 'true'
+  el.setAttribute('animation__derez', `property: position; to: ${el.object3D.position.x} ${cloudY - RISE_DISTANCE} ${el.object3D.position.z}; dur: ${DEREZ_EXIT_MS}; easing: easeInQuad`)
+  setTimeout(() => { if (el.isConnected && el.dataset.exiting) el.remove() }, DEREZ_EXIT_MS + 50)
+}
+
+function createCloudBox(cloudEl, id, card, b, cloudY) {
+  const el = document.createElement('a-box')
+  el.dataset.cardId = id
+  el.setAttribute('width', b.w)
+  el.setAttribute('height', 10)
+  el.setAttribute('depth', b.h)
+  el.setAttribute('color', card.color || 'lemonchiffon')
+  el.setAttribute('position', `${b.cx} ${cloudY - RISE_DISTANCE} ${b.cz}`)
+  cloudEl.appendChild(el)
+  el.setAttribute('animation__derez', `property: position; to: ${b.cx} ${cloudY} ${b.cz}; dur: ${DEREZ_ENTER_MS}; easing: easeOutQuad`)
+}
+
+function createCloudLabel(group, spritesById, id, card, b, cloudY) {
+  const THREE = window.AFRAME?.THREE
+  const name = (card.text || '').split('\n')[0].trim()
+  if (!THREE || !name) return
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 128
+  const ctx = canvas.getContext('2d')
+  ctx.font = 'bold 52px "Recursive", sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  const o = 3
+  const shadows = [['black',o,o],['cyan',-o,o],['magenta',-o,-o],['yellow',o,-o]]
+  for (const [color, dx, dy] of shadows) {
+    ctx.fillStyle = color
+    ctx.fillText(name, 256 + dx, 64 + dy, 480)
+  }
+  ctx.fillStyle = 'white'
+  ctx.fillText(name, 256, 64, 480)
+
+  const texture = new THREE.CanvasTexture(canvas)
+  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, opacity: 0 })
+  const sprite = new THREE.Sprite(mat)
+  sprite.scale.set(320, 80, 1)
+  sprite.position.set(b.cx, cloudY + 90, b.cz)
+  sprite.raycast = () => {}
+  sprite.userData.fadeState = 'in' // updateLabelFades() ramps opacity 0->1
+  group.add(sprite)
+  spritesById[id] = sprite
+}
+
+function getOrCreateLabelGroup(labelsEl) {
   const THREE = window.AFRAME?.THREE
   if (!THREE) return null
-  const entries = Object.entries(cards)
-  const group = new THREE.Group()
+  let group = labelsEl.getObject3D('labels')
+  if (!group) {
+    group = new THREE.Group()
+    group.userData.spritesById = {}
+    labelsEl.setObject3D('labels', group)
+  }
+  return group
+}
 
-  for (const [, card] of entries) {
-    const name = (card.text || '').split('\n')[0].trim()
-    if (!name) continue
+// walks every card once, deciding per-id whether to update/exit/enqueue —
+// existing boxes+labels get patched in place, cards newly in-band get queued
+// (not created immediately), cards leaving the band exit right away.
+function updateCloudVisibility(target, cards, playerPos, renderDistance) {
+  const cloudEl = target.querySelector('.cloud-platforms')
+  const labelsEl = target.querySelector('.cloud-labels')
+  if (!cloudEl || !labelsEl) return
+  const group = getOrCreateLabelGroup(labelsEl)
+  const spritesById = group?.userData.spritesById || {}
+  const entries = Object.entries(cards)
+
+  for (const [id, card] of entries) {
     const b = cardBounds(card)
+    const dist = playerPos ? Math.hypot(b.cx - playerPos.x, b.cz - playerPos.z) : 0
+    // boxes are physical ground — rebuildCloudColliders builds a collider for
+    // every card regardless of visibility, so de-rezzing the box a player is
+    // standing on/near would leave them floating on invisible ground. boxes
+    // only respect the far cutoff; labels get the full near+far band.
+    const boxWithin = !renderDistance || dist <= renderDistance.cloud
+    const labelWithin = !renderDistance || withinVisibilityBand(dist, renderDistance.cloud)
+    const boxEl = cloudEl.querySelector(`a-box[data-card-id="${id}"]`)
+    const sprite = spritesById[id]
     const h = computeHeight(b.cx, b.cz, entries)
     const cloudY = CLOUD + h
 
-    const canvas = document.createElement('canvas')
-    canvas.width = 512
-    canvas.height = 128
-    const ctx = canvas.getContext('2d')
-
-    ctx.font = 'bold 52px "Recursive", sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    const o = 3
-    const shadows = [['black',o,o],['cyan',-o,o],['magenta',-o,-o],['yellow',o,-o]]
-    for (const [color, dx, dy] of shadows) {
-      ctx.fillStyle = color
-      ctx.fillText(name, 256 + dx, 64 + dy, 480)
+    if (boxWithin) {
+      if (boxEl) {
+        boxEl.setAttribute('position', `${b.cx} ${cloudY} ${b.cz}`)
+        if (boxEl.dataset.exiting) { delete boxEl.dataset.exiting; riseBoxIn(boxEl, cloudY) }
+      } else if (!_revealQueued.has(id)) {
+        _revealQueue.push(id)
+        _revealQueued.add(id)
+      }
+    } else {
+      if (_revealQueued.has(id)) {
+        _revealQueue = _revealQueue.filter(qid => qid !== id)
+        _revealQueued.delete(id)
+      }
+      if (boxEl) sinkBoxOut(boxEl, cloudY)
     }
-    ctx.fillStyle = 'white'
-    ctx.fillText(name, 256, 64, 480)
 
-    const texture = new THREE.CanvasTexture(canvas)
-    const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false })
-    const sprite = new THREE.Sprite(mat)
-    sprite.scale.set(320, 80, 1)
-    sprite.position.set(b.cx, cloudY + 90, b.cz)
-    sprite.raycast = () => {}
-    group.add(sprite)
+    if (sprite) {
+      sprite.position.set(b.cx, cloudY + 90, b.cz)
+      sprite.userData.fadeState = labelWithin ? 'in' : 'out'
+    } else if (labelWithin && group) {
+      // sprites are fully destroyed once their fade-out reaches 0 opacity
+      // (updateLabelFades), not just hidden — without this, a label that
+      // faded out from a de-rez never comes back once the player returns.
+      // no queue needed here: label creation already fades in via opacity
+      // (createCloudLabel starts at 0), so it's smooth without staggering,
+      // and its narrower near+far band means it's rarely ahead of the box's
+      // own (wider) reveal anyway.
+      createCloudLabel(group, spritesById, id, card, b, cloudY)
+    }
   }
 
-  return group
+  cloudEl.querySelectorAll('a-box[data-card-id]').forEach(el => {
+    if (!(el.dataset.cardId in cards)) el.remove()
+  })
+  for (const id of Object.keys(spritesById)) {
+    if (!(id in cards)) spritesById[id].userData.fadeState = 'out'
+  }
+}
+
+// drains one card off the reveal queue every REVEAL_INTERVAL_MS — called from
+// physicsLoop every frame, only actually does anything on its own cadence.
+// picks the best queued card to reveal next: closest to the player and most
+// aligned with where the camera is actually facing, recomputed each drain
+// tick (not a fixed FIFO order) since the player keeps moving/turning while
+// things wait their turn.
+function pickNextReveal(target, cards) {
+  const playerPos = _lastPlayerPos
+  const cam = target.querySelector('[camera]')
+  const yaw = cam?.object3D?.rotation.y ?? 0
+  const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw)
+
+  let bestIdx = -1, bestScore = -Infinity
+  for (let i = 0; i < _revealQueue.length; i++) {
+    const card = cards[_revealQueue[i]]
+    if (!card) continue
+    const b = cardBounds(card)
+    const dx = b.cx - playerPos.x, dz = b.cz - playerPos.z
+    const dist = Math.hypot(dx, dz) || 1
+    const facing = (dx / dist) * fwdX + (dz / dist) * fwdZ // 1 = dead ahead, -1 = behind
+    const score = facing * 2000 - dist // facing dominates, distance breaks ties
+    if (score > bestScore) { bestScore = score; bestIdx = i }
+  }
+  return bestIdx
+}
+
+function driveRevealQueue(target, cards, dt) {
+  if (!_revealQueue.length) { _revealTimer = 0; return }
+  _revealTimer += dt * 1000
+  if (_revealTimer < REVEAL_INTERVAL_MS) return
+  _revealTimer = 0
+
+  const idx = pickNextReveal(target, cards)
+  if (idx === -1) { _revealQueue = []; _revealQueued.clear(); return } // everything queued was deleted
+  const id = _revealQueue.splice(idx, 1)[0]
+  _revealQueued.delete(id)
+  const card = cards[id]
+  if (!card) return // card was deleted while queued
+
+  const cloudEl = target.querySelector('.cloud-platforms')
+  const labelsEl = target.querySelector('.cloud-labels')
+  const entries = Object.entries(cards)
+  const b = cardBounds(card)
+  const cloudY = CLOUD + computeHeight(b.cx, b.cz, entries)
+
+  if (cloudEl && !cloudEl.querySelector(`a-box[data-card-id="${id}"]`)) {
+    createCloudBox(cloudEl, id, card, b, cloudY)
+  }
+  if (labelsEl) {
+    const group = getOrCreateLabelGroup(labelsEl)
+    if (group && !group.userData.spritesById[id]) {
+      createCloudLabel(group, group.userData.spritesById, id, card, b, cloudY)
+    }
+  }
+}
+
+function updateLabelFades(target, dt) {
+  const labelsEl = target.querySelector('.cloud-labels')
+  const group = labelsEl?.getObject3D?.('labels')
+  if (!group) return
+  const spritesById = group.userData.spritesById
+  for (const [id, sprite] of Object.entries(spritesById)) {
+    const mat = sprite.material
+    if (sprite.userData.fadeState === 'in' && mat.opacity < 1) {
+      mat.opacity = Math.min(1, mat.opacity + LABEL_FADE_RATE * dt)
+    } else if (sprite.userData.fadeState === 'out') {
+      mat.opacity = Math.max(0, mat.opacity - LABEL_FADE_RATE * dt)
+      if (mat.opacity === 0) {
+        group.remove(sprite)
+        mat.map?.dispose()
+        mat.dispose()
+        delete spritesById[id]
+      }
+    }
+  }
+}
+
+// rebuild cloud platforms + labels for the current cards/player position.
+// shared by the data-change path (afterUpdate) and the movement-triggered
+// path (physicsLoop) so de-rezzing/re-rezzing as the player walks around
+// doesn't wait for the next unrelated card edit to happen to re-render.
+// terrain/land is still a single global mesh (computeHeight scans every card,
+// not chunkable without a much bigger rewrite — see the follow-up note in the
+// commit history), so it can't be de-rezzed the way boxes/labels are. fog
+// hides it visually instead: fade to the sky color starting halfway to the
+// same cloud cutoff, fully opaque right at it, so land fades out of sight at
+// the exact distance things actually stop existing — no visible seam between
+// "gone" and "still there but abruptly clipped."
+function applyWorldFog(target, renderDistance) {
+  if (!target || !renderDistance || target._underwater) return
+  const scene = target.querySelector('a-scene')
+  if (!scene) return
+  const near = (renderDistance.cloud * 0.5) | 0
+  const far  = renderDistance.cloud | 0
+  scene.setAttribute('fog', `type: linear; color: dodgerblue; near: ${near}; far: ${far}`)
+}
+
+function refreshClouds(target, cards, playerPos) {
+  const renderDistance = computeLayoutRenderDistance(cards)
+  _lastRenderDistance = renderDistance
+  applyWorldFog(target, renderDistance)
+  updateCloudVisibility(target, cards, playerPos, renderDistance)
 }
 
 // ── sea floor path arrows + cliff rise terminators ───────────────────────────
@@ -603,6 +852,21 @@ function physicsLoop(now) {
 
   const { world, body, collider, ctrl } = _phys
   const pos = body.translation()
+  _lastPlayerPos = pos
+
+  updateLabelFades(_physTarget, dt)
+  driveRevealQueue(_physTarget, $.learn().cards, dt)
+
+  // re-cull cloud platforms/labels as the player moves, not just when card
+  // data changes — otherwise walking toward a distant island never re-rezzes
+  // it until someone happens to edit a card
+  if (!_lastCloudBuildPos || Math.hypot(pos.x - _lastCloudBuildPos.x, pos.z - _lastCloudBuildPos.z) > CLOUD_REBUILD_MOVE_THRESHOLD) {
+    const { cards } = $.learn()
+    if (Object.keys(cards).length > 0) {
+      refreshClouds(_physTarget, cards, pos)
+      _lastCloudBuildPos = { x: pos.x, y: pos.y, z: pos.z }
+    }
+  }
 
   // gravity — always
   _physVel.y -= 220 * dt
@@ -731,7 +995,7 @@ function physicsLoop(now) {
         scene.setAttribute('fog', 'type: linear; color: #001144; near: 80; far: 500')
         scene.setAttribute('background', 'color: #001133')
       } else {
-        scene.removeAttribute('fog')
+        applyWorldFog(_physTarget, _lastRenderDistance)
       }
     }
   }
@@ -789,7 +1053,7 @@ $.draw(target => {
   target._parkMounted = true
   const W = WORLD, WH = W / 2
   return `
-    <a-scene embedded vr-mode-ui="enabled: false" background="color: black"
+    <a-scene embedded vr-mode-ui="enabled: false" background="color: dodgerblue"
              renderer="shadowMapEnabled: true; shadowMapType: pcfsoft">
       <a-entity camera look-controls
                 position="${WH} ${SEA + 100} ${WH}" rotation="-10 0 0">
@@ -875,17 +1139,9 @@ $.draw(target => {
       if (tg) tunnelsEl.setObject3D('tunnels', tg)
     }
 
-    const cloudEl = target.querySelector('.cloud-platforms')
-    if (cloudEl) cloudEl.innerHTML = renderCloudPlatforms(cards)
     rebuildCloudColliders(cards)
-
-    const labelsEl = target.querySelector('.cloud-labels')
-    if (labelsEl) {
-      const old = labelsEl.getObject3D?.('labels')
-      if (old) old.traverse(c => { c.geometry?.dispose(); c.material?.map?.dispose(); c.material?.dispose() })
-      const lg = buildCloudLabels(cards)
-      if (lg) labelsEl.setObject3D('labels', lg)
-    }
+    refreshClouds(target, cards, _lastPlayerPos)
+    _lastCloudBuildPos = { ..._lastPlayerPos }
 
     if (!target._spawned && Object.keys(cards).length > 0) {
       target._spawned = true
