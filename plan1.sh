@@ -163,6 +163,9 @@ case "$CMD" in
     # contain puppeteer-core, and its presence otherwise forces byonm resolution.
     deno run --node-modules-dir=none --allow-net --allow-read --allow-write --allow-env --allow-run --allow-sys $ENV_FLAG "$SCRIPT_DIR/debugging_utilities/e2e_test.ts" "${@:2}"
     ;;
+  elf-map)
+    deno run --node-modules-dir=none --allow-read --allow-write "$SCRIPT_DIR/debugging_utilities/elf_map.ts"
+    ;;
   deploy)
     PROD_HOST="${2:-local.tychi.me}"
     PROD_DIR="${3:-~/plan1}"
@@ -334,5 +337,6 @@ ENDSSH
     echo "  watch    — rebuilds dist/ on any change to client/"
     echo "  serve  — serves dist/ on port $PORT"
     echo "  test   — headless e2e flow(s) w/ screenshot per step → private/screenshots/e2e/<flow>/ (arg: flow name, default: all)"
+    echo "  elf-map  — static hypergraph of elf imports/embeds/saga-embeds → private/elf-map/graph.json"
     ;;
 esac
