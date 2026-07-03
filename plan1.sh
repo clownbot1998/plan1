@@ -138,6 +138,11 @@ case "$CMD" in
       echo "error: double-nested vendor paths detected in dist HTML — run ./plan1.sh build again to fix"
       exit 1
     fi
+    # static elf-map graph.json — pure regex scan, no server/network needed,
+    # cheap enough to refresh on every build. the runtime crawl (elf-map-crawl,
+    # needs `serve` running) and the board push (elf-map-board, needs WAS) stay
+    # separate — those have real external dependencies build shouldn't have.
+    deno run --node-modules-dir=none --allow-read --allow-write "$SCRIPT_DIR/debugging_utilities/elf_map.ts" || echo "warn: elf-map graph.json generation failed, continuing"
     ;;
   sync)
     ENV_FLAG=""
