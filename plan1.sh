@@ -142,7 +142,7 @@ case "$CMD" in
     # cheap enough to refresh on every build. the runtime crawl (elf-map-crawl,
     # needs `serve` running) and the board push (elf-map-board, needs WAS) stay
     # separate — those have real external dependencies build shouldn't have.
-    deno run --node-modules-dir=none --allow-read --allow-write "$SCRIPT_DIR/debugging_utilities/elf_map.ts" || echo "warn: elf-map graph.json generation failed, continuing"
+    deno run --node-modules-dir=none --allow-read --allow-write --allow-env "$SCRIPT_DIR/debugging_utilities/elf_map.ts" || echo "warn: elf-map graph.json generation failed, continuing"
     ;;
   sync)
     ENV_FLAG=""
@@ -169,7 +169,21 @@ case "$CMD" in
     deno run --node-modules-dir=none --allow-net --allow-read --allow-write --allow-env --allow-run --allow-sys $ENV_FLAG "$SCRIPT_DIR/debugging_utilities/e2e_test.ts" "${@:2}"
     ;;
   elf-map)
-    deno run --node-modules-dir=none --allow-read --allow-write "$SCRIPT_DIR/debugging_utilities/elf_map.ts"
+    deno run --node-modules-dir=none --allow-read --allow-write --allow-env "$SCRIPT_DIR/debugging_utilities/elf_map.ts" "${@:2}"
+    ;;
+  plan98-map)
+    # same static scan, aimed at the ~/.plan98 firmware repo instead of this
+    # one — comparable architecture graph on a different (human-authored)
+    # source tree. arg1 overrides the plan98 checkout path if it's not at ~/.plan98.
+    PLAN98_ROOT="${2:-$HOME/.plan98}/client/public"
+    deno run --node-modules-dir=none --allow-read --allow-write --allow-env "$SCRIPT_DIR/debugging_utilities/elf_map.ts" \
+      --root "$PLAN98_ROOT" --out "$SCRIPT_DIR/private/plan98-map/graph.json"
+    ;;
+  elf-map-merge)
+    # unifies elf-map + plan98-map into private/elf-map/combined.json, with
+    # source/kind/edgeTypes/degree/prefix facets for the checkbox-filtered
+    # viewer at /app/elf-map. run elf-map + plan98-map first.
+    deno run --node-modules-dir=none --allow-read --allow-write "$SCRIPT_DIR/debugging_utilities/elf_map_merge.ts"
     ;;
   elf-map-crawl)
     ENV_FLAG=""
@@ -349,5 +363,7 @@ ENDSSH
     echo "  test   — headless e2e flow(s) w/ screenshot per step → private/screenshots/e2e/<flow>/ (arg: flow name, default: all)"
     echo "  elf-map  — static hypergraph of elf imports/embeds/saga-embeds → private/elf-map/graph.json"
     echo "  elf-map-crawl — headless-visits every elf route, merges 'renders' edges into graph.json (needs serve running)"
+    echo "  plan98-map — same static scan aimed at ~/.plan98 instead → private/plan98-map/graph.json (arg: alt checkout path)"
+    echo "  elf-map-merge — unify elf-map + plan98-map into private/elf-map/combined.json with source/kind/edgeTypes/degree/prefix facets"
     ;;
 esac
