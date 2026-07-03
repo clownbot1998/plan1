@@ -163,8 +163,21 @@ if (requested && flows.length === 0) {
   Deno.exit(1)
 }
 
+// puppeteer.launch() needs an actual path, unlike Deno.Command('chromium', ...)
+// (used elsewhere in this dir) which resolves through $PATH itself.
+async function findChromium() {
+  for (const name of ['chromium', 'chromium-browser', 'google-chrome']) {
+    try {
+      const cmd = new Deno.Command('which', { args: [name], stdout: 'piped', stderr: 'null' })
+      const { success, stdout } = await cmd.output()
+      if (success) return new TextDecoder().decode(stdout).trim()
+    } catch { /* try next */ }
+  }
+  throw new Error('no chromium/chromium-browser/google-chrome found on $PATH')
+}
+
 const browser = await puppeteer.launch({
-  executablePath: '/usr/bin/chromium',
+  executablePath: await findChromium(),
   headless: true,
   args: ['--no-sandbox', '--disable-gpu'],
 })
