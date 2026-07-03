@@ -60,6 +60,10 @@ const HYPER_ID = 'hyper'
 const DIRS = ['N','S','E','W','NE','NW','SE','SW']
 
 let _lastRenderSig = null
+let _lastLinksPanX = null
+let _lastLinksPanY = null
+let _lastLinksZoom = null
+const LINKS_REBUILD_MOVE_PX = 300 // screen px of pan movement before re-culling edges is worth it
 let _arrowInterval = null
 let _peerArrowInterval = null
 let _smoothArrowX = 0
@@ -246,18 +250,28 @@ async function upsertBayunGroup(groupId) {
   } catch {}
 }
 
-// board id "elf-map" builds itself from the static graph.json build artifact
-// (./plan1.sh build regenerates it, no server/WAS needed) rather than
-// requiring a manual elf_map_to_board.ts push into WAS first — same layout
-// math as that script, ported to the browser. this is a read-only seed: it
-// only fires when WAS genuinely has nothing yet, and the instant someone
-// touches a card the normal wasSave() path takes over from there.
-const ELF_MAP_EDGE_COLOR = {
+// certain board ids build themselves from a static graph.json build artifact
+// (./plan1.sh elf-map / plan98-map regenerate these, no server/WAS needed)
+// rather than requiring a manual elf_map_to_board.ts push into WAS first —
+// same layout math as that script, ported to the browser. this is a
+// read-only seed: it only fires when WAS genuinely has nothing yet, and the
+// instant someone touches a card the normal wasSave() path takes over.
+const GRAPH_EDGE_COLOR = {
   imports: '#4a7ac9', embeds: '#3a9d5c', 'saga-embeds': '#c97a2e', renders: '#c94a8a',
 }
 
-async function loadElfMapFromGraph() {
-  const res = await fetch('/private/elf-map/graph.json', { cache: 'no-store' }).catch(() => null)
+// board id → which graph.json seeds it, and whether /app/<node-id> resolves
+// to anything on THIS server. elf-map's nodes are this app's own elves — the
+// route exists. plan98-map's nodes are ~/.plan98's elves, a different,
+// currently-unserved codebase here — same tag name doesn't mean same route,
+// so no play button rather than a link that 404s.
+const SELF_HYDRATE_GRAPHS = {
+  'elf-map':    { path: '/private/elf-map/graph.json',    linkHrefs: true },
+  'plan98-map': { path: '/private/plan98-map/graph.json', linkHrefs: false },
+}
+
+async function loadGraphIntoBoard(graphPath, { linkHrefs = false } = {}) {
+  const res = await fetch(graphPath, { cache: 'no-store' }).catch(() => null)
   if (!res?.ok) return false
   const graph = await res.json().catch(() => null)
   if (!graph?.nodes?.length) return false
@@ -275,7 +289,7 @@ async function loadElfMapFromGraph() {
       text: node.id,
       color: node.kind === 'elf' ? '#dce8ff' : '#fff3d6',
       saga: '',
-      href: node.kind === 'elf' ? `/app/${node.id}` : '',
+      href: linkHrefs && node.kind === 'elf' ? `/app/${node.id}` : '',
       createdAt: Date.now(),
       links: {},
       backlinks: {},
@@ -285,7 +299,7 @@ async function loadElfMapFromGraph() {
 
   const edgeTypes = {}
   for (const type of new Set(graph.edges.map(e => e.type))) {
-    edgeTypes[type] = { name: type, color: ELF_MAP_EDGE_COLOR[type] || '#888888' }
+    edgeTypes[type] = { name: type, color: GRAPH_EDGE_COLOR[type] || '#888888' }
   }
 
   for (const edge of graph.edges) {
@@ -327,7 +341,8 @@ async function wasLoad() {
       }
     }
   } catch {}
-  if (_boardId === 'elf-map') await loadElfMapFromGraph().catch(() => null)
+  const seed = SELF_HYDRATE_GRAPHS[_boardId]
+  if (seed) await loadGraphIntoBoard(seed.path, seed).catch(() => null)
 }
 
 let _wasSaveTimer = null
@@ -1227,7 +1242,7 @@ function updateShell(target) {
   return null
 }
 
-function renderLinksInner(cards, edgeTypes = {}) {
+function renderLinksInner(cards, edgeTypes = {}, rect = null) {
   const allTypes = { [HYPER_ID]: { name: 'hyper', color: 'dodgerblue' }, ...edgeTypes }
   const usedTypeIds = new Set()
   const linkData = []
@@ -1236,6 +1251,17 @@ function renderLinksInner(cards, edgeTypes = {}) {
     Object.entries(card.links || {}).forEach(([linkId, link]) => {
       const to = cards[link.to]
       if (!to) return
+      // skip the O(64) bestCompassPair search entirely for edges nowhere near
+      // the viewport — dense graphs (plan98-map: 1151 edges vs elf-map's 152)
+      // otherwise pay full cost for every edge even when most are off-screen.
+      // endpoint-in-rect, not true segment/rect intersection — a real
+      // bounding-box test was tried and measured WORSE for a ring layout
+      // specifically: with lots of long cross-ring edges, an edge's own
+      // bounding box routinely spans most of the ring's diameter regardless
+      // of where the viewport sits, so almost nothing got culled. this is a
+      // real limit of viewport culling for this topology, not a rendering
+      // bug — see the elf-map-vs-plan98-map perf writeup for the numbers.
+      if (rect && !cardInRect(card, rect) && !cardInRect(to, rect)) return
       const typeId = link.typeId || HYPER_ID
       usedTypeIds.add(typeId)
       const [fromDir, toDir] = bestCompassPair(card, to)
@@ -1658,17 +1684,28 @@ function mount(target) {
     if (mode !== 'pan' && mode !== 'manage') return
     if (e.target.closest('.card-sidebar')) return
     e.preventDefault()
+    // both branches below are incremental against the CURRENT zoom/pan (not
+    // an absolute value from a fixed drag-start, unlike pointermove-pan) —
+    // so once an update is deferred to the next rAF, the next wheel event
+    // has to chain off that pending value instead of $.learn() (which won't
+    // reflect it until the flush), or a fast burst — pinch-zoom easily fires
+    // faster than one event per frame — collapses to just the last event
+    // instead of accumulating, and both panning and zooming would visibly
+    // undershoot the actual gesture.
+    const base = { zoom, panX, panY, ..._pendingCamera }
     if (e.ctrlKey) {
       const rect = target.getBoundingClientRect()
       const cursorX = e.clientX - rect.left
       const cursorY = e.clientY - rect.top
       const delta = -e.deltaY * (e.deltaMode === 1 ? 24 : e.deltaMode === 2 ? 400 : 1)
-      const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom * Math.exp(delta * 0.01)))
-      const anchorX = (cursorX - panX) / zoom
-      const anchorY = (cursorY - panY) / zoom
-      $.teach({ zoom: newZoom, ...clampPan(cursorX - anchorX * newZoom, cursorY - anchorY * newZoom, newZoom) })
+      const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, base.zoom * Math.exp(delta * 0.01)))
+      const anchorX = (cursorX - base.panX) / base.zoom
+      const anchorY = (cursorY - base.panY) / base.zoom
+      const clamped = clampPan(cursorX - anchorX * newZoom, cursorY - anchorY * newZoom, newZoom)
+      scheduleCameraTeach({ zoom: newZoom, ...clamped })
     } else {
-      $.teach(clampPan(panX - e.deltaX * 0.6, panY - e.deltaY * 0.6, zoom))
+      const clamped = clampPan(base.panX - e.deltaX * 0.6, base.panY - e.deltaY * 0.6, base.zoom)
+      scheduleCameraTeach(clamped)
     }
   }, { passive: false })
 
@@ -1738,9 +1775,17 @@ function update(target) {
   const etColorSig = Object.entries(edgeTypes).map(([k, v]) => `${k}:${v.color}`).join(',')
   const renderSig = cardsJson + '|' + etColorSig
   const linksLayer = target.querySelector('.links-layer')
-  if (renderSig !== _lastRenderSig) {
-    linksLayer.innerHTML = renderLinksInner(cards, edgeTypes)
+  // re-culling on every pan/zoom frame would reintroduce the exact rebuild
+  // cost this is meant to avoid — only worth doing once the viewport has
+  // actually moved far enough that the culled edge set would meaningfully
+  // change, same movement-gating idea as generic-park's cloud reveal queue.
+  const movedEnough = _lastLinksZoom !== zoom || _lastLinksPanX === null ||
+    Math.hypot(panX - _lastLinksPanX, panY - _lastLinksPanY) > LINKS_REBUILD_MOVE_PX
+  if (renderSig !== _lastRenderSig || movedEnough) {
+    const rect = visibleWorldRect({ panX, panY, zoom, viewportW: target.clientWidth, viewportH: target.clientHeight })
+    linksLayer.innerHTML = renderLinksInner(cards, edgeTypes, rect)
     _lastRenderSig = renderSig
+    _lastLinksPanX = panX; _lastLinksPanY = panY; _lastLinksZoom = zoom
   }
 
   // rubber-band preview
@@ -1847,6 +1892,32 @@ const ZOOM_MIN = 0.2
 const ZOOM_MAX = 4
 const CANVAS_SIZE = 5000
 
+// pan/zoom used to call $.teach() straight from every pointermove/wheel
+// event — unthrottled, so on a dense board (many cards, many edges) the
+// JS-side re-render work could queue up faster than the browser actually
+// paints, and camera movement would visibly trail behind the input.
+// batching to one teach per animation frame caps the re-render rate to what
+// can actually be drawn, regardless of how many input events fired in
+// between. holds panX/panY and, for wheel-zoom, zoom too — $.teach merges
+// partial state either way.
+let _pendingCamera = null
+let _cameraRafScheduled = false
+function scheduleCameraTeach(payload) {
+  _pendingCamera = { ..._pendingCamera, ...payload }
+  if (_cameraRafScheduled) return
+  _cameraRafScheduled = true
+  requestAnimationFrame(() => {
+    _cameraRafScheduled = false
+    if (_pendingCamera) { $.teach(_pendingCamera); _pendingCamera = null }
+  })
+}
+// pointerup needs the true final position immediately (for clamping +
+// settling panXmod/panYmod) — can't wait for the next rAF, or the drag ends
+// on a stale value and visibly snaps back to catch up.
+function flushPendingCamera() {
+  if (_pendingCamera) { $.teach(_pendingCamera); _pendingCamera = null }
+}
+
 function clampPan(panX, panY, zoom) {
   const host = document.querySelector(tag)
   if (!host) return { panX, panY }
@@ -1922,7 +1993,7 @@ $.when('pointermove', '.bulletin-canvas', e => {
     const midY = (pts[0].clientY + pts[1].clientY) / 2
     const anchorX = (_pinchMidClientX - _pinchStartPanX) / _pinchStartZoom
     const anchorY = (_pinchMidClientY - _pinchStartPanY) / _pinchStartZoom
-    $.teach({ zoom: newZoom, ...clampPan(midX - anchorX * newZoom, midY - anchorY * newZoom, newZoom) })
+    scheduleCameraTeach({ zoom: newZoom, ...clampPan(midX - anchorX * newZoom, midY - anchorY * newZoom, newZoom) })
     return
   }
 
@@ -1930,7 +2001,7 @@ $.when('pointermove', '.bulletin-canvas', e => {
           isDrawing, createStartX, createStartY, zoom } = $.learn()
 
   if (mode === 'pan' && panHappening) {
-    $.teach({
+    scheduleCameraTeach({
       panX: panStartPanX + (e.clientX - panStartClientX),
       panY: panStartPanY + (e.clientY - panStartClientY),
     })
@@ -1945,6 +2016,7 @@ $.when('pointermove', '.bulletin-canvas', e => {
 })
 
 $.when('pointerup', '.bulletin-canvas', e => {
+  flushPendingCamera()
   e.preventDefault()
   _canvasPointers.delete(e.pointerId)
 
@@ -2894,6 +2966,13 @@ $.style(`
     inset: 0;
     transform: translate(var(--pan-x, 0), var(--pan-y, 0)) scale(var(--zoom, 1));
     transform-origin: 0 0;
+    /* without this, a board with a lot of content (many cards, a dense SVG
+       edges layer — elf-map's ring is 90 cards + 133 edges) can force the
+       browser to repaint that content on every pan frame instead of just
+       compositing the transform on the GPU. that repaint lag is what reads
+       as a trailing smear during a fast pan — this promotes .workspace to
+       its own layer up front so panning is a pure, cheap composite. */
+    will-change: transform;
   }
 
   & .bulletin-canvas {
@@ -3750,6 +3829,13 @@ $.style(`
     position: absolute;
     inset: 0;
     z-index: 100;
+    /* A-Frame's canvas defaults to a transparent WebGL context (alpha:
+       true) — wherever the 3D scene's own fog/sky/background sphere don't
+       fully cover a pixel, the canvas is genuinely see-through and reveals
+       whatever's behind it in the DOM, which is this board's own dark 2D
+       layer underneath. explicit opaque background here is a hard floor
+       under the 3D scene so a rendering gap shows dodgerblue, not black. */
+    background: dodgerblue;
   }
   & .share-overlay {
     position: absolute;
