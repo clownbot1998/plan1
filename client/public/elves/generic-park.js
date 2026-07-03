@@ -250,13 +250,24 @@ function buildTerrainMesh(cards) {
   const cliffIndices = []
   let nextIdx = N * N
 
+  // cliff walls stop exactly at CLIFF_FLOOR, which is also exactly where the
+  // "gold" backdrop slab's top face sits (the <a-box color="gold"> in this
+  // file's a-scene template — the visible "sea floor" wherever terrain has a
+  // hole, since open water gets no terrain geometry at all by design). two
+  // surfaces from unrelated geometry occupying the identical Y plane is
+  // textbook z-fighting — seizure-risk flicker, not a cosmetic nitpick, so
+  // this gets fixed by removing the ambiguity outright: extend the wall a
+  // little past the seam and into the slab's own volume. no shared plane
+  // left, nothing left to fight over.
+  const CLIFF_WALL_OVERLAP = 20
+
   for (const [k, count] of edgeMap) {
     if (count !== 1) continue
     const [a, b] = edgeMap._raw.get(k)
     for (const vi of [a, b]) {
       if (!bottomIdx.has(vi)) {
         bottomIdx.set(vi, nextIdx++)
-        positions.push(positions[vi*3], CLIFF_FLOOR, positions[vi*3+2])
+        positions.push(positions[vi*3], CLIFF_FLOOR - CLIFF_WALL_OVERLAP, positions[vi*3+2])
         colors.push(0.24, 0.70, 0.44)  // mediumseagreen — underwater cliff wall
       }
     }
@@ -307,6 +318,21 @@ const DEREZ_ENTER_MS      = 400
 const DEREZ_EXIT_MS       = 300
 const NEAR_FADE_DISTANCE  = 220   // closer than this = fades out, same as leaving far range
 const REVEAL_INTERVAL_MS  = 180   // one card's box+label revealed per tick, not all at once
+
+// dense layouts (e.g. elf-map's ring — 90 cards, ~150 units wide each, packed
+// into ~63 units of circumferential spacing) pack platforms tightly enough
+// that many overlap in XZ. computeHeight tends to give overlapping cards
+// near-identical heights, so their coplanar top faces z-fight — the same
+// flicker as the terrain/gold-slab seam, just between platforms instead of
+// against the backdrop. a deterministic per-card micro-offset (hash of the
+// id, not randomness — the same card always lands at the same height, so
+// this can't itself introduce flicker) breaks exact coplanarity without
+// meaningfully moving anything.
+function microYOffset(id) {
+  let hash = 0
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0
+  return (Math.abs(hash) % 9) - 4 // -4..4 units
+}
 const LABEL_FADE_RATE     = 1 / (DEREZ_ENTER_MS / 1000) // opacity units/sec
 
 let _revealQueue  = []      // card ids waiting their turn
@@ -368,7 +394,15 @@ function createCloudLabel(group, spritesById, id, card, b, cloudY) {
   ctx.fillText(name, 256, 64, 480)
 
   const texture = new THREE.CanvasTexture(canvas)
-  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, opacity: 0 })
+  // depthWrite:false relies entirely on the renderer's per-frame transparent
+  // sort to draw far labels before near ones — when that sort doesn't happen
+  // reliably (multiple labels, multiple boxes, all sharing one THREE.Group),
+  // draw order wins instead of distance and far labels paint over near ones.
+  // alphaTest + depthWrite:true sidesteps the whole problem: each sprite
+  // writes its own depth per-pixel, only where the text itself is opaque
+  // (the transparent canvas margin around it never touches the depth
+  // buffer), so occlusion is correct regardless of what order things drew in.
+  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: true, alphaTest: 0.1, opacity: 0 })
   const sprite = new THREE.Sprite(mat)
   sprite.scale.set(320, 80, 1)
   sprite.position.set(b.cx, cloudY + 90, b.cz)
@@ -413,7 +447,7 @@ function updateCloudVisibility(target, cards, playerPos, renderDistance) {
     const boxEl = cloudEl.querySelector(`a-box[data-card-id="${id}"]`)
     const sprite = spritesById[id]
     const h = computeHeight(b.cx, b.cz, entries)
-    const cloudY = CLOUD + h
+    const cloudY = CLOUD + h + microYOffset(id)
 
     if (boxWithin) {
       if (boxEl) {
@@ -497,7 +531,7 @@ function driveRevealQueue(target, cards, dt) {
   const labelsEl = target.querySelector('.cloud-labels')
   const entries = Object.entries(cards)
   const b = cardBounds(card)
-  const cloudY = CLOUD + computeHeight(b.cx, b.cz, entries)
+  const cloudY = CLOUD + computeHeight(b.cx, b.cz, entries) + microYOffset(id)
 
   if (cloudEl && !cloudEl.querySelector(`a-box[data-card-id="${id}"]`)) {
     createCloudBox(cloudEl, id, card, b, cloudY)
@@ -746,10 +780,12 @@ function rebuildCloudColliders(cards) {
   _cloudBodies = []
 
   const entries = Object.entries(cards)
-  for (const [, card] of entries) {
+  for (const [id, card] of entries) {
     const b  = cardBounds(card)
     const h  = computeHeight(b.cx, b.cz, entries)
-    const cy = CLOUD + h
+    // must match the microYOffset applied to the visual box's Y, or the
+    // collider and what the player sees drift apart by a few units
+    const cy = CLOUD + h + microYOffset(id)
     const body = world.createRigidBody(
       RAPIER.RigidBodyDesc.fixed().setTranslation(b.cx, cy, b.cz),
     )
@@ -995,6 +1031,12 @@ function physicsLoop(now) {
         scene.setAttribute('fog', 'type: linear; color: #001144; near: 80; far: 500')
         scene.setAttribute('background', 'color: #001133')
       } else {
+        // background never got reset back on surfacing — stuck at underwater
+        // navy forever after the first dive. whatever's beyond the sky
+        // sphere (fog: false, so distance/de-rez don't touch it) or beyond
+        // fog's own far distance shows this background raw, so it needs to
+        // match dodgerblue too, not just the initial scene attribute.
+        scene.setAttribute('background', 'color: dodgerblue')
         applyWorldFog(_physTarget, _lastRenderDistance)
       }
     }
@@ -1054,7 +1096,7 @@ $.draw(target => {
   const W = WORLD, WH = W / 2
   return `
     <a-scene embedded vr-mode-ui="enabled: false" background="color: dodgerblue"
-             renderer="shadowMapEnabled: true; shadowMapType: pcfsoft">
+             renderer="shadowMapEnabled: true; shadowMapType: pcfsoft; alpha: false">
       <a-entity camera look-controls
                 position="${WH} ${SEA + 100} ${WH}" rotation="-10 0 0">
         <a-cursor color="white" opacity="0.4" fuse="false"></a-cursor>
@@ -1085,8 +1127,18 @@ $.draw(target => {
 
       <a-box position="${WH} 500 ${WH}"  width="${W}" height="1000" depth="${W}" color="firebrick" shadow="receive: true"></a-box>
       <a-box position="${WH} 1500 ${WH}" width="${W}" height="1000" depth="${W}" color="gold"      shadow="receive: true"></a-box>
+      <!-- side: front (not double) — this box is solid and world-spanning, and
+           gameplay/physics keeps the player's camera inside its own Y range
+           (2000-2500, same span as SEA_FLOOR_Y/the tunnel edge lines) most of
+           the time while swimming. double-sided rendering of a box you're
+           standing inside of means both interior walls fight for render
+           order around the camera every frame — a whole-screen flicker, not
+           a cosmetic one. front-side only renders the outward-facing surface
+           (correctly visible looking down at it from above/through a
+           terrain hole, correctly absent — not fighting itself — from
+           inside it). -->
       <a-box position="${WH} 2250 ${WH}" width="${W}" height="500" depth="${W}"
-             material="color: dodgerblue; opacity: 0.55; transparent: true; side: double"
+             material="color: dodgerblue; opacity: 0.55; transparent: true; side: front"
              shadow="receive: true"></a-box>
 
       <!-- sky sphere — dodgerblue, just beyond sun orbit (r=9000), fades with day/night -->
