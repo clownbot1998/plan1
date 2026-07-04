@@ -25,7 +25,23 @@ const screenshotsRoot = join(root, 'private', 'screenshots', 'e2e')
 
 type StepResult = { ok: boolean, note?: string }
 type Step = { name: string, run: (page: any) => Promise<StepResult | void> }
-type Flow = { name: string, url: string, steps: Step[] }
+type Flow = { name: string, url: string, steps: Step[], waitUntil?: 'networkidle0' | 'domcontentloaded', beforeGoto?: () => Promise<void> }
+
+// shells out to `deno run reset_test_state.ts` — a fresh puppeteer profile
+// does NOT mean a fresh app state for anything that persists server-side
+// (WAS), and accessibility-mode's workspaces/tabs/chat history do exactly
+// that. any flow that needs a deterministic starting point should reset
+// first, the same way a test fixture gets a factory reset.
+async function resetTestState() {
+  const root = new URL('../', import.meta.url).pathname
+  const cmd = new Deno.Command('deno', {
+    args: ['run', '--node-modules-dir=none', '--allow-net', '--allow-env', '--env-file=' + join(root, '.env'), join(root, 'debugging_utilities', 'reset_test_state.ts')],
+    stdout: 'piped', stderr: 'piped',
+  })
+  const { success, stdout, stderr } = await cmd.output()
+  const out = new TextDecoder().decode(success ? stdout : stderr).trim()
+  console.log(`  reset-test-state: ${out}`)
+}
 
 async function swipe(page: any, selector: string, dx: number) {
   const box = await page.evaluate((sel: string) => {
@@ -70,7 +86,215 @@ async function waitForRendered(page: any, tag: string, timeoutMs = 4000) {
   }
 }
 
+// the model list is fetched from whatever remote endpoint
+// ACCESSIBILITY_MODE_LOCK points at — latency is real and variable, so poll
+// instead of trusting a single fixed delay to be enough.
+async function selectModel(page: any, modelSubstring: string, timeoutMs = 15000) {
+  await page.waitForSelector('[data-model-select]', { timeout: 10000 })
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const result = await page.evaluate((sub: string) => {
+      const sel = document.querySelector('[data-model-select]') as HTMLSelectElement
+      const opt = [...sel.options].find(o => o.value.includes(sub))
+      if (!opt) return { ok: false, options: [...sel.options].map(o => o.value) }
+      if (sel.value !== opt.value) {
+        sel.value = opt.value
+        sel.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      return { ok: true, selected: sel.value }
+    }, modelSubstring)
+    if (result.ok) return result
+    await new Promise(r => setTimeout(r, 500))
+  }
+  return { ok: false, selected: null }
+}
+
+async function sendChatMessage(page: any, text: string) {
+  const ta = await page.waitForSelector('textarea[name="messageText"], input[name="messageText"]', { timeout: 8000 })
+  await ta.click({ clickCount: 3 })
+  await ta.type(text)
+  await page.keyboard.press('Enter')
+}
+
+// approves every human-permission prompt as it appears, up to timeoutMs total,
+// stopping once no prompt is showing AND the agent isn't mid tool-call (a
+// short settle window after the last approval, so we don't quit between two
+// back-to-back prompts).
+async function approveAllPrompts(page: any, timeoutMs: number) {
+  const start = Date.now()
+  let approvals = 0
+  let sinceLastPrompt = 0
+  while (Date.now() - start < timeoutMs) {
+    const hasPrompt = await page.evaluate(() => !!document.querySelector('.human-prompt-yes'))
+    if (hasPrompt) {
+      await page.click('.human-prompt-yes')
+      approvals++
+      sinceLastPrompt = 0
+      await new Promise(r => setTimeout(r, 700))
+      continue
+    }
+    sinceLastPrompt += 500
+    // a 24b model generating the next tool call after digesting a read_file
+    // result can genuinely take longer than a few seconds against a real
+    // remote endpoint — too short a window here reads as "done" when it's
+    // actually just thinking.
+    if (sinceLastPrompt > 60000) break
+    await new Promise(r => setTimeout(r, 500))
+  }
+  return approvals
+}
+
 const FLOWS: Flow[] = [
+  {
+    name: 'accessibility-mode-edit-loop',
+    url: `${plan1Base}/app/accessibility-mode`,
+    waitUntil: 'domcontentloaded',
+    beforeGoto: resetTestState,
+    steps: [
+      // the model list is fetched from the configured remote endpoint
+      // (ACCESSIBILITY_MODE_LOCK) and the sessions/workspace view is
+      // populated from IndexedDB, both async — neither is done right after
+      // domcontentloaded.
+      { name: 'load', run: async () => { await new Promise(r => setTimeout(r, 4000)) } },
+      {
+        name: 'new-chat-and-select-model',
+        run: async page => {
+          // the model-select dropdown lives in a persistent topbar shared by
+          // BOTH the sessions/workspace browser and the actual compose view
+          // — its presence doesn't confirm we've left the sessions view.
+          // the textarea only exists in the compose view, so wait for THAT,
+          // retrying the click if it doesn't show up the first time.
+          let newChatClicked = false
+          let reachedCompose = false
+          for (let attempt = 0; attempt < 3 && !reachedCompose; attempt++) {
+            try {
+              const btn = await page.waitForSelector('[data-new-chat]', { timeout: 5000 })
+              await btn.click()
+              newChatClicked = true
+            } catch {}
+            try {
+              await page.waitForSelector('textarea[name="messageText"], input[name="messageText"]', { timeout: 4000 })
+              reachedCompose = true
+            } catch {}
+          }
+          const model = await selectModel(page, 'ornith:9b')
+          return { ok: !!model.ok && reachedCompose, note: `model=${model.selected ?? 'NOT FOUND'} newChat=${newChatClicked} composeView=${reachedCompose}` }
+        },
+      },
+      {
+        name: 'authenticate',
+        // patch_file 401s without this. going through "admin" as a typed
+        // chat command opens a separate full-screen accessibility keyboard
+        // overlay (unrelated to the tool-calling loop this flow is actually
+        // demonstrating) — hit the login API directly instead, the same
+        // request that flow ends up making anyway.
+        run: async page => {
+          const ok = await page.evaluate(async (passphrase: string) => {
+            const res = await fetch('/api/login', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ passphrase }),
+            })
+            return res.ok
+          }, Deno.env.get('PLAN1_PASSPHRASE') ?? 'clownbot')
+          return { ok, note: ok ? 'authenticated' : 'login failed' }
+        },
+      },
+      {
+        name: 'send-edit-request',
+        run: async page => {
+          await sendChatMessage(page, 'change the button color in pot-luck to orange')
+        },
+      },
+      {
+        // some models answer with a clarifying question instead of acting
+        // right away (confirmed: ornith:9b asked "which buttons — all of
+        // them, or just specific ones?" instead of picking one, unlike
+        // mistral-small3.2:24b which just went with .po-btn-go directly —
+        // a real behavior difference, not a bug). give it a beat, then
+        // answer if no tool-call prompt showed up on its own.
+        name: 'answer-clarifying-question-if-asked',
+        run: async page => {
+          await new Promise(r => setTimeout(r, 8000))
+          const state = await page.evaluate(() => ({
+            hasPrompt: !!document.querySelector('.human-prompt-yes'),
+            thinking: !!document.querySelector('.thinking-disk'),
+          }))
+          if (!state.hasPrompt && !state.thinking) {
+            await sendChatMessage(page, 'just the primary action button (.po-btn-go)')
+            return { ok: true, note: 'answered a clarifying question' }
+          }
+          return { ok: true, note: 'no clarifying question — proceeding' }
+        },
+      },
+      {
+        name: 'approve-tool-calls',
+        run: async page => {
+          const approvals = await approveAllPrompts(page, 240000)
+          return { ok: approvals > 0, note: `${approvals} tool call(s) approved` }
+        },
+      },
+      {
+        name: 'view-agent-logs',
+        run: async page => {
+          // the agent's own final step (per its system prompt) is calling
+          // set_preview once the edit succeeds, which takes over the WHOLE
+          // view (previewOpen replaces chat/logs entirely) — the logs
+          // toggle button does nothing while that's showing. close it first.
+          const isPreviewOpen = await page.evaluate(() => !!document.querySelector('[data-toggle-preview].-active'))
+          if (isPreviewOpen) {
+            await page.click('[data-toggle-preview]').catch(() => {})
+            await new Promise(r => setTimeout(r, 300))
+          }
+          await page.click('[data-toggle-logs]').catch(() => {})
+          await new Promise(r => setTimeout(r, 500))
+          const logsText = await page.evaluate(() => document.querySelector('.messages')?.innerText ?? '')
+          const sawPatch = /patch_file/.test(logsText)
+          return { ok: sawPatch, note: sawPatch ? 'patch_file call visible in logs' : 'no patch_file call found in logs' }
+        },
+      },
+      {
+        name: 'preview-pot-luck-button-color',
+        run: async page => {
+          // /elves/*.js is served WAS-first (server.js: "reads come back
+          // from WAS so any node sharing the same space sees live edits") —
+          // patch_file's own PUT round-trip to WAS can trail its HTTP
+          // response by a beat, so poll a few fresh loads instead of
+          // trusting the very next request to already reflect it.
+          //
+          // which SELECTOR gets the edit varies by model — confirmed
+          // directly: mistral-small3.2:24b picked .po-btn-go (the colored
+          // primary-action button), ornith:9b picked the neutral base
+          // .po-btn instead (affecting every button). check every po-btn
+          // variant and accept any orange-ish shade, not one exact RGB
+          // formula — #FFA500 and #e67e22 (carrot orange) are both
+          // reasonable answers to "make it orange" and neither should read
+          // as a false failure just because it's not the other one's exact
+          // hex.
+          const isOrangeish = (rgb: string | null) => {
+            if (!rgb) return false
+            const m = rgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/)
+            if (!m) return false
+            const [, r, g, b] = m.map(Number)
+            return r >= 180 && g >= 60 && g <= 200 && b <= 100 && r > g && g > b
+          }
+          let colors: string[] = []
+          for (let attempt = 0; attempt < 5; attempt++) {
+            await page.goto(`${plan1Base}/app/pot-luck?_v=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 15000 })
+            await new Promise(r => setTimeout(r, 1500))
+            colors = await page.evaluate(() => {
+              const btns = [...document.querySelectorAll('pot-luck [class*="po-btn"]')]
+              return btns.map(b => getComputedStyle(b).backgroundColor)
+            })
+            if (colors.some(isOrangeish)) break
+            await new Promise(r => setTimeout(r, 1500))
+          }
+          const found = colors.find(isOrangeish)
+          return { ok: !!found, note: `button colors seen: ${colors.join(', ') || 'none found'}` }
+        },
+      },
+    ],
+  },
   {
     name: 'dweb-camp-swipe',
     url: `${plan1Base}/app/dweb-camp`,
@@ -107,13 +331,19 @@ async function runFlow(flow: Flow, browser: any) {
   const outDir = join(screenshotsRoot, flow.name)
   await Deno.mkdir(outDir, { recursive: true })
 
+  if (flow.beforeGoto) await flow.beforeGoto()
+
   const page = await browser.newPage()
   await page.setViewport({ width: 1280, height: 800 })
   const consoleErrors: string[] = []
   page.on('pageerror', (e: Error) => consoleErrors.push(`pageerror: ${e.message}`))
   page.on('console', (msg: any) => { if (msg.type() === 'error') consoleErrors.push(`console: ${msg.text()}`) })
 
-  await page.goto(flow.url, { waitUntil: 'networkidle0', timeout: 20000 })
+  // networkidle0 hangs for any elf with a persistent connection live from the
+  // moment it mounts (WAS, SSE, multiplayer) — fine for dweb-camp-swipe
+  // (accessibility-mode isn't the active saga beat on initial load), not
+  // fine for a flow that opens accessibility-mode directly.
+  await page.goto(flow.url, { waitUntil: flow.waitUntil ?? 'networkidle0', timeout: 20000 })
 
   const results = []
   let stepNum = 0
@@ -182,14 +412,35 @@ const browser = await puppeteer.launch({
   args: ['--no-sandbox', '--disable-gpu'],
 })
 
+// puppeteer spawns chromium as a CHILD process — killing this deno process
+// (an external timeout sending SIGTERM/SIGKILL, an uncaught step error, a
+// non-zero Deno.exit before this had a chance to run) does NOT take chromium
+// down with it. every one of those paths used to leak an orphaned chromium
+// process tree that kept running indefinitely, and enough of them
+// accumulated across repeated runs to peg the whole machine. SIGTERM is
+// catchable (best-effort close); SIGKILL is not — the timeout given to
+// whatever invokes this script has to stay within what the flow can
+// actually finish in, there's no signal handler that saves you from that.
+let _closed = false
+async function closeBrowser() {
+  if (_closed) return
+  _closed = true
+  await browser.close().catch(() => {})
+}
+Deno.addSignalListener('SIGINT', async () => { await closeBrowser(); Deno.exit(130) })
+Deno.addSignalListener('SIGTERM', async () => { await closeBrowser(); Deno.exit(143) })
+
 let allOk = true
-for (const flow of flows) {
-  console.log(`\n${flow.name}`)
-  const manifest = await runFlow(flow, browser)
-  await upsertIndex(manifest)
-  if (!manifest.ok) allOk = false
+try {
+  for (const flow of flows) {
+    console.log(`\n${flow.name}`)
+    const manifest = await runFlow(flow, browser)
+    await upsertIndex(manifest)
+    if (!manifest.ok) allOk = false
+  }
+} finally {
+  await closeBrowser()
 }
 
-await browser.close()
 console.log(`\n${allOk ? 'all flows passed' : 'some flows failed'}`)
 Deno.exit(allOk ? 0 : 1)

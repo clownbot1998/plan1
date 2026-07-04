@@ -149,6 +149,15 @@ case "$CMD" in
     [ -f "$SCRIPT_DIR/.env" ] && ENV_FLAG="--env-file=$SCRIPT_DIR/.env"
     deno run --allow-net --allow-env $ENV_FLAG "$SCRIPT_DIR/debugging_utilities/was_bootstrap.ts"
     ;;
+  reset-test-state)
+    # factory-resets accessibility-mode's WAS-persisted workspaces/tabs —
+    # run before any e2e flow that opens accessibility-mode, so it starts
+    # from a deterministic state instead of whatever the last test run (or
+    # real session) left behind.
+    ENV_FLAG=""
+    [ -f "$SCRIPT_DIR/.env" ] && ENV_FLAG="--env-file=$SCRIPT_DIR/.env"
+    deno run --node-modules-dir=none --allow-net --allow-env $ENV_FLAG "$SCRIPT_DIR/debugging_utilities/reset_test_state.ts"
+    ;;
   private)
     ENV_FLAG=""
     [ -f "$SCRIPT_DIR/.env" ] && ENV_FLAG="--env-file=$SCRIPT_DIR/.env"
@@ -354,6 +363,7 @@ ENDSSH
     echo "  build  — generates blog pages + vendors deps into dist/"
     echo "  ship   — build, serve locally, prompt to confirm, commit + push + deploy"
     echo "  sync   — uploads dist/ bootstrap files to WAS"
+    echo "  reset-test-state — factory-resets accessibility-mode's WAS-persisted workspaces/tabs to a clean single default workspace"
     echo "  setup    — install systemd service + initial rsync (run once on fresh machine)"
     echo "  deploy   — ssh pull + build + smoke test + rsync + restart on prod"
     echo "  private  — sync private/ to WAS (--pull to restore, --dry-run to preview)"
