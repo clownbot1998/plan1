@@ -37,6 +37,17 @@ async function write_file(path, content) {
 }
 
 async function patch_file(path, find, replace) {
+  // models drift on what they call this argument (mistral-small3.2:24b
+  // consistently sent "replacement" despite the tool schema declaring
+  // "replace") — without this check, a missing/undefined replace argument
+  // makes String.replace(find, undefined) silently stringify to the
+  // literal text "undefined" and write THAT into the file. no error,
+  // no warning, just a real file quietly corrupted with the word
+  // "undefined". fail loudly instead.
+  if (typeof replace !== 'string') {
+    log('error', `patch_file: replace argument missing or not a string (got ${typeof replace}) — ${path}`)
+    return { error: 'replace argument must be a string — did you mean to call this argument something else? use "replace", not "replacement"' }
+  }
   try {
     const res = await fetch(path)
     if (!res.ok) { log('error', `patch_file: file not found — ${path}`); return { error: 'file not found' } }
@@ -117,7 +128,10 @@ export async function callTool(name, args) {
   switch (name) {
     case 'read_file':   return read_file(args.path)
     case 'write_file':  return write_file(args.path, args.content)
-    case 'patch_file':  return patch_file(args.path, args.find, args.replace)
+    // replacement: a fallback alias, not the schema's declared name — models
+    // reliably reach for it anyway (confirmed with mistral-small3.2:24b),
+    // so accept it directly instead of only catching it as an error.
+    case 'patch_file':  return patch_file(args.path, args.find, args.replace ?? args.replacement)
     case 'list_files':  return list_files(args.dir)
     case 'file_exists': return file_exists(args.path)
     default:            return { error: `unknown tool: ${name}` }
