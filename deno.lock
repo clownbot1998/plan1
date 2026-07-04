@@ -18,6 +18,7 @@
     "npm:@wallet.storage/fetch-client@1.1.3": "1.1.3",
     "npm:@wallet.storage/fetch-client@^1.1.3": "1.1.3",
     "npm:crypto-js@*": "4.2.0",
+    "npm:graphql@^16.9.0": "16.14.2",
     "npm:puppeteer-core@23": "23.11.1"
   },
   "jsr": {
@@ -400,6 +401,9 @@
         "data-uri-to-buffer",
         "debug"
       ]
+    },
+    "graphql@16.14.2": {
+      "integrity": "sha512-Chq1s4CY7jmh8gO2qvLIJyfCDIN+EHLFW/9iShnp1z8FjBQMoodWP1kDC36VAMXXIvAjj4ARa7ntfAV2BrjsbA=="
     },
     "http-proxy-agent@7.0.2": {
       "integrity": "sha512-T1gkAiYYDWYx3V5Bmyu7HcfcvL7mUrTWiM6yOfa3PIphViJ/gFPbvidQ+veqSOHci/PxBcDabeUNCzpOODJZig==",

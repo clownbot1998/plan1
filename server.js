@@ -1,7 +1,7 @@
 // plan1 app server — serves dist/, handles /app/<tag> routing
 import { serveDir } from 'jsr:@std/http/file-server';
 import { Ed25519Signer } from 'npm:@did.coop/did-key-ed25519@0.0.14';
-import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3';
+import { StorageClient } from 'npm:@wallet.storage/fetch-client@1.1.3';
 import { resolve } from 'node:path';
 import { parse } from 'npm:graphql@^16.9.0';
 import { ttlToGraph, parseOperation, resolveRead, upsertElfState } from './graphql-rdf.js';

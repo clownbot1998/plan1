@@ -14,7 +14,7 @@
  */
 
 import { Ed25519Signer } from 'npm:@did.coop/did-key-ed25519@0.0.14';
-import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3';
+import { StorageClient } from 'npm:@wallet.storage/fetch-client@1.1.3';
 
 const WAS_HOST   = Deno.env.get('PLAN98_WAS_HOST')     ?? 'http://localhost:1088';
 const PLAN1_HOST = `http://localhost:${Deno.env.get('PLAN1_PORT') ?? '1998'}`;

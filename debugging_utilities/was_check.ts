@@ -10,7 +10,7 @@
  * Falls back to .env defaults if env vars not set (load via --env-file .env).
  */
 import { Ed25519Signer } from 'npm:@did.coop/did-key-ed25519@0.0.14';
-import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3';
+import { StorageClient } from 'npm:@wallet.storage/fetch-client@1.1.3';
 
 const signerJson = Deno.env.get('PLAN98_WAS_SIGNER') ?? '';
 const spaceId    = Deno.env.get('PLAN98_WAS_SPACE_ID') ?? '';
