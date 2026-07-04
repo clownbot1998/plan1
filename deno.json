@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "start": "deno task serve & deno task desktop",
+    "start": "deno task serve & deno task wallet-service",
     "serve": "deno run --allow-all --env-file=.env server.js",
     "build": "qjs --std build.js",
     "deploy": "./scripts/deploy.sh",
