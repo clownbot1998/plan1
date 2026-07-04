@@ -1174,24 +1174,43 @@ $.draw(target => {
     if (json === target._lastCards) return
     target._lastCards = json
 
-    const terrainEl = target.querySelector('.terrain-mesh')
-    if (terrainEl) {
-      const old = terrainEl.getObject3D?.('terrain')
-      if (old) { old.geometry.dispose(); old.material.dispose() }
-      const mesh = buildTerrainMesh(cards)
-      if (mesh) terrainEl.setObject3D('terrain', mesh)
-      rebuildTerrainCollider()
+    // terrain/tunnels only care about geometry — position, size, and link
+    // topology (plus edge-type colors for tunnel color). every OTHER card
+    // edit (rename, recolor, notes, attachments) also changes the full
+    // cards object and would otherwise force a full dispose+rebuild of
+    // both meshes on every keystroke of a field neither one reads. this
+    // narrower signature lets those edits skip the expensive rebuild while
+    // still reaching cloud/refresh below (cheap, and cloud labels DO show
+    // card text, so those still need to react to a rename).
+    const geoSig = JSON.stringify({
+      cards: Object.fromEntries(Object.entries(cards).map(([id, c]) => [
+        id, { x: c.x, y: c.y, w: c.w, h: c.h, links: c.links },
+      ])),
+      edgeColors: Object.fromEntries(Object.entries(edgeTypes).map(([id, t]) => [id, t.color])),
+    })
+    if (geoSig !== target._lastGeoSig) {
+      target._lastGeoSig = geoSig
+
+      const terrainEl = target.querySelector('.terrain-mesh')
+      if (terrainEl) {
+        const old = terrainEl.getObject3D?.('terrain')
+        if (old) { old.geometry.dispose(); old.material.dispose() }
+        const mesh = buildTerrainMesh(cards)
+        if (mesh) terrainEl.setObject3D('terrain', mesh)
+        rebuildTerrainCollider()
+      }
+
+      const tunnelsEl = target.querySelector('.tunnels')
+      if (tunnelsEl) {
+        const old = tunnelsEl.getObject3D?.('tunnels')
+        if (old) old.traverse(c => { c.geometry?.dispose(); c.material?.dispose() })
+        const tg = buildTunnelMesh(cards, edgeTypes)
+        if (tg) tunnelsEl.setObject3D('tunnels', tg)
+      }
+
+      rebuildCloudColliders(cards)
     }
 
-    const tunnelsEl = target.querySelector('.tunnels')
-    if (tunnelsEl) {
-      const old = tunnelsEl.getObject3D?.('tunnels')
-      if (old) old.traverse(c => { c.geometry?.dispose(); c.material?.dispose() })
-      const tg = buildTunnelMesh(cards, edgeTypes)
-      if (tg) tunnelsEl.setObject3D('tunnels', tg)
-    }
-
-    rebuildCloudColliders(cards)
     refreshClouds(target, cards, _lastPlayerPos)
     _lastCloudBuildPos = { ..._lastPlayerPos }
 
