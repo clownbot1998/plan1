@@ -84,7 +84,7 @@ const FLOWS: Flow[] = [
           await new Promise(r => setTimeout(r, 400))
         },
       },
-      ...['cdn-video', 'accessibility-mode', 'pot-luck', 'bulletin-board'].map((expected, i) => ({
+      ...['cdn-video', 'accessibility-mode', 'pot-luck', 'bulletin-board', 'cdn-video', 'elf-map'].map((expected, i) => ({
         name: `swipe-${i + 1}-expect-${expected}`,
         run: async (page: any) => {
           if (i > 0) await swipe(page, 'saga-pitch [name="screen"]', -200)

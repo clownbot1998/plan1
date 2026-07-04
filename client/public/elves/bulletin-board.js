@@ -92,13 +92,30 @@ function contrastColor(colorStr) {
 const initialPanX = -2500 + document.documentElement.clientWidth / 2
 const initialPanY = -2500 + document.documentElement.clientHeight / 2
 
+// pan/zoom camera update batching state — declared here (not down by
+// scheduleCameraTeach where it's used) because mount() also reads
+// _pendingCamera directly, and $.draw's callback runs synchronously on
+// registration below, before the file's own top-to-bottom evaluation would
+// otherwise have reached a later declaration (threw a TDZ ReferenceError).
+let _pendingCamera = null
+let _cameraRafScheduled = false
+const ZOOM_MIN = 0.2
+const ZOOM_MAX = 4
+
 const _urlParams = new URLSearchParams(location.search)
 const _permalinkCard = _urlParams.get('card') || null
 const _permalinkSidebar = _urlParams.get('sidebar') === 'open' && !!_permalinkCard
 
-// Persistent board identity — generate once, stamp into URL so the QR
-// is always a stable entry point for this specific board.
-let _boardId = _urlParams.get('id')
+// Persistent board identity. Standalone route (/app/bulletin-board?id=...):
+// read it off the URL, or mint one and stamp it in so the QR is a stable
+// entry point. Saga-embedded (e.g. dweb-camp's <bulletin-board id: elf-map>):
+// there's no board-specific query param on the page at all — the id lives
+// on the mounted element's own id="" attribute instead, set by the saga
+// parser from the id: property. Element attribute wins when present, since
+// an explicit id on the tag is a deliberate identity, not something to
+// override with a fresh random one; only fall back to minting + mutating
+// the URL when neither source has an answer.
+let _boardId = document.querySelector('bulletin-board')?.getAttribute('id') || _urlParams.get('id')
 if (!_boardId) {
   _boardId = crypto.randomUUID()
   const _u = new URL(location.href)
@@ -518,7 +535,19 @@ function renderLogsBody(cardId, ops) {
   }).join('')
 }
 
+// mount() re-runs on every remount (a saga slide swiped away and back
+// creates a fresh element, target.innerHTML starts empty again) and used to
+// call subscribe() unconditionally — each call opens its own long-lived
+// braid subscription that's never torn down, so repeated visits stacked up
+// N live subscriptions all racing on the same "does braid have more cards
+// than we do" check below. Whichever stale one last decided "braid has
+// fewer, push mine" would stomp newer state with an older, smaller local
+// count. One subscription per board id is enough regardless of how many
+// times this board gets (re)mounted on the page.
+let _subscribedBoardIds = new Set()
 function subscribe(target) {
+  if (_subscribedBoardIds.has(_boardId)) return
+  _subscribedBoardIds.add(_boardId)
   if (!history.state?.type) {
     history.replaceState({ type: 'bulletin-board-launch', href: null }, '', location.href)
   }
@@ -1638,7 +1667,26 @@ function afterUpdate(target) {
 
 
 function mount(target) {
-  const { panX, panY, zoom, mode } = $.learn()
+  // mount() only ever runs for a genuinely fresh element (target.innerHTML
+  // was empty) — a real page load, or a saga slide swiped away and back in.
+  // $ state lives at module scope, not per-DOM-element, so without this a
+  // fresh element would inherit whatever camera position the LAST element
+  // drifted to (e.g. a saga's own swipe-to-navigate gesture also reading as
+  // a drag-to-pan on the board underneath it, nudging panX/panY a little
+  // further off-content on every revisit — the data was always intact, only
+  // the camera had wandered off it). Treat a fresh mount as a fresh camera —
+  // used directly below for this render, and written back to $ once
+  // target.innerHTML is no longer empty (writing it before that point re-
+  // triggers this same branch of $.draw's mount-vs-update check, recursing).
+  const panX = initialPanX, panY = initialPanY, zoom = 1
+  // a pan/zoom gesture queues its $.teach through _pendingCamera, applied on
+  // the next rAF (see scheduleCameraTeach below) — if the user navigated
+  // away before that rAF fired, it's still queued and WILL fire later
+  // regardless of this fresh mount, overwriting the reset above with the
+  // previous session's stale camera a frame or two after we set it. Discard
+  // it so that stale callback finds nothing to apply.
+  _pendingCamera = null
+  const { mode } = $.learn()
   const stars = getStars()
 
   target.innerHTML = `
@@ -1678,6 +1726,9 @@ function mount(target) {
   `
 
   target.querySelector('.bulletin-canvas').style.backgroundImage = stars
+  // safe now — target.innerHTML is non-empty, so the next $.draw call this
+  // triggers takes the update() branch, not another recursive mount().
+  $.teach({ panX, panY, zoom })
 
   target.addEventListener('wheel', e => {
     const { mode, zoom, panX, panY } = $.learn()
@@ -1716,6 +1767,39 @@ function mount(target) {
     startViewportBroadcast()
     if (!_peerArrowInterval) {
       _peerArrowInterval = setInterval(patchPeerArrows, 83)
+    }
+    // the actual bug behind "empty on return" wasn't a rendering race at
+    // all — cards were always loading and always in the DOM. zoom:1 assumes
+    // a "normal desktop" viewport is big enough to reach the content from a
+    // centered camera. elf-map's ring layout puts every card ~900 units out
+    // from world-center with nothing AT the center, so a small/narrow
+    // viewport (a saga's embedded stage can be far smaller than the full
+    // page) never reaches the ring at zoom 1 — centered on empty space is
+    // mathematically correct and still shows nothing. Fit zoom to the
+    // loaded content's real bounding box instead of assuming 1 always works.
+    const { cards: loadedCards } = $.learn()
+    const list = Object.values(loadedCards || {})
+    // only fit against target's OWN actual size, never a window-size guess —
+    // this number feeds the workspace's real pan/zoom, not just an internal
+    // cull estimate, and a mismatched guess here (e.g. assuming the full
+    // window when the saga's embedded stage is smaller) is exactly the kind
+    // of thing that can throw off an ancestor's layout. if target isn't
+    // laid out yet, skip for now — the next natural re-render (any $.teach,
+    // e.g. from a live WAS update) will retry with real dimensions.
+    if (list.length && target.clientWidth && target.clientHeight) {
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+      for (const c of list) {
+        if (c.x < minX) minX = c.x; if (c.x + c.w > maxX) maxX = c.x + c.w
+        if (c.y < minY) minY = c.y; if (c.y + c.h > maxY) maxY = c.y + c.h
+      }
+      const PAD = 150
+      const boxW = Math.max(1, maxX - minX + PAD * 2)
+      const boxH = Math.max(1, maxY - minY + PAD * 2)
+      const vw = target.clientWidth
+      const vh = target.clientHeight
+      const fitZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.min(1, vw / boxW, vh / boxH)))
+      const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+      $.teach({ zoom: fitZoom, panX: vw / 2 - cx * fitZoom, panY: vh / 2 - cy * fitZoom })
     }
   })
 }
@@ -1765,9 +1849,15 @@ function update(target) {
     }
   }
 
+  // target.clientWidth/clientHeight can genuinely be 0 in edge cases
+  // (element not yet laid out, or truly hidden) — fall back to the window
+  // size rather than culling everything against a degenerate 0x0 rect.
+  const viewportW = target.clientWidth || window.innerWidth
+  const viewportH = target.clientHeight || window.innerHeight
+
   const cardsLayer = target.querySelector('.cards-layer')
   patchCardsLayer(cardsLayer, cards, focusedCard, linkSource, grabbing, {
-    panX, panY, zoom, viewportW: target.clientWidth, viewportH: target.clientHeight,
+    panX, panY, zoom, viewportW, viewportH,
   })
   applyPeerPositions(cardsLayer, players)
 
@@ -1782,7 +1872,7 @@ function update(target) {
   const movedEnough = _lastLinksZoom !== zoom || _lastLinksPanX === null ||
     Math.hypot(panX - _lastLinksPanX, panY - _lastLinksPanY) > LINKS_REBUILD_MOVE_PX
   if (renderSig !== _lastRenderSig || movedEnough) {
-    const rect = visibleWorldRect({ panX, panY, zoom, viewportW: target.clientWidth, viewportH: target.clientHeight })
+    const rect = visibleWorldRect({ panX, panY, zoom, viewportW, viewportH })
     linksLayer.innerHTML = renderLinksInner(cards, edgeTypes, rect)
     _lastRenderSig = renderSig
     _lastLinksPanX = panX; _lastLinksPanY = panY; _lastLinksZoom = zoom
@@ -1888,8 +1978,6 @@ let _pinchStartPanX = 0
 let _pinchStartPanY = 0
 let _pinchMidClientX = 0
 let _pinchMidClientY = 0
-const ZOOM_MIN = 0.2
-const ZOOM_MAX = 4
 const CANVAS_SIZE = 5000
 
 // pan/zoom used to call $.teach() straight from every pointermove/wheel
@@ -1900,8 +1988,10 @@ const CANVAS_SIZE = 5000
 // can actually be drawn, regardless of how many input events fired in
 // between. holds panX/panY and, for wheel-zoom, zoom too — $.teach merges
 // partial state either way.
-let _pendingCamera = null
-let _cameraRafScheduled = false
+// (declared up near initialPanX/initialPanY — mount() reads _pendingCamera
+// too, and $.draw's callback runs synchronously on registration, before
+// this point in the file's own top-to-bottom evaluation would otherwise
+// have been reached, which threw a TDZ ReferenceError.)
 function scheduleCameraTeach(payload) {
   _pendingCamera = { ..._pendingCamera, ...payload }
   if (_cameraRafScheduled) return
@@ -2954,7 +3044,12 @@ window.addEventListener('bb:world-toggle', toggleWorldMode)
 $.style(`
   & {
     position: relative;
-    overflow: hidden;
+    /* something else (saga-pitch's own stage/screen wrapper, most likely)
+       sets overflow back to auto on this element in the saga-embedded
+       context — !important so a card positioned in world coordinates far
+       outside the viewport can never force a scrollbar here regardless of
+       what an ancestor or later rule does to this element's own overflow. */
+    overflow: hidden !important;
     width: 100%;
     height: 100%;
     display: block;
@@ -2964,6 +3059,13 @@ $.style(`
   & .workspace {
     position: absolute;
     inset: 0;
+    /* NOT overflow:hidden here — cards are positioned via left/top in WORLD
+       coordinates (e.g. left:2048px), far beyond .workspace's own inset:0
+       box size (viewport-sized, e.g. 640x752). overflow:hidden clips in the
+       element's own local coordinate space before the transform below
+       repositions the whole result — putting it here clipped away nearly
+       everything. the untransformed parent (&, above) is the correct place
+       for that clip, since it clips the final, already-transformed result. */
     transform: translate(var(--pan-x, 0), var(--pan-y, 0)) scale(var(--zoom, 1));
     transform-origin: 0 0;
     /* without this, a board with a lot of content (many cards, a dense SVG

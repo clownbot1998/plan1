@@ -14,7 +14,10 @@ src: /private/beerdogusa.com/queen-we-will-rock-you/manifest.m3u8
 <pot-luck
 
 <bulletin-board
+id: elf-map
 
 <cdn-video
 autoplay: true
 src: /private/beerdogusa.com/queen-we-are-the-champions/manifest.m3u8
+
+<elf-map
