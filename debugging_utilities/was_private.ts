@@ -11,7 +11,7 @@
  * Maintains was-manifest.json (last-synced state) for delta detection.
  */
 import { Ed25519Signer } from 'npm:@did.coop/did-key-ed25519@0.0.14';
-import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3';
+import { StorageClient } from 'npm:@wallet.storage/fetch-client@1.1.3';
 import { join, dirname } from 'jsr:@std/path';
 
 const signerJson = Deno.env.get('PLAN98_WAS_SIGNER') ?? '';

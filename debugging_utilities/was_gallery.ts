@@ -10,7 +10,7 @@
  * screenshots each item URL via CDP, saves to private/screenshots/<id>/<item-id>.png
  */
 import { Ed25519Signer } from 'npm:@did.coop/did-key-ed25519@0.0.14'
-import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3'
+import { StorageClient } from 'npm:@wallet.storage/fetch-client@1.1.3'
 import { join, dirname } from 'jsr:@std/path'
 
 const args      = Deno.args
