@@ -5,7 +5,17 @@ import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3';
 import { resolve } from 'node:path';
 import { parse } from 'npm:graphql@^16.9.0';
 import { ttlToGraph, parseOperation, resolveRead, upsertElfState } from './graphql-rdf.js';
-import { handleHolesailBridge } from './server/holesail-bridge.js';
+
+// holesail's native dependency (udx-native) isn't guaranteed to have a
+// working prebuilt binary on every machine this server runs on — a failed
+// import here must not take down the rest of the server, the same
+// "can't break firmware" guarantee plan98.js already gives geckos.
+let handleHolesailBridge = async () => null;
+import('./server/holesail-bridge.js').then((mod) => {
+  handleHolesailBridge = mod.handleHolesailBridge;
+}).catch((e) => {
+  console.warn('holesail-bridge unavailable, /holesail/* routes disabled:', e.message);
+});
 
 const DIST    = (Deno.env.get('PLAN1_DIST') || new URL('./dist/', import.meta.url).pathname).replace(/\/?$/, '/');
 const PRIVATE = new URL('./private/', import.meta.url).pathname;
