@@ -209,6 +209,8 @@ case "$CMD" in
       cd "$PROD_DIR"
       echo "── pull ──"
       git pull
+      echo "── npm install ──"
+      npm install
       echo "── build ──"
       ./plan1.sh build
       echo "── smoke test ──"
