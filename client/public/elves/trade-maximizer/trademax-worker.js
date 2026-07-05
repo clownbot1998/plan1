@@ -2562,7 +2562,6 @@ onerror = function(error) {
 }
 
 onmessage = function(e) {
-  debugger
   switch( e.data[0] ) {
     case RUN :
       // plan1: accept the wants-file text directly instead of XHR-fetching a URL
