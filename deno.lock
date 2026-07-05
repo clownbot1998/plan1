@@ -711,6 +711,7 @@
         "npm:crypto-js@^4.2.0",
         "npm:express@^5.2.1",
         "npm:graphql@^16.14.2",
+        "npm:holesail@^2.4.1",
         "npm:quickjs-emscripten@0.32"
       ]
     }
