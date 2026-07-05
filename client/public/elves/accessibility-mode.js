@@ -758,6 +758,22 @@ const shellToolDefinitions = [
       parameters: { type: 'object', properties: { url: { type: 'string', description: 'URL to preview, e.g. /app/pot-luck' } }, required: ['url'] },
     }
   },
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: 'Search the web for current, real-time information — weather, news, prices, anything that changes after your training cutoff or that you are not certain about. Use this whenever the user asks about live/current conditions instead of guessing.',
+      parameters: { type: 'object', properties: { query: { type: 'string', description: 'The search query, e.g. "weather in San Francisco right now"' } }, required: ['query'] },
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_youtube_transcript',
+      description: 'Fetch the transcript/captions of a YouTube video as plain text. Use this whenever the user gives you a YouTube URL and asks you to transcribe, summarize, or answer questions about its content.',
+      parameters: { type: 'object', properties: { url: { type: 'string', description: 'A YouTube video URL, e.g. https://www.youtube.com/watch?v=VIDEO_ID' } }, required: ['url'] },
+    }
+  },
 ]
 
 async function callToolGated(name, args, tabId) {
@@ -766,6 +782,52 @@ async function callToolGated(name, args, tabId) {
     const url = args.url.includes('?') ? `${args.url}&_v=${ts}` : `${args.url}?_v=${ts}`
     $.teach({ previewUrl: url, previewOpen: true })
     return { ok: true }
+  }
+  if (name === 'web_search') {
+    // `features: { web_search: true }` on /chat/completions turned out to be
+    // silently ignored on this OpenWebUI's plain OpenAI-compatible passthrough
+    // — confirmed empirically (direct curl test came back ungrounded). The
+    // mechanism that actually works is OpenWebUI's own retrieval endpoint,
+    // which runs the admin-configured search engine (searxng here) directly
+    // and hands back real results — no chat completion involved at all.
+    const apiUrl = getEnv('ACCESSIBILITY_MODE_LOCK') || getEnv('FALLBACK_LLM_URL') || getEnv('OLLAMA_HOST') || ''
+    const apiKey = getEnv('ACCESSIBILITY_MODE_KEY') || getEnv('FALLBACK_LLM_KEY') || getEnv('OLLAMA_KEY') || 'ollama'
+    if (!apiUrl) return { error: 'no AI endpoint configured for web_search' }
+    try {
+      const res = await fetch(apiUrl + '/v1/retrieval/process/web/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({ queries: [args.query] }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        return { error: err.detail?.[0]?.msg || err.error?.message || `web_search request failed: ${res.status}` }
+      }
+      const data = await res.json()
+      const items = data.items || []
+      if (!items.length) return { error: 'web_search returned no results — is a search engine configured in OpenWebUI\'s admin settings?' }
+      return { results: items.map(i => ({ title: i.title, url: i.link, snippet: i.snippet })) }
+    } catch (e) {
+      return { error: e.message }
+    }
+  }
+  if (name === 'get_youtube_transcript') {
+    // OpenWebUI has this exact tool registered server-side (Workspace >
+    // Tools), but tool_ids on the plain completions passthrough only injects
+    // its schema for the model to request — it doesn't execute the Python
+    // itself here (confirmed empirically the same way features.web_search
+    // was). YouTube's own caption endpoints don't send CORS headers, so we
+    // can't fetch them from the browser either — hence a small proxy route
+    // on plan1's own server (/api/youtube-transcript), same shape as the
+    // existing /api/git-proxy.
+    try {
+      const res = await fetch(`/api/youtube-transcript?url=${encodeURIComponent(args.url)}`)
+      const data = await res.json()
+      if (!res.ok) return { error: data.error || `transcript fetch failed: ${res.status}` }
+      return { transcript: data.text, language: data.language }
+    } catch (e) {
+      return { error: e.message }
+    }
   }
   const desc = Object.entries(args).map(([k, v]) => `${k}: ${String(v).slice(0, 100)}`).join(' | ')
   await humanRPC({ action: name, description: desc }, tabId)
@@ -858,7 +920,9 @@ CRITICAL RULES:
 - Never describe edits for the user to make manually — just call the tool
 - Never ask "shall I proceed?" — just call the tool
 - Elves live at /elves/<name>.js — e.g. pot-luck is at /elves/pot-luck.js (NOT /public/elves/)
-- If a tool returns 401: tell user to type "admin" in the shell to authenticate, then retry` },
+- If a tool returns 401: tell user to type "admin" in the shell to authenticate, then retry
+- For questions about current/live information (weather, news, prices, anything that could have changed since training) call web_search — never guess or say you don't have real-time access
+- If the user gives a YouTube URL, call get_youtube_transcript — never say you can't access YouTube videos` },
     ...historyMessages,
   ]
 

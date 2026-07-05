@@ -5,6 +5,7 @@ import { StorageClient } from 'npm:@wallet.storage/fetch-client@^1.1.3';
 import { resolve } from 'node:path';
 import { parse } from 'npm:graphql@^16.9.0';
 import { ttlToGraph, parseOperation, resolveRead, upsertElfState } from './graphql-rdf.js';
+import { handleHolesailBridge } from './server/holesail-bridge.js';
 
 const DIST    = (Deno.env.get('PLAN1_DIST') || new URL('./dist/', import.meta.url).pathname).replace(/\/?$/, '/');
 const PRIVATE = new URL('./private/', import.meta.url).pathname;
@@ -398,6 +399,13 @@ async function handleRequest(request) {
 
   if (path === '/admin' || path === '/admin/') return adminPage(request);
 
+  // federation bridge — plan1 joins a peersky-hosted Holesail room as a
+  // client and proxies its doc/events API back to the browser.
+  if (path.startsWith('/holesail/')) {
+    const bridged = await handleHolesailBridge(request, path);
+    if (bridged) return bridged;
+  }
+
   // graphql over turtle — POST /graphql { query, variables }
   // query/mutation 1:1 with the graphql-http envelope; subscriptions return the
   // braid pointer (live streaming is a follow-up). The card is the entity:
@@ -725,6 +733,46 @@ async function handleRequest(request) {
       return new Response(resp.body, { status: resp.status, headers: respHeaders })
     } catch (e) {
       return new Response(String(e), { status: 502 })
+    }
+  }
+
+  // /api/youtube-transcript → fetch a YouTube video's caption track and
+  // return it as plain text. YouTube's caption endpoints don't send CORS
+  // headers, so the browser can't fetch them directly — this proxies
+  // server-to-server the same way /api/git-proxy does for git.
+  if (path === '/api/youtube-transcript') {
+    const videoUrl = url.searchParams.get('url')
+    if (!videoUrl) return new Response(JSON.stringify({ error: 'missing url param' }), { status: 400, headers: { 'content-type': 'application/json' } })
+
+    const idMatch = videoUrl.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{11})/)
+    const videoId = idMatch ? idMatch[1] : (/^[A-Za-z0-9_-]{11}$/.test(videoUrl) ? videoUrl : null)
+    if (!videoId) return new Response(JSON.stringify({ error: 'could not extract a video id from that url' }), { status: 400, headers: { 'content-type': 'application/json' } })
+
+    try {
+      const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+        headers: { 'accept-language': 'en-US,en;q=0.9', 'user-agent': 'Mozilla/5.0' },
+      })
+      const html = await pageRes.text()
+      const tracksMatch = html.match(/"captionTracks":(\[.*?\])/)
+      if (!tracksMatch) return new Response(JSON.stringify({ error: 'no captions available for this video' }), { status: 404, headers: { 'content-type': 'application/json' } })
+
+      const tracks = JSON.parse(tracksMatch[1])
+      const track = tracks.find(t => t.languageCode === 'en') || tracks.find(t => t.languageCode?.startsWith('en')) || tracks[0]
+      if (!track) return new Response(JSON.stringify({ error: 'no caption tracks found' }), { status: 404, headers: { 'content-type': 'application/json' } })
+
+      const captionRes = await fetch(track.baseUrl.replace(/\\u0026/g, '&'))
+      const xml = await captionRes.text()
+      const text = [...xml.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)]
+        .map(m => m[1]
+          .replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+          .replace(/&lt;/g, '<').replace(/&gt;/g, '>'))
+        .join(' ')
+        .trim()
+
+      if (!text) return new Response(JSON.stringify({ error: 'caption track was empty' }), { status: 404, headers: { 'content-type': 'application/json' } })
+      return new Response(JSON.stringify({ text, language: track.languageCode }), { headers: { 'content-type': 'application/json' } })
+    } catch (e) {
+      return new Response(JSON.stringify({ error: String(e.message || e) }), { status: 502, headers: { 'content-type': 'application/json' } })
     }
   }
 
