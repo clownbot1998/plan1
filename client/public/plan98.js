@@ -401,7 +401,12 @@ function createStore(initialState = {}, broadcast = () => null) {
 
 export function linkState(elf, id) {
   _elfRooms[elf] = id
-  if (!channel) return
+  // no `if (!channel) return` here — channel is assigned asynchronously
+  // (geckos import resolves after this can run), and bailing out early
+  // silently dropped the room-join forever with no retry. _connect()
+  // already queues until _peerReady, and by the time any queued callback
+  // actually runs, channel is guaranteed to be set (it's assigned before
+  // _peerReady ever becomes true) — the queue alone is sufficient.
   _connect(() => {
     channel.emit('linkState', { elf, id, data: store.get(elf) })
   })
