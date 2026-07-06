@@ -228,9 +228,16 @@ case "$CMD" in
       echo "── copy to $RUNTIME_DIR ──"
       mkdir -p "$RUNTIME_DIR"
       rsync -a --delete "$PROD_DIR/dist/" "$RUNTIME_DIR/"
-      echo "── restart ──"
+      echo "── sync systemd units ──"
       export XDG_RUNTIME_DIR=/run/user/$(id -u)
-      systemctl --user restart plan1
+      mkdir -p "$HOME/.config/systemd/user"
+      for svc in plan1 plan1-relay; do
+        sed "s|%h|$HOME|g" "$PROD_DIR/deploy/$svc.service" > "$HOME/.config/systemd/user/$svc.service"
+      done
+      systemctl --user daemon-reload
+      systemctl --user enable plan1 plan1-relay
+      echo "── restart ──"
+      systemctl --user restart plan1 plan1-relay
       sleep 1
       echo "── deployed ──"
 ENDSSH
