@@ -766,14 +766,6 @@ const shellToolDefinitions = [
       parameters: { type: 'object', properties: { query: { type: 'string', description: 'The search query, e.g. "weather in San Francisco right now"' } }, required: ['query'] },
     }
   },
-  {
-    type: 'function',
-    function: {
-      name: 'get_youtube_transcript',
-      description: 'Fetch the transcript/captions of a YouTube video as plain text. Use this whenever the user gives you a YouTube URL and asks you to transcribe, summarize, or answer questions about its content.',
-      parameters: { type: 'object', properties: { url: { type: 'string', description: 'A YouTube video URL, e.g. https://www.youtube.com/watch?v=VIDEO_ID' } }, required: ['url'] },
-    }
-  },
 ]
 
 async function callToolGated(name, args, tabId) {
@@ -807,24 +799,6 @@ async function callToolGated(name, args, tabId) {
       const items = data.items || []
       if (!items.length) return { error: 'web_search returned no results — is a search engine configured in OpenWebUI\'s admin settings?' }
       return { results: items.map(i => ({ title: i.title, url: i.link, snippet: i.snippet })) }
-    } catch (e) {
-      return { error: e.message }
-    }
-  }
-  if (name === 'get_youtube_transcript') {
-    // OpenWebUI has this exact tool registered server-side (Workspace >
-    // Tools), but tool_ids on the plain completions passthrough only injects
-    // its schema for the model to request — it doesn't execute the Python
-    // itself here (confirmed empirically the same way features.web_search
-    // was). YouTube's own caption endpoints don't send CORS headers, so we
-    // can't fetch them from the browser either — hence a small proxy route
-    // on plan1's own server (/api/youtube-transcript), same shape as the
-    // existing /api/git-proxy.
-    try {
-      const res = await fetch(`/api/youtube-transcript?url=${encodeURIComponent(args.url)}`)
-      const data = await res.json()
-      if (!res.ok) return { error: data.error || `transcript fetch failed: ${res.status}` }
-      return { transcript: data.text, language: data.language }
     } catch (e) {
       return { error: e.message }
     }
@@ -921,8 +895,7 @@ CRITICAL RULES:
 - Never ask "shall I proceed?" — just call the tool
 - Elves live at /elves/<name>.js — e.g. pot-luck is at /elves/pot-luck.js (NOT /public/elves/)
 - If a tool returns 401: tell user to type "admin" in the shell to authenticate, then retry
-- For questions about current/live information (weather, news, prices, anything that could have changed since training) call web_search — never guess or say you don't have real-time access
-- If the user gives a YouTube URL, call get_youtube_transcript — never say you can't access YouTube videos` },
+- For questions about current/live information (weather, news, prices, anything that could have changed since training) call web_search — never guess or say you don't have real-time access` },
     ...historyMessages,
   ]
 
