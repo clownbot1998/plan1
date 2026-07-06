@@ -9,6 +9,19 @@ PID_FILE="$SCRIPT_DIR/.serve.pid"
 RELAY_PID_FILE="$SCRIPT_DIR/.relay.pid"
 PORT=${PLAN1_PORT:-1998}
 
+# guards against exactly the mistake that broke production earlier: running
+# plan1.sh's own manual PID-file supervision against a port systemd already
+# owns. Warns and refuses rather than fighting silently for the same port.
+check_systemd_conflict() {
+  local active=""
+  systemctl --user is-active --quiet plan1 2>/dev/null && active="$active plan1"
+  systemctl --user is-active --quiet plan1-relay 2>/dev/null && active="$active plan1-relay"
+  if [ -n "$active" ]; then
+    echo "error:$active already running under systemd — use 'systemctl --user restart$active' or './plan1.sh doctor', not '$0 $CMD'"
+    exit 1
+  fi
+}
+
 case "$CMD" in
   start)
     [ "$(id -u)" = "0" ] && echo "error: do not run start as root" && exit 1
@@ -20,6 +33,7 @@ case "$CMD" in
     ;;
   serve)
     [ "$(id -u)" = "0" ] && echo "error: do not run serve as root" && exit 1
+    check_systemd_conflict
     if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
       echo "already serving on port $PORT (pid $(cat "$PID_FILE"))"
       exit 0
@@ -29,13 +43,19 @@ case "$CMD" in
     deno run --no-lock --allow-read --allow-net --allow-env --allow-run --allow-write $ENV_FLAG "$SCRIPT_DIR/server.js" &
     echo $! > "$PID_FILE"
     echo "serving dist/ on http://localhost:$PORT (pid $!)"
-    fuser -k 9208/tcp 2>/dev/null || true; sleep 1
+    # only clear 9208 if it's our own stale relay, not an unrelated service —
+    # blindly fuser -k'ing it once caused real confusion on a shared host
+    if [ -f "$RELAY_PID_FILE" ] && ! kill -0 "$(cat "$RELAY_PID_FILE")" 2>/dev/null; then
+      fuser -k 9208/tcp 2>/dev/null || true
+    fi
+    sleep 1
     node $ENV_FLAG "$SCRIPT_DIR/multiplayer.js" &
     echo $! > "$RELAY_PID_FILE"
     echo "multiplayer relay on :9208 (pid $!)"
     echo "open http://localhost:$PORT/app/private-ai"
     ;;
   stop)
+    check_systemd_conflict
     WATCH_PID_FILE="$SCRIPT_DIR/.watch.pid"
     if [ -f "$WATCH_PID_FILE" ]; then
       kill "$(cat "$WATCH_PID_FILE")" 2>/dev/null || true
