@@ -267,17 +267,24 @@ ENDSSH
     echo "watching (pid $!)"
     ;;
   setup)
-    # Install systemd service, create runtime dir, initial rsync
-    # Run this once on a fresh machine after cloning the repo.
+    # Install systemd USER services (both server.js and the multiplayer
+    # relay — the two must be supervised together, or the relay never
+    # starts and every multiplayer elf silently has no sync), create
+    # runtime dir, initial rsync. Run this once on a fresh machine after
+    # cloning the repo.
+    #
+    # User-level (~/.config/systemd/user/), not system-level: `deploy`
+    # already restarts via `systemctl --user`, and no sudo needed here
+    # keeps setup usable without root on a shared box.
     RUNTIME_DIR="${2:-$HOME/srv/plan1}"
-    SERVICE_SRC="$SCRIPT_DIR/deploy/plan1.service"
-    SERVICE_DST="/etc/systemd/system/plan1.service"
+    mkdir -p "$HOME/.config/systemd/user"
 
-    echo "── installing $SERVICE_DST ──"
-    sudo cp "$SERVICE_SRC" "$SERVICE_DST"
-    sudo sed -i "s|/home/clownbot|$HOME|g" "$SERVICE_DST"
-    sudo systemctl daemon-reload
-    sudo systemctl enable plan1
+    for svc in plan1 plan1-relay; do
+      echo "── installing ~/.config/systemd/user/$svc.service ──"
+      sed "s|%h|$HOME|g" "$SCRIPT_DIR/deploy/$svc.service" > "$HOME/.config/systemd/user/$svc.service"
+    done
+    systemctl --user daemon-reload
+    systemctl --user enable plan1 plan1-relay
 
     echo "── building ──"
     "$0" build
@@ -287,8 +294,8 @@ ENDSSH
     rsync -a --delete "$DIST_DIR/" "$RUNTIME_DIR/"
 
     echo "── starting ──"
-    sudo systemctl restart plan1
-    echo "── setup done — plan1 running ──"
+    systemctl --user restart plan1 plan1-relay
+    echo "── setup done — plan1 + relay running ──"
     ;;
   bootstrap)
     MEMORY_SRC="$SCRIPT_DIR/memory"

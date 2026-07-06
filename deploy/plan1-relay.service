@@ -1,0 +1,17 @@
+[Unit]
+Description=plan1 multiplayer relay (clownbot)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/plan1
+# node's actual location varies by install method (nvm, system package, etc) —
+# resolved via $PATH rather than hardcoded, since a hardcoded /usr/bin/node
+# breaks on any nvm-based install (this box's own node lives under
+# ~/.nvm/versions/node/*/bin, not /usr/bin).
+ExecStart=/bin/bash -lc 'node --env-file=%h/plan1/.env %h/plan1/multiplayer.js'
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

@@ -1,15 +1,14 @@
 [Unit]
-Description=plan1 (sillyz.computer peer)
+Description=plan1 server (clownbot)
 After=network.target
 
 [Service]
-User=clownbot
-WorkingDirectory=/home/clownbot/plan1
-Environment=PLAN1_DIST=/home/clownbot/srv/plan1
-EnvironmentFile=/home/clownbot/plan1/.env
-ExecStart=/usr/local/bin/deno run --no-lock --allow-read --allow-net --allow-env --allow-run --allow-write /home/clownbot/plan1/server.js
-Restart=always
-RestartSec=2
+Type=simple
+WorkingDirectory=%h/plan1
+ExecStart=%h/.deno/bin/deno task serve
+Restart=on-failure
+RestartSec=3
+Environment=PATH=%h/.deno/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
