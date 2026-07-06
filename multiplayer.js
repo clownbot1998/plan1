@@ -2,8 +2,182 @@ import geckos from '@geckos.io/server'
 import http from 'http'
 import express from 'express'
 import { getQuickJS } from "quickjs-emscripten"
+import Holesail from 'holesail'
 
 import createStore from './storage.mjs'
+
+// federation — bridges a geckos room to a peersky-hosted Holesail room of
+// the same (elf, id), so a plan1 browser and a peersky Electron instance
+// can share one live pot-luck. Deno can't load holesail's native addon
+// (confirmed: valid prebuilt binary, plain Node loads it fine, Deno's
+// require() shim fails on it regardless) — multiplayer.js already runs as
+// a plain Node process for geckos, so it's the natural home for this
+// instead of a Deno-side import.
+//
+// Scope: gated to pot-luck only for now, not every elf — unproven for
+// anything else and not worth the risk of a silent behavior change
+// elsewhere.
+const FEDERATED_ELVES = new Set(['pot-luck'])
+const holesailBridges = new Map() // room (`${elf}/${id}`) -> { role, holesail, docPort, doc }
+
+function createFederationDocServer(room, elf, party) {
+  const clients = new Set()
+
+  const server = http.createServer((req, res) => {
+    if (req.url === '/state' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(party.store.get(elf) || {}))
+      return
+    }
+
+    if (req.url === '/upload' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        let payload
+        try {
+          payload = JSON.parse(body)
+        } catch (e) {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Invalid JSON' }))
+          return
+        }
+        // a peersky peer pushed a patch — apply it to the SAME store geckos
+        // peers read/write, then fan it out to both sides: local geckos
+        // channels (stateDownload, exactly like a normal stateUpload) and
+        // any other Holesail/peersky peers on this doc server.
+        try {
+          const merge = typeof payload.nuance === 'string' ? payload.nuance : payload.nuance
+          party.store.set(elf, payload.knowledge, merge)
+        } catch (e) {
+          console.error('federation upload merge failed:', e)
+        }
+        party.channels.forEach((channel) => {
+          if (channel) channel.emit('stateDownload', { elf, knowledge: payload.knowledge, serializedNuance: payload.nuance })
+        })
+        const message = `event: update\ndata: ${JSON.stringify(payload)}\n\n`
+        clients.forEach((client) => client.write(message))
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true }))
+      })
+      return
+    }
+
+    if (req.url === '/events' && req.method === 'GET') {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive'
+      })
+      res.write(': connected\n\n')
+      clients.add(res)
+      const keepalive = setInterval(() => res.write(': ping\n\n'), 15000)
+      req.on('close', () => {
+        clients.delete(res)
+        clearInterval(keepalive)
+      })
+      return
+    }
+
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('Not found')
+  })
+
+  return { server, clients }
+}
+
+function withTimeout(promise, ms, msg) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(msg)), ms))
+  ])
+}
+
+// same deterministic-key derivation as peersky's silly-handler.js — same
+// (elf, id) on either side always lands on the identical HyperDHT keypair,
+// so whichever side reaches the room first becomes host, no coordination.
+async function ensureFederationBridge(room, elf, id, party) {
+  if (holesailBridges.has(room)) return holesailBridges.get(room)
+
+  const holesailKey = `silly-room:${elf}:${id}`
+  const doc = createFederationDocServer(room, elf, party)
+  const docPort = await new Promise((resolve) => {
+    doc.server.listen(0, '127.0.0.1', () => resolve(doc.server.address().port))
+  })
+  const clientTunnelPort = 20000 + Math.floor(Math.random() * 20000)
+
+  let bridge
+  try {
+    const client = new Holesail({ client: true, secure: true, key: holesailKey, host: '127.0.0.1', port: clientTunnelPort, log: 0 })
+    await client.ready()
+    await withTimeout(fetch(`http://127.0.0.1:${clientTunnelPort}/state`), 4000, 'no host found')
+    doc.server.close()
+    bridge = { role: 'client', holesail: client, docPort: clientTunnelPort, doc: null, clients: null }
+    console.log(`[federation] joined "${room}" as Holesail client`)
+    listenForFederationUpdates(room, elf, party, clientTunnelPort)
+  } catch (e) {
+    try { await new Holesail({ client: true, secure: true, key: holesailKey, host: '127.0.0.1', port: clientTunnelPort, log: 0 }).close() } catch {}
+    const server = new Holesail({ server: true, secure: true, key: holesailKey, host: '127.0.0.1', port: docPort, log: 0 })
+    await server.ready()
+    bridge = { role: 'server', holesail: server, docPort, doc, clients: doc.clients }
+    console.log(`[federation] hosting "${room}" as Holesail server`)
+  }
+
+  holesailBridges.set(room, bridge)
+  return bridge
+}
+
+// when we're the Holesail client (peersky is host), the remote side's
+// updates only arrive over its /events SSE stream — Node has no native
+// EventSource, so read the stream manually and parse the same `data:` lines.
+async function listenForFederationUpdates(room, elf, party, tunnelPort) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${tunnelPort}/events`)
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const messages = buffer.split('\n\n')
+      buffer = messages.pop()
+      for (const message of messages) {
+        const dataLine = message.split('\n').find((l) => l.startsWith('data: '))
+        if (!dataLine) continue
+        try {
+          const payload = JSON.parse(dataLine.slice('data: '.length))
+          if (payload.senderId === 'plan1-relay') continue
+          party.store.set(elf, payload.knowledge, payload.nuance)
+          party.channels.forEach((channel) => {
+            if (channel) channel.emit('stateDownload', { elf, knowledge: payload.knowledge, serializedNuance: payload.nuance })
+          })
+        } catch (e) {
+          console.warn('federation event parse failed:', e.message)
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`[federation] events stream for "${room}" ended:`, e.message)
+  }
+}
+
+// pushes a local geckos-originated update out to any federated peersky peers.
+function broadcastToFederation(room, elf, knowledge, serializedNuance) {
+  const bridge = holesailBridges.get(room)
+  if (!bridge) return
+  const payload = { senderId: 'plan1-relay', knowledge, nuance: serializedNuance }
+  if (bridge.role === 'server' && bridge.clients) {
+    const message = `event: update\ndata: ${JSON.stringify(payload)}\n\n`
+    bridge.clients.forEach((client) => client.write(message))
+    return
+  }
+  fetch(`http://127.0.0.1:${bridge.docPort}/upload`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch((e) => console.warn('federation broadcast failed:', e.message))
+}
 
 const PORT = Number(process.env.PLAN1_GECKOS_PORT ?? 9208)
 
@@ -220,6 +394,9 @@ io.onConnection(channel => {
         channels: [],
         store: createStore(data || {}, notify.bind(room), secureEval)
       })
+      if (FEDERATED_ELVES.has(elf)) {
+        ensureFederationBridge(room, elf, id, elves.get(room)).catch((e) => console.warn(`[federation] bridge failed for "${room}":`, e.message))
+      }
     }
 
     const party = elves.get(room)
@@ -251,6 +428,7 @@ io.onConnection(channel => {
           : serializedNuance
 
         party.store.set(elf, knowledge, merge)
+        if (FEDERATED_ELVES.has(elf)) broadcastToFederation(room, elf, knowledge, serializedNuance)
       } catch(e) {
         console.error('Error processing stateUpload:', e)
       }

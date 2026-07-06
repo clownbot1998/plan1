@@ -6,17 +6,6 @@ import { resolve } from 'node:path';
 import { parse } from 'npm:graphql@^16.9.0';
 import { ttlToGraph, parseOperation, resolveRead, upsertElfState } from './graphql-rdf.js';
 
-// holesail's native dependency (udx-native) isn't guaranteed to have a
-// working prebuilt binary on every machine this server runs on — a failed
-// import here must not take down the rest of the server, the same
-// "can't break firmware" guarantee plan98.js already gives geckos.
-let handleHolesailBridge = async () => null;
-import('./server/holesail-bridge.js').then((mod) => {
-  handleHolesailBridge = mod.handleHolesailBridge;
-}).catch((e) => {
-  console.warn('holesail-bridge unavailable, /holesail/* routes disabled:', e.message);
-});
-
 const DIST    = (Deno.env.get('PLAN1_DIST') || new URL('./dist/', import.meta.url).pathname).replace(/\/?$/, '/');
 const PRIVATE = new URL('./private/', import.meta.url).pathname;
 const PORT = Number(Deno.env.get('PLAN1_PORT') ?? 1998);
@@ -408,13 +397,6 @@ async function handleRequest(request) {
   if (path === '/') path = '/index.html';
 
   if (path === '/admin' || path === '/admin/') return adminPage(request);
-
-  // federation bridge — plan1 joins a peersky-hosted Holesail room as a
-  // client and proxies its doc/events API back to the browser.
-  if (path.startsWith('/holesail/')) {
-    const bridged = await handleHolesailBridge(request, path);
-    if (bridged) return bridged;
-  }
 
   // graphql over turtle — POST /graphql { query, variables }
   // query/mutation 1:1 with the graphql-http envelope; subscriptions return the
