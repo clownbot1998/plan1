@@ -5,10 +5,12 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/plan1
-ExecStart=%h/.deno/bin/deno task serve
+# resolve via login shell PATH, not a hardcoded install path — deno lives
+# at ~/.deno/bin on some machines, /usr/local/bin on others (confirmed
+# both exist in the wild across this project's own hosts)
+ExecStart=/bin/bash -lc 'deno task serve'
 Restart=on-failure
 RestartSec=3
-Environment=PATH=%h/.deno/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin
 
 [Install]
 WantedBy=default.target

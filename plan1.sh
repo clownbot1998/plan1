@@ -231,15 +231,23 @@ case "$CMD" in
       echo "── sync systemd units ──"
       export XDG_RUNTIME_DIR=/run/user/$(id -u)
       mkdir -p "$HOME/.config/systemd/user"
-      for svc in plan1 plan1-relay; do
+      # the relay (multiplayer.js) is only needed on hosts that don't already
+      # point at an external realtime service — installing/running it
+      # anywhere else is pure noise (confirmed: it crash-loops fighting an
+      # unrelated port-9208 squatter on a host that never needed it at all)
+      SVCS="plan1"
+      if ! grep -q '^PLAN98_REALTIME=' "$PROD_DIR/.env" 2>/dev/null; then
+        SVCS="plan1 plan1-relay"
+      fi
+      for svc in $SVCS; do
         sed "s|%h|$HOME|g" "$PROD_DIR/deploy/$svc.service" > "$HOME/.config/systemd/user/$svc.service"
       done
       systemctl --user daemon-reload
-      systemctl --user enable plan1 plan1-relay
+      systemctl --user enable $SVCS
       echo "── restart ──"
-      systemctl --user restart plan1 plan1-relay
+      systemctl --user restart $SVCS
       sleep 1
-      echo "── deployed ──"
+      echo "── deployed ($SVCS) ──"
 ENDSSH
     ;;
   watch)
@@ -274,11 +282,13 @@ ENDSSH
     echo "watching (pid $!)"
     ;;
   setup)
-    # Install systemd USER services (both server.js and the multiplayer
-    # relay — the two must be supervised together, or the relay never
-    # starts and every multiplayer elf silently has no sync), create
-    # runtime dir, initial rsync. Run this once on a fresh machine after
-    # cloning the repo.
+    # Install systemd USER services: server.js always, plus the multiplayer
+    # relay ONLY on a host that doesn't already point at an external
+    # realtime service via PLAN98_REALTIME in .env — installing/running the
+    # relay anywhere else is pure noise (confirmed: on a host that already
+    # has a dedicated hosted relay, a local multiplayer.js has nothing to
+    # do but crash-loop fighting for its port against whatever else runs
+    # there). Run this once on a fresh machine after cloning the repo.
     #
     # User-level (~/.config/systemd/user/), not system-level: `deploy`
     # already restarts via `systemctl --user`, and no sudo needed here
@@ -286,12 +296,17 @@ ENDSSH
     RUNTIME_DIR="${2:-$HOME/srv/plan1}"
     mkdir -p "$HOME/.config/systemd/user"
 
-    for svc in plan1 plan1-relay; do
+    SVCS="plan1"
+    if ! grep -q '^PLAN98_REALTIME=' "$SCRIPT_DIR/.env" 2>/dev/null; then
+      SVCS="plan1 plan1-relay"
+    fi
+
+    for svc in $SVCS; do
       echo "── installing ~/.config/systemd/user/$svc.service ──"
       sed "s|%h|$HOME|g" "$SCRIPT_DIR/deploy/$svc.service" > "$HOME/.config/systemd/user/$svc.service"
     done
     systemctl --user daemon-reload
-    systemctl --user enable plan1 plan1-relay
+    systemctl --user enable $SVCS
 
     echo "── building ──"
     "$0" build
@@ -301,8 +316,8 @@ ENDSSH
     rsync -a --delete "$DIST_DIR/" "$RUNTIME_DIR/"
 
     echo "── starting ──"
-    systemctl --user restart plan1 plan1-relay
-    echo "── setup done — plan1 + relay running ──"
+    systemctl --user restart $SVCS
+    echo "── setup done ($SVCS) ──"
     ;;
   bootstrap)
     MEMORY_SRC="$SCRIPT_DIR/memory"
