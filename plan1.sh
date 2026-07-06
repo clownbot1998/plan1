@@ -68,10 +68,69 @@ case "$CMD" in
       || echo "open http://localhost:$PORT/index.html"
     ;;
   status)
-    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-      echo "running on port $PORT (pid $(cat "$PID_FILE"))"
+    # plan1.sh serve's own PID files are the exception now, not the rule —
+    # systemd is the canonical supervisor (see `doctor`). This just checks
+    # the port is answering, regardless of which mechanism is serving it.
+    if curl -sf -o /dev/null "http://localhost:$PORT/" 2>/dev/null; then
+      echo "running on port $PORT"
     else
       echo "not running"
+    fi
+    ;;
+  doctor)
+    # Verifies the two things that actually broke deploy on 2026-07-06:
+    # (1) the relay should run only where no external realtime service is
+    #     already configured, (2) whichever units are supposed to be up
+    #     actually are. Run this after any deploy/setup change, not just
+    #     when something looks wrong — it's cheap and it catches drift
+    #     before a human has to notice a 000 from curl.
+    echo "── plan1 doctor ──"
+    FAIL=0
+
+    RELAY_EXPECTED=yes
+    if grep -q '^PLAN98_REALTIME=' "$SCRIPT_DIR/.env" 2>/dev/null; then
+      RELAY_EXPECTED=no
+    fi
+    echo "PLAN98_REALTIME in .env: $([ "$RELAY_EXPECTED" = no ] && echo yes || echo no) → local relay expected: $RELAY_EXPECTED"
+
+    if systemctl --user is-active --quiet plan1 2>/dev/null; then
+      echo "plan1: active ✓"
+    else
+      echo "plan1: NOT active ✗"
+      FAIL=1
+    fi
+
+    RELAY_ACTIVE=no
+    systemctl --user is-active --quiet plan1-relay 2>/dev/null && RELAY_ACTIVE=yes
+
+    if [ "$RELAY_EXPECTED" = yes ]; then
+      if [ "$RELAY_ACTIVE" = yes ]; then
+        echo "plan1-relay: active ✓ (expected — no external realtime configured)"
+      else
+        echo "plan1-relay: NOT active ✗ (expected to be running — no external realtime configured)"
+        FAIL=1
+      fi
+    else
+      if [ "$RELAY_ACTIVE" = yes ]; then
+        echo "plan1-relay: active ✗ (should NOT run here — PLAN98_REALTIME already points elsewhere)"
+        FAIL=1
+      else
+        echo "plan1-relay: correctly absent ✓ (external realtime configured)"
+      fi
+    fi
+
+    if curl -sf -o /dev/null "http://localhost:$PORT/" 2>/dev/null; then
+      echo "port $PORT: responding ✓"
+    else
+      echo "port $PORT: NOT responding ✗"
+      FAIL=1
+    fi
+
+    if [ "$FAIL" = 0 ]; then
+      echo "── doctor: all checks passed ──"
+    else
+      echo "── doctor: FAILED — see ✗ above ──"
+      exit 1
     fi
     ;;
   lint)
@@ -248,6 +307,7 @@ case "$CMD" in
       systemctl --user restart $SVCS
       sleep 1
       echo "── deployed ($SVCS) ──"
+      cd "$PROD_DIR" && ./plan1.sh doctor
 ENDSSH
     ;;
   watch)
@@ -318,6 +378,7 @@ ENDSSH
     echo "── starting ──"
     systemctl --user restart $SVCS
     echo "── setup done ($SVCS) ──"
+    "$0" doctor
     ;;
   bootstrap)
     MEMORY_SRC="$SCRIPT_DIR/memory"
@@ -389,14 +450,15 @@ ENDSSH
     esac
     ;;
   *)
-    echo "Usage: ./plan1.sh [start|serve|stop|restart|open|status|lint|build|sync|deploy|ship|watch|test|reverse-client|bootstrap|setup]"
+    echo "Usage: ./plan1.sh [start|serve|stop|restart|open|status|doctor|lint|build|sync|deploy|ship|watch|test|reverse-client|bootstrap|setup]"
     echo "  start  — docker up WAS + serve (the one command)"
     echo "  build  — generates blog pages + vendors deps into dist/"
     echo "  ship   — build, serve locally, prompt to confirm, commit + push + deploy"
     echo "  sync   — uploads dist/ bootstrap files to WAS"
     echo "  reset-test-state — factory-resets accessibility-mode's WAS-persisted workspaces/tabs to a clean single default workspace"
-    echo "  setup    — install systemd service + initial rsync (run once on fresh machine)"
-    echo "  deploy   — ssh pull + build + smoke test + rsync + restart on prod"
+    echo "  setup    — install systemd service(s) + initial rsync (run once on fresh machine)"
+    echo "  doctor   — verify plan1/relay systemd state matches this host's PLAN98_REALTIME config, and the port responds"
+    echo "  deploy   — ssh pull + build + smoke test + rsync + restart on prod + doctor"
     echo "  private  — sync private/ to WAS (--pull to restore, --dry-run to preview)"
     echo "  gallery  — screenshot gallery items → private/screenshots/<id>/ then build"
     echo "  watch    — rebuilds dist/ on any change to client/"
