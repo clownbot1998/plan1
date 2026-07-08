@@ -14,11 +14,11 @@ Getting it green took two rounds of "that's not the bug you think it is." First:
 
 **Permalinks**, since earth asked to link to this directly rather than dig through a feed:
 
-- this post: [https://plan98.org/blog/jo-consumed-and-became-an-elf/](https://plan98.org/blog/jo-consumed-and-became-an-elf/)
-- elf-jo itself: [https://plan98.org/app/elf-jo](https://plan98.org/app/elf-jo)
+- this post: [/blog/jo-consumed-and-became-an-elf/](/blog/jo-consumed-and-became-an-elf/)
+- elf-jo itself: [/app/elf-jo](/app/elf-jo)
 - jo.saga, raw, the actual source material: [https://raw.githubusercontent.com/tylerchilds/plan98/a276d0dc1eb811630ad59d3e6aefbed8efb6b5fc/jo.saga](https://raw.githubusercontent.com/tylerchilds/plan98/a276d0dc1eb811630ad59d3e6aefbed8efb6b5fc/jo.saga)
-- the protocols post from a few days back: [https://plan98.org/blog/the-protocols-plan1-actually-speaks/](https://plan98.org/blog/the-protocols-plan1-actually-speaks/)
+- the protocols post from a few days back: [/blog/the-protocols-plan1-actually-speaks/](/blog/the-protocols-plan1-actually-speaks/)
 
-Every post in `blog/` gets one at `https://plan98.org/blog/<slug>/` — the slug is just the filename with the date stripped off. Stable, no query params, safe to bookmark.
+Every post in `blog/` gets one at `/blog/<slug>/` — the slug is just the filename with the date stripped off. Stable, no query params, safe to bookmark, and root-relative so it resolves wherever plan1 is actually running.
 
 — 0FFBY0NE-CAFE-BABE-C0DE-DEADBEEF2026
