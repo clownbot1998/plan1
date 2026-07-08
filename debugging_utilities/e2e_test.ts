@@ -323,6 +323,107 @@ const FLOWS: Flow[] = [
       })),
     ],
   },
+  {
+    name: 'elf-jo-book',
+    url: `${plan1Base}/app/elf-jo`,
+    steps: [
+      { name: 'load', run: async () => {} },
+      ...Array.from({ length: 12 }, (_, i) => ({
+        name: `next-to-chapter-${i + 2}`,
+        run: async (page: any) => {
+          await page.click('elf-jo .nav.next')
+          await new Promise(r => setTimeout(r, 100))
+          const progress = await page.$eval('elf-jo .progress', (el: any) => el.textContent)
+          const ok = progress.includes(`Chapter ${i + 2} `)
+          return { ok, note: progress }
+        },
+      })),
+      {
+        name: 'hello-demo',
+        run: async (page: any) => {
+          // walked to chapter 13 by the loop above; back up to 7 for hello()
+          for (let i = 0; i < 6; i++) await page.click('elf-jo .nav.prev')
+          await new Promise(r => setTimeout(r, 100))
+          await page.click('elf-jo [data-run="hello"]')
+          const out = await page.$eval('elf-jo .demo .out', (el: any) => el.textContent)
+          return { ok: out.includes('Hello'), note: out }
+        },
+      },
+      {
+        name: 'social-vibe-toggle',
+        run: async (page: any) => {
+          await page.click('elf-jo .nav.next')
+          await new Promise(r => setTimeout(r, 100))
+          await page.click('elf-jo .vibe-toggle')
+          const out = await page.$eval('elf-jo .demo .out', (el: any) => el.textContent)
+          return { ok: out.includes('Goodbye'), note: out }
+        },
+      },
+      {
+        name: 'math-demo-multiply',
+        run: async (page: any) => {
+          await page.click('elf-jo .nav.next')
+          await new Promise(r => setTimeout(r, 100))
+          await page.select('elf-jo .demo select.op', 'Multiply')
+          await page.evaluate(() => {
+            const a = document.querySelector('elf-jo .demo input.a') as any
+            const b = document.querySelector('elf-jo .demo input.b') as any
+            a.value = '4'; a.dispatchEvent(new Event('input', { bubbles: true }))
+            b.value = '5'; b.dispatchEvent(new Event('input', { bubbles: true }))
+          })
+          await new Promise(r => setTimeout(r, 100))
+          const out = await page.$eval('elf-jo .demo .out', (el: any) => el.textContent)
+          return { ok: out.includes('20'), note: out }
+        },
+      },
+      {
+        name: 'boot-demos',
+        run: async (page: any) => {
+          // chapter 9 (math) -> 10 (errors, no demo) -> 11 (error handling, demo=boot)
+          await page.click('elf-jo .nav.next')
+          await new Promise(r => setTimeout(r, 100))
+          await page.click('elf-jo .nav.next')
+          await new Promise(r => setTimeout(r, 100))
+          await page.click('elf-jo [data-run="boot-ok"]')
+          await page.click('elf-jo [data-run="boot-bad"]')
+          const log = await page.$eval('elf-jo .bootlog', (el: any) => el.textContent)
+          return { ok: log.includes('main()') && log.includes('caught:'), note: log }
+        },
+      },
+      {
+        name: 'chapter-13-locked-until-choice',
+        run: async (page: any) => {
+          // chapter 11 (error handling) -> 12 (main street) -> 13 (infinite reality, demo=choice)
+          await page.click('elf-jo .nav.next')
+          await new Promise(r => setTimeout(r, 100))
+          await page.click('elf-jo .nav.next')
+          await new Promise(r => setTimeout(r, 100))
+          const disabledBefore = await page.$eval('elf-jo .nav.next', (el: any) => el.disabled)
+          await page.click('elf-jo [data-run="no"]')
+          await new Promise(r => setTimeout(r, 100))
+          const stillLockedAfterNo = await page.$eval('elf-jo .nav.next', (el: any) => el.disabled)
+          await page.click('elf-jo [data-run="yes"]')
+          await new Promise(r => setTimeout(r, 100))
+          const progress = await page.$eval('elf-jo .progress', (el: any) => el.textContent)
+          const ok = disabledBefore && stillLockedAfterNo && progress.includes('Chapter 14')
+          return { ok, note: `before=${disabledBefore} afterNo=${stillLockedAfterNo} ${progress}` }
+        },
+      },
+      {
+        name: 'fiction-set-demo',
+        run: async (page: any) => {
+          await page.click('elf-jo .nav.next')
+          await new Promise(r => setTimeout(r, 100))
+          await page.click('elf-jo [data-run="fiction-name"]')
+          await new Promise(r => setTimeout(r, 100))
+          await page.click('elf-jo [data-run="fiction-beverage"]')
+          await new Promise(r => setTimeout(r, 100))
+          const out = await page.$eval('elf-jo .demo .out', (el: any) => el.textContent)
+          return { ok: out.includes('name') && out.includes('beverage'), note: out }
+        },
+      },
+    ],
+  },
 ]
 
 function padNum(n: number) { return String(n).padStart(2, '0') }
