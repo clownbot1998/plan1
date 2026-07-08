@@ -3,7 +3,7 @@
     "start": "deno task serve & deno task wallet-service",
     "serve": "deno run --allow-all --env-file=.env server.js",
     "build": "qjs --std build.js",
-    "deploy": "./scripts/deploy.sh",
+    "deploy": "./plan1.sh deploy",
     "compile:server": "deno desktop server.js",
     "compile:desktop": "deno desktop scripts/desktop-bridge.js --backend webview",
     "desktop": "./scripts/laufey --runtime ./server/server.so",
