@@ -273,3 +273,62 @@ plan98.js  — UI bridge / game engine. reducer sandbox, broadcast callback, MVC
 - replay any op sequence through QuickJS sandbox → same state, always
 - reducers are the functions in the elf — discovery is the codebase, not a registry file
 - the sandbox already guards scope leakage; VPN guards peer identity; no CIDs or signatures needed behind a trusted boundary
+
+---
+
+## flip-book: voice-over → animation (record-in-app)
+
+goal: streamline voice-over-to-animation. record narration directly in
+flip-book, seed blank frames at the project's fps from the recording's
+duration, and land you in the timeline ready to draw against the audio.
+
+**audit first (2026-07-08) — most of the pipeline already exists:**
+- camera: `getUserMedia({video:..., audio:false})` — video-only live feed,
+  used as a rotoscope layer + "📷 capture" single-frame grab (line ~3860)
+- video import: `importVideo()` already extracts real frames from an
+  uploaded video file at fps and inserts them (line ~3490)
+- audio playback: `startAudio()`/`stopAudio()` scrub in sync with frame
+  position during darkroom playback; export muxes audio into webm/mp4
+  via ffmpeg (line ~2895, ~3070)
+- audio import: `importAudio(target, file, fps)` already does the exact
+  seed-frames-from-duration math we want —
+  `totalFrames = Math.ceil(audioBuffer.duration * fps)`, then creates
+  that many blank frames (line ~3448)
+- **the actual gap**: no live mic recording anywhere. `importAudio()`
+  only accepts an uploaded file — no `MediaRecorder`/
+  `getUserMedia({audio:true})` path exists. record elsewhere, import the
+  file today.
+
+**the plan — this is additive, not a rewrite:**
+
+- [ ] add a "record" control to the Playback (or a new "Voice-over")
+      accordion section — button that starts/stops a `MediaRecorder` on
+      `getUserMedia({audio:true})`
+- [ ] on stop, hand the recorded `Blob` to the SAME frame-seeding path
+      `importAudio()` already uses (factor the "decode → seed frames at
+      fps" body out of `importAudio()` into a shared helper that takes
+      an `AudioBuffer`, called by both the file-import path and the new
+      record path — avoid duplicating the seeding math)
+- [ ] live recording indicator + elapsed time in the accordion row while
+      armed (mirrors the existing `[data-capture-frame]` "📷 capture"
+      pattern already used for camera stills)
+- [ ] decide: does recording REPLACE frames (like `importAudio` does
+      today, confirm-gated) or does it insert audio without touching an
+      existing hand-drawn timeline? probably needs the same "insert
+      after current / replace all" prompt `importVideo()` already asks
+- [ ] verify mic permission prompt behavior inside an iframe (blog posts
+      /my-computer embed elves in iframes — check flip-book's own
+      `/app/flip-book` route works standalone first, then confirm the
+      iframe-embedded case either works or degrades with a clear message)
+- [ ] once recording works: revisit whether the *camera* toggle should
+      also request audio (`audio:true` instead of `false`) so video
+      capture + voice-over can happen in the same take, instead of two
+      separate recording flows
+- [ ] e2e coverage: extend `flip-book-erase-live`-style flow — record a
+      short clip (or stub `MediaRecorder`/`getUserMedia` in the headless
+      browser context, since real mic input isn't available in CI),
+      confirm frame count matches `duration * fps`
+
+not scoped yet, flag if it comes up: waveform display against the frame
+reel (visualizing WHERE in the audio each frame lands), trimming/scrubbing
+the recording before committing to seed frames, multi-take recording.
