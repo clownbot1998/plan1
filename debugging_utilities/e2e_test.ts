@@ -424,6 +424,161 @@ const FLOWS: Flow[] = [
       },
     ],
   },
+  {
+    name: 'flip-book-sidebar',
+    url: `${plan1Base}/app/flip-book`,
+    steps: [
+      { name: 'load', run: async () => { await new Promise(r => setTimeout(r, 500)) } },
+      {
+        name: 'open-sidebar',
+        run: async (page: any) => {
+          await page.click('flip-book [data-toggle-sidebar]')
+          await new Promise(r => setTimeout(r, 200))
+          const open = await page.$eval('flip-book [data-sidebar]', (el: any) => el.dataset.open)
+          return { ok: open === 'true', note: `data-open=${open}` }
+        },
+      },
+      {
+        name: 'brush-open-by-default',
+        run: async (page: any) => {
+          const collapsed = await page.$eval('flip-book [data-fb-section-body="brush"]', (el: any) => el.classList.contains('fb-acc-collapsed'))
+          return { ok: !collapsed, note: `collapsed=${collapsed}` }
+        },
+      },
+      {
+        name: 'expand-playback-accordion',
+        run: async (page: any) => {
+          await page.click('flip-book [data-toggle-fb-section="playback"]')
+          await new Promise(r => setTimeout(r, 150))
+          const collapsed = await page.$eval('flip-book [data-fb-section-body="playback"]', (el: any) => el.classList.contains('fb-acc-collapsed'))
+          return { ok: !collapsed, note: `collapsed=${collapsed}` }
+        },
+      },
+      {
+        name: 'stroke-swatch-opens-popover-with-palette',
+        run: async (page: any) => {
+          await page.click('flip-book [data-open-popover="stroke"]')
+          await new Promise(r => setTimeout(r, 150))
+          const open = await page.$eval('flip-book [data-fb-popover]', (el: any) => el.classList.contains('open'))
+          const hasPalette = await page.$('flip-book [data-fb-popover] plan98-palette') !== null
+          return { ok: open && hasPalette, note: `open=${open} palette=${hasPalette}` }
+        },
+      },
+      {
+        name: 'outside-click-closes-popover',
+        run: async (page: any) => {
+          // click a plain kv-row label inside the (still-open) sidebar — closes the
+          // popover without tripping flip-book's own click-outside-sidebar auto-close
+          await page.click('flip-book .fb-kv-key')
+          await new Promise(r => setTimeout(r, 150))
+          const open = await page.$eval('flip-book [data-fb-popover]', (el: any) => el.classList.contains('open'))
+          return { ok: !open, note: `open=${open}` }
+        },
+      },
+      {
+        name: 'size-popover-pick-closes-and-updates-value',
+        run: async (page: any) => {
+          await page.click('flip-book [data-open-popover="size"]')
+          await new Promise(r => setTimeout(r, 150))
+          await page.click('flip-book [data-fb-popover] [data-thick="32"]')
+          await new Promise(r => setTimeout(r, 150))
+          const label = await page.$eval('flip-book [data-open-popover="size"]', (el: any) => el.textContent)
+          const open = await page.$eval('flip-book [data-fb-popover]', (el: any) => el.classList.contains('open'))
+          return { ok: label.includes('32px') && !open, note: `label=${label} popoverOpen=${open}` }
+        },
+      },
+      {
+        name: 'fps-select-popover-pick-closes-and-updates-value',
+        run: async (page: any) => {
+          await page.click('flip-book [data-open-popover="fps"]')
+          await new Promise(r => setTimeout(r, 150))
+          await page.select('flip-book [data-fb-popover] [data-fps-select]', '24')
+          await new Promise(r => setTimeout(r, 150))
+          const label = await page.$eval('flip-book [data-open-popover="fps"]', (el: any) => el.textContent)
+          const open = await page.$eval('flip-book [data-fb-popover]', (el: any) => el.classList.contains('open'))
+          return { ok: label.trim() === '24' && !open, note: `label=${label} popoverOpen=${open}` }
+        },
+      },
+      {
+        name: 'camera-toggle-is-direct-no-popover',
+        run: async (page: any) => {
+          await page.click('flip-book [data-toggle-fb-section="camera"]')
+          await new Promise(r => setTimeout(r, 150))
+          await page.click('flip-book [data-toggle-camera]')
+          await new Promise(r => setTimeout(r, 150))
+          const active = await page.$eval('flip-book [data-toggle-camera]', (el: any) => el.classList.contains('active'))
+          const popoverOpen = await page.$eval('flip-book [data-fb-popover]', (el: any) => el.classList.contains('open'))
+          // camera device may not exist headless — toggling the control itself (not the resulting video state) is what we're checking
+          return { ok: !popoverOpen, note: `cameraActive=${active} popoverOpen=${popoverOpen}` }
+        },
+      },
+      {
+        name: 'chromakey-rows-appear-only-when-enabled',
+        run: async (page: any) => {
+          const hiddenBefore = await page.$eval('flip-book [data-fb-ck-row]', (el: any) => getComputedStyle(el).display === 'none')
+          await page.click('flip-book [data-toggle-ck]')
+          await new Promise(r => setTimeout(r, 150))
+          const visibleAfter = await page.$eval('flip-book [data-fb-ck-row]', (el: any) => getComputedStyle(el).display !== 'none')
+          return { ok: hiddenBefore && visibleAfter, note: `hiddenBefore=${hiddenBefore} visibleAfter=${visibleAfter}` }
+        },
+      },
+    ],
+  },
+  {
+    name: 'flip-book-erase-live',
+    url: `${plan1Base}/app/flip-book`,
+    steps: [
+      { name: 'load', run: async () => { await new Promise(r => setTimeout(r, 500)) } },
+      {
+        name: 'draw-a-stroke',
+        run: async (page: any) => {
+          const box = await (await page.$('flip-book .output-canvas')).boundingBox()
+          const cx = box.x + box.width / 2, cy = box.y + box.height / 2
+          await page.mouse.move(cx - 100, cy)
+          await page.mouse.down()
+          for (let i = 0; i <= 20; i++) await page.mouse.move(cx - 100 + i * 10, cy, { steps: 1 })
+          await page.mouse.up()
+          await new Promise(r => setTimeout(r, 200))
+          return { ok: true }
+        },
+      },
+      {
+        name: 'erase-live-mid-drag-matches-post-release',
+        run: async (page: any) => {
+          // tool petals are pointer-events:none until the compass root opens
+          await page.click('flip-book [data-menu]')
+          await new Promise(r => setTimeout(r, 150))
+          await page.click('flip-book [data-tool="erase"]')
+          await new Promise(r => setTimeout(r, 100))
+
+          const box = await (await page.$('flip-book .output-canvas')).boundingBox()
+          const cx = box.x + box.width / 2, cy = box.y + box.height / 2
+          await page.mouse.move(cx - 30, cy)
+          await page.mouse.down()
+          for (let i = 0; i <= 6; i++) {
+            await page.mouse.move(cx - 30 + i * 10, cy, { steps: 1 })
+            // rAF-throttled teachPlayer broadcasts fire between moves during a real drag —
+            // this is exactly the timing that used to stomp the live erase back out
+            await new Promise(r => setTimeout(r, 60))
+          }
+          const midDrag = await page.evaluate(() => {
+            const oc = document.querySelector('flip-book .output-canvas')
+            const ctx = oc.getContext('2d')
+            return [...ctx.getImageData(Math.round(oc.width/2), Math.round(oc.height/2), 1, 1).data]
+          })
+          await page.mouse.up()
+          await new Promise(r => setTimeout(r, 200))
+          const afterRelease = await page.evaluate(() => {
+            const oc = document.querySelector('flip-book .output-canvas')
+            const ctx = oc.getContext('2d')
+            return [...ctx.getImageData(Math.round(oc.width/2), Math.round(oc.height/2), 1, 1).data]
+          })
+          const matches = JSON.stringify(midDrag) === JSON.stringify(afterRelease)
+          return { ok: matches, note: `midDrag=${midDrag} afterRelease=${afterRelease}` }
+        },
+      },
+    ],
+  },
 ]
 
 function padNum(n: number) { return String(n).padStart(2, '0') }

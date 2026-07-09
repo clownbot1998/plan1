@@ -550,6 +550,8 @@ const $ = elf(tag, {
   sidebarOpen:        false,
   view:               null,
   showOverlay:        false,
+  fbPopover:          null,
+  sidebarSections:    { brush: true, playback: false, canvas: false, camera: false, violin: false, import: false },
 
   // audio — whisper only, never synced over the network
   violinMode:         false,
@@ -960,12 +962,50 @@ $.style(`
   }
   & .fb-action-btn:last-child { border-right: none; }
   & .fb-action-btn:hover { background: rgba(215,153,33,.12); color: #fabd2f; }
-  & .fb-sidebar-section { padding: .5rem .6rem; border-bottom: 1px solid #3c3836; }
-  & .fb-sidebar-label {
-    font-size: .5rem; letter-spacing: .1em; text-transform: uppercase;
-    color: #665c54; margin-bottom: .35rem;
+
+  /* accordion sections */
+  & .fb-acc-section { border-bottom: 1px solid #3c3836; }
+  & .fb-acc-toggle {
+    display: flex; align-items: center; gap: .35rem; width: 100%;
+    background: transparent; border: none; cursor: pointer;
+    padding: .5rem .6rem; font-family: 'Recursive'; font-size: .58rem;
+    font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: #928374; text-align: left; transition: color 80ms;
   }
-  & .fb-palette-wrap { height: 120px; overflow: hidden; border-radius: 2px; }
+  & .fb-acc-toggle:hover { color: #ebdbb2; }
+  & .fb-acc-chevron { font-size: .7rem; flex-shrink: 0; }
+  & .fb-acc-body { padding: 0 .6rem .55rem; display: flex; flex-direction: column; gap: .3rem; }
+  & .fb-acc-body.fb-acc-collapsed { display: none; }
+
+  /* two-column key/value rows — value is always a button */
+  & .fb-kv-row { display: grid; grid-template-columns: 5.5rem 1fr; align-items: center; gap: .4rem; }
+  & .fb-kv-key { font-size: .58rem; color: #665c54; }
+  & .fb-kv-btn {
+    background: #3c3836; border: 1px solid #504945; color: #a89984;
+    font-family: 'Recursive'; font-size: .62rem; padding: .3rem .5rem;
+    cursor: pointer; border-radius: 2px; text-align: left; transition: all 80ms;
+    display: flex; align-items: center; gap: .35rem; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  & .fb-kv-btn:hover { border-color: #d79921; color: #fabd2f; }
+  & .fb-toggle-btn.active { background: #d79921; color: #282828; border-color: #d79921; }
+  & .fb-swatch { width: 14px; height: 14px; border-radius: 2px; border: 1px solid rgba(255,255,255,.2); flex-shrink: 0; }
+
+  /* anchored popover — the "pop the selector" surface. width/height are set
+     inline per control (see FB_POPOVER_SIZE) since a color grid needs far
+     more room than a select or a toggle. */
+  & .fb-popover {
+    position: fixed; display: none; z-index: 60;
+    background: #1d2021; border: 1px solid #504945; border-radius: 3px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.5); padding: .5rem; box-sizing: border-box;
+  }
+  & .fb-popover.open { display: block; }
+  /* no display: override here — plan98-palette's own grid-template-areas:'spot'
+     overlap trick depends on its internal display:grid; overriding it pushed
+     the 128-button swatch grid out of the visible box entirely */
+  & .fb-popover plan98-palette { width: 100%; height: 100%; min-height: 160px; }
+  & .fb-popover-val { font-size: .6rem; color: #928374; min-width: 2rem; text-align: right; }
+
   & .fb-sidebar-toggle {
     background: transparent; border: none; padding: 0;
     cursor: pointer; display: block; width: 34px; height: 34px;
@@ -992,9 +1032,75 @@ Draw — afterUpdate boots once, update() is minimal.
 
 */
 
+const FB_SECTIONS = [
+  { key: 'brush',    label: 'Brush' },
+  { key: 'playback', label: 'Playback' },
+  { key: 'canvas',   label: 'Canvas' },
+  { key: 'camera',   label: 'Camera' },
+  { key: 'violin',   label: 'Tiniest Violin' },
+  { key: 'import',   label: 'Import' },
+]
+
+function fbKvRow(label, valueHtml, extraAttrs = '') {
+  return `<div class="fb-kv-row"${extraAttrs}><span class="fb-kv-key">${label}</span>${valueHtml}</div>`
+}
+
+function fbSwatchBtn(key, color) {
+  return `<button class="fb-kv-btn" data-open-popover="${key}"><span class="fb-swatch" style="background:${color};"></span><span class="fb-swatch-label">${color}</span></button>`
+}
+
+function renderSidebarSections() {
+  const { thickness, opacity, onion, fps, loopMode, canvasW, canvasH, color, fillColor,
+          chromakeyEnabled, chromakeyColor, chromakeyTolerance, videoEnabled, violinMode,
+          sidebarSections: sec } = $.learn()
+  const collapsed = k => sec?.[k] ? '' : ' fb-acc-collapsed'
+  const chevron   = k => sec?.[k] ? 'chevron-down' : 'chevron-right'
+  const ckRowStyle = ` data-fb-ck-row style="display:${chromakeyEnabled ? 'grid' : 'none'};"`
+
+  const bodies = {
+    brush: `
+      ${fbKvRow('stroke', fbSwatchBtn('stroke', color))}
+      ${fbKvRow('fill', fbSwatchBtn('fill', fillColor))}
+      ${fbKvRow('size', `<button class="fb-kv-btn" data-open-popover="size">${thickness}px</button>`)}
+      ${fbKvRow('opacity', `<button class="fb-kv-btn" data-open-popover="opacity">${Math.round(opacity*100)}%</button>`)}
+    `,
+    playback: `
+      ${fbKvRow('onion skin', `<button class="fb-kv-btn fb-toggle-btn${onion?' active':''}" data-toggle-onion>${onion?'● on':'○ off'}</button>`)}
+      ${fbKvRow('fps', `<button class="fb-kv-btn" data-open-popover="fps">${fps}</button>`)}
+      ${fbKvRow('loop mode', `<button class="fb-kv-btn" data-open-popover="loop">${loopMode}</button>`)}
+    `,
+    canvas: `
+      ${fbKvRow('size', `<button class="fb-kv-btn" data-open-view="canvas" data-canvas-dims>${canvasW}×${canvasH}</button>`)}
+    `,
+    camera: `
+      ${fbKvRow('camera', `<button class="fb-kv-btn fb-toggle-btn${videoEnabled?' active':''}" data-toggle-camera>${videoEnabled?'● on':'○ off'}</button>`)}
+      ${fbKvRow('chromakey', `<button class="fb-kv-btn fb-toggle-btn${chromakeyEnabled?' active':''}" data-toggle-ck>${chromakeyEnabled?'● on':'○ off'}</button>`)}
+      ${fbKvRow('key color', fbSwatchBtn('ckcolor', chromakeyColor), ckRowStyle)}
+      ${fbKvRow('tolerance', `<button class="fb-kv-btn" data-open-popover="cktol">${chromakeyTolerance}</button>`, ckRowStyle)}
+    `,
+    violin: `
+      ${fbKvRow('violin', `<button class="fb-kv-btn fb-toggle-btn${violinMode?' active':''}" data-toggle-violin>${violinMode?'● on':'○ off'}</button>`)}
+    `,
+    import: `
+      ${fbKvRow('import', `<button class="fb-kv-btn" data-import-file>↑ file…</button>`)}
+      <input class="import-file-input" type="file" accept=".json,image/*,video/*,audio/*,.zip" multiple data-file-input>
+    `,
+  }
+
+  return FB_SECTIONS.map(({ key, label }) => `
+    <div class="fb-acc-section">
+      <button class="fb-acc-toggle" data-toggle-fb-section="${key}">
+        <sl-icon name="${chevron(key)}" class="fb-acc-chevron"></sl-icon>
+        <span>${label}</span>
+      </button>
+      <div class="fb-acc-body${collapsed(key)}" data-fb-section-body="${key}">
+        ${bodies[key]}
+      </div>
+    </div>
+  `).join('')
+}
+
 function renderSidebarHtml() {
-  const { thickness, opacity, onion, fps, loopMode, canvasW, canvasH,
-          chromakeyEnabled, chromakeyColor, chromakeyTolerance, videoEnabled, violinMode } = $.learn()
   return `
     <div class="fb-sidebar" data-sidebar>
       <div class="fb-sidebar-inner">
@@ -1004,83 +1110,61 @@ function renderSidebarHtml() {
           <button class="fb-action-btn" data-sidebar-export>export</button>
           <button class="fb-action-btn" data-sidebar-share>share</button>
         </div>
-        <div class="fb-sidebar-section">
-          <div class="fb-sidebar-label">stroke</div>
-          <div class="fb-palette-wrap"><plan98-palette data-color-target="stroke"></plan98-palette></div>
-        </div>
-        <div class="fb-sidebar-section">
-          <div class="fb-sidebar-label">fill</div>
-          <div class="fb-palette-wrap"><plan98-palette data-color-target="fill"></plan98-palette></div>
-        </div>
-        <div class="fb-sidebar-section">
-          <div class="fb-sidebar-label">size</div>
-          <div class="thicknoid-grid">${thicknoids.map(t=>`<button class="thicknoid-btn${t===thickness?' active':''}" data-thick="${t}">${t}</button>`).join('')}</div>
-        </div>
-        <div class="fb-sidebar-section">
-          <div class="fb-sidebar-label">opacity</div>
-          <div class="opacity-grid">${[0,.1,.2,.3,.4,.5,.6,.7,.8,.9,1].map(o=>`<button class="opacity-btn${o===opacity?' active':''}" data-opacity="${o}">${o}</button>`).join('')}</div>
-        </div>
-        <div class="fb-sidebar-section">
-          <div class="fb-sidebar-label">onion skin</div>
-          <button class="row-btn${onion?' active':''}" data-toggle-onion>${onion?'● on':'○ off'}</button>
-        </div>
-        <div class="fb-sidebar-section">
-          <div class="fb-sidebar-label">fps</div>
-          <select class="tl-select" data-fps-select>${[1,2,4,6,8,12,24,30,60].map(v=>`<option value="${v}"${v===fps?' selected':''}>${v}</option>`).join('')}</select>
-          <div class="fb-sidebar-label" style="margin-top:.4rem;">loop mode</div>
-          <select class="tl-select" data-loop-select style="margin-top:.2rem;">${['loop','pingpong','once'].map(v=>`<option value="${v}"${v===loopMode?' selected':''}>${v}</option>`).join('')}</select>
-        </div>
-        <div class="fb-sidebar-section">
-          <div class="fb-sidebar-label">canvas</div>
-          <button class="row-btn" data-open-view="canvas" data-canvas-dims>${canvasW}×${canvasH}</button>
-        </div>
-        <div class="fb-sidebar-section">
-          <div class="fb-sidebar-label">camera</div>
-          <button class="row-btn${videoEnabled?' active':''}" data-toggle-camera>${videoEnabled?'● on':'○ off'}</button>
-        </div>
-        <div class="fb-sidebar-section">
-          <div class="fb-sidebar-label">chromakey</div>
-          <button class="row-btn${chromakeyEnabled?' active':''}" data-toggle-ck>${chromakeyEnabled?'● on':'○ off'}</button>
-          <div class="ck-color-row" style="margin-top:.35rem;">
-            <div class="ck-preview" style="background:${chromakeyColor};" data-ck-preview></div>
-            <input type="color" value="${chromakeyColor}" data-ck-color>
-          </div>
-          <div class="field-row" style="margin-top:.3rem;">
-            <label>tolerance</label>
-            <input type="range" min="0" max="150" value="${chromakeyTolerance}" data-ck-tolerance>
-          </div>
-        </div>
-        <div class="fb-sidebar-section">
-          <div class="fb-sidebar-label">tiniest violin</div>
-          <button class="row-btn${violinMode?' active':''}" data-toggle-violin>${violinMode?'● on':'○ off'}</button>
-        </div>
-        <div class="fb-sidebar-section">
-          <div class="fb-sidebar-label">import</div>
-          <button class="row-btn" data-import-file>↑ import file…</button>
-          <input class="import-file-input" type="file" accept=".json,image/*,video/*,audio/*,.zip" multiple data-file-input>
-        </div>
+        ${renderSidebarSections()}
       </div>
     </div>
+    <div class="fb-popover" data-fb-popover></div>
   `
 }
 
 function patchSidebar(target) {
-  const sidebar = target.querySelector('[data-sidebar]')
-  if (!sidebar) return
   const { thickness, opacity, onion, fps, loopMode, chromakeyEnabled, chromakeyColor,
-          chromakeyTolerance, videoEnabled, violinMode, canvasW, canvasH } = $.learn()
-  sidebar.querySelectorAll('[data-thick]').forEach(b => b.classList.toggle('active', Integer(b.dataset.thick) === thickness))
-  sidebar.querySelectorAll('[data-opacity]').forEach(b => b.classList.toggle('active', parseFloat(b.dataset.opacity) === opacity))
-  const ob = sidebar.querySelector('[data-toggle-onion]'); if (ob) { ob.classList.toggle('active', onion); ob.textContent = onion?'● on':'○ off' }
-  const cb = sidebar.querySelector('[data-toggle-camera]'); if (cb) { cb.classList.toggle('active', videoEnabled); cb.textContent = videoEnabled?'● on':'○ off' }
-  const ckb = sidebar.querySelector('[data-toggle-ck]'); if (ckb) { ckb.classList.toggle('active', chromakeyEnabled); ckb.textContent = chromakeyEnabled?'● on':'○ off' }
-  const vb = sidebar.querySelector('[data-toggle-violin]'); if (vb) { vb.classList.toggle('active', violinMode); vb.textContent = violinMode?'● on':'○ off' }
-  const fs = sidebar.querySelector('[data-fps-select]'); if (fs && document.activeElement !== fs) fs.value = fps
-  const ls = sidebar.querySelector('[data-loop-select]'); if (ls && document.activeElement !== ls) ls.value = loopMode
-  const cv = sidebar.querySelector('[data-canvas-dims]'); if (cv) cv.textContent = `${canvasW}×${canvasH}`
-  const ckp = sidebar.querySelector('[data-ck-preview]'); if (ckp) ckp.style.background = chromakeyColor
-  const ckc = sidebar.querySelector('[data-ck-color]'); if (ckc && document.activeElement !== ckc) ckc.value = chromakeyColor
-  const ckt = sidebar.querySelector('[data-ck-tolerance]'); if (ckt && document.activeElement !== ckt) ckt.value = chromakeyTolerance
+          chromakeyTolerance, videoEnabled, violinMode, canvasW, canvasH, color, fillColor,
+          sidebarSections: sec } = $.learn()
+
+  // accordion chevrons + collapse state
+  target.querySelectorAll('[data-toggle-fb-section]').forEach(btn => {
+    const key = btn.dataset.toggleFbSection
+    const isOpen = !!sec?.[key]
+    const icon = btn.querySelector('sl-icon')
+    if (icon) icon.setAttribute('name', isOpen ? 'chevron-down' : 'chevron-right')
+    const body = target.querySelector(`[data-fb-section-body="${key}"]`)
+    if (body) body.classList.toggle('fb-acc-collapsed', !isOpen)
+  })
+
+  // swatch value-buttons
+  const strokeSwatch = target.querySelector('[data-open-popover="stroke"]')
+  if (strokeSwatch) { strokeSwatch.querySelector('.fb-swatch').style.background = color; strokeSwatch.querySelector('.fb-swatch-label').textContent = color }
+  const fillSwatch = target.querySelector('[data-open-popover="fill"]')
+  if (fillSwatch) { fillSwatch.querySelector('.fb-swatch').style.background = fillColor; fillSwatch.querySelector('.fb-swatch-label').textContent = fillColor }
+  const ckSwatch = target.querySelector('[data-open-popover="ckcolor"]')
+  if (ckSwatch) { ckSwatch.querySelector('.fb-swatch').style.background = chromakeyColor; ckSwatch.querySelector('.fb-swatch-label').textContent = chromakeyColor }
+
+  // value-only buttons
+  const sizeBtn = target.querySelector('[data-open-popover="size"]'); if (sizeBtn) sizeBtn.textContent = `${thickness}px`
+  const opBtn = target.querySelector('[data-open-popover="opacity"]'); if (opBtn) opBtn.textContent = `${Math.round(opacity*100)}%`
+  const fpsBtn = target.querySelector('[data-open-popover="fps"]'); if (fpsBtn) fpsBtn.textContent = fps
+  const loopBtn = target.querySelector('[data-open-popover="loop"]'); if (loopBtn) loopBtn.textContent = loopMode
+  const tolBtn = target.querySelector('[data-open-popover="cktol"]'); if (tolBtn) tolBtn.textContent = chromakeyTolerance
+  const cv = target.querySelector('[data-canvas-dims]'); if (cv) cv.textContent = `${canvasW}×${canvasH}`
+
+  // toggles
+  const ob = target.querySelector('[data-toggle-onion]'); if (ob) { ob.classList.toggle('active', onion); ob.textContent = onion?'● on':'○ off' }
+  const cb = target.querySelector('[data-toggle-camera]'); if (cb) { cb.classList.toggle('active', videoEnabled); cb.textContent = videoEnabled?'● on':'○ off' }
+  const ckb = target.querySelector('[data-toggle-ck]'); if (ckb) { ckb.classList.toggle('active', chromakeyEnabled); ckb.textContent = chromakeyEnabled?'● on':'○ off' }
+  const vb = target.querySelector('[data-toggle-violin]'); if (vb) { vb.classList.toggle('active', violinMode); vb.textContent = violinMode?'● on':'○ off' }
+
+  // chromakey color/tolerance rows only make sense once chromakey is on
+  target.querySelectorAll('[data-fb-ck-row]').forEach(row => { row.style.display = chromakeyEnabled ? 'grid' : 'none' })
+
+  // controls currently open inside the popover (thick/opacity grids, selects, ck inputs)
+  target.querySelectorAll('[data-thick]').forEach(b => b.classList.toggle('active', Integer(b.dataset.thick) === thickness))
+  target.querySelectorAll('[data-opacity]').forEach(b => b.classList.toggle('active', parseFloat(b.dataset.opacity) === opacity))
+  const fs = target.querySelector('[data-fps-select]'); if (fs && document.activeElement !== fs) fs.value = fps
+  const ls = target.querySelector('[data-loop-select]'); if (ls && document.activeElement !== ls) ls.value = loopMode
+  const ckc = target.querySelector('[data-ck-color]'); if (ckc && document.activeElement !== ckc) ckc.value = chromakeyColor
+  const ckt = target.querySelector('[data-ck-tolerance]'); if (ckt && document.activeElement !== ckt) ckt.value = chromakeyTolerance
+  const cktv = target.querySelector('[data-ck-tol-val]'); if (cktv) cktv.textContent = chromakeyTolerance
 }
 
 const TOOL_ICONS = { draw: 'pencil-fill', pen: 'pen-fill', erase: 'eraser-fill', fill: 'paint-bucket', pan: 'arrows-move' }
@@ -1316,12 +1400,15 @@ function boot(target) {
   // Watch for remote frame/stroke changes
   watchSharedState(target)
 
-  // close sidebar when clicking outside it
+  // close sidebar when clicking outside it — the popover is a DOM sibling
+  // of .fb-sidebar (fixed positioning needs viewport coords, not sidebar-
+  // relative ones), so it must be explicitly treated as "inside" here too
   target.addEventListener('pointerdown', e => {
     if (!$.learn().sidebarOpen) return
     const sidebar = target.querySelector('[data-sidebar]')
     const toggle  = target.querySelector('[data-toggle-sidebar]')
-    if (sidebar?.contains(e.target) || toggle?.contains(e.target)) return
+    const popover = target.querySelector('[data-fb-popover]')
+    if (sidebar?.contains(e.target) || toggle?.contains(e.target) || popover?.contains(e.target)) return
     $.whisper({ sidebarOpen: false })
   })
 
@@ -1367,7 +1454,7 @@ full state atomically (late-join burst).
 
 function watchSharedState(target) {
   const _knownCounts = {}
-  const _knownArrays = {}  // track array identity — catches in-place replacements (recolor)
+  const _knownArrays = {}  // stringified stroke content per frame — see note below on why not reference identity
   $.learn().frames.forEach(id => { _knownCounts[id] = -1 })
 
   let _lastFrameStr = ''  // force frames diff on first run
@@ -1400,14 +1487,24 @@ function watchSharedState(target) {
     }
 
     // ── changed strokes on any frame (count OR content) ──────────────────
+    // every single $.teach() round-trips the whole elf state through JSON in
+    // the sandboxed reducer (see plan98.js createStore.set), so frameStrokes
+    // gets a brand-new array reference on EVERY state change, including the
+    // rAF-throttled teachPlayer() cursor/presence broadcasts fired while
+    // erasing. Comparing by reference made every one of those look like a
+    // real stroke change, so this block re-painted _drawCanvas from the last
+    // *committed* bitmap mid-drag — stomping the live erase back out until
+    // pointerup finally committed it. Compare stringified content instead
+    // (same fix already applied to the frames-list check just above).
     state.frames.forEach(id => {
       const arr = state.frameStrokes[id]
       const sharedLen = (arr || []).length
       const knownLen  = _knownCounts[id] ?? -1
-      const arrChanged = arr !== _knownArrays[id]
-      if (sharedLen !== knownLen || arrChanged) {
+      const strokesStr = JSON.stringify(arr || [])
+      const contentChanged = strokesStr !== _knownArrays[id]
+      if (sharedLen !== knownLen || contentChanged) {
         _knownCounts[id] = sharedLen
-        _knownArrays[id] = arr
+        _knownArrays[id] = strokesStr
         ensureFrame(id, state.canvasW, state.canvasH)
         replayStrokes(id)
         // only refresh draw canvas if this is the frame we're currently viewing
@@ -3480,6 +3577,56 @@ Overlay panel.
 
 */
 
+function fbPopoverContent(key, state) {
+  const { thickness, opacity, fps, loopMode, chromakeyColor, chromakeyTolerance } = state
+  if (key === 'stroke')  return `<plan98-palette data-color-target="stroke"></plan98-palette>`
+  if (key === 'fill')    return `<plan98-palette data-color-target="fill"></plan98-palette>`
+  if (key === 'size')    return `<div class="thicknoid-grid">${thicknoids.map(t=>`<button class="thicknoid-btn${t===thickness?' active':''}" data-thick="${t}">${t}</button>`).join('')}</div>`
+  if (key === 'opacity') return `<div class="opacity-grid">${[0,.1,.2,.3,.4,.5,.6,.7,.8,.9,1].map(o=>`<button class="opacity-btn${o===opacity?' active':''}" data-opacity="${o}">${o}</button>`).join('')}</div>`
+  if (key === 'fps')     return `<select class="tl-select" data-fps-select>${[1,2,4,6,8,12,24,30,60].map(v=>`<option value="${v}"${v===fps?' selected':''}>${v}</option>`).join('')}</select>`
+  if (key === 'loop')    return `<select class="tl-select" data-loop-select>${['loop','pingpong','once'].map(v=>`<option value="${v}"${v===loopMode?' selected':''}>${v}</option>`).join('')}</select>`
+  if (key === 'ckcolor') return `<input type="color" value="${chromakeyColor}" data-ck-color>`
+  if (key === 'cktol')   return `<div class="field-row"><input type="range" min="0" max="150" value="${chromakeyTolerance}" data-ck-tolerance><span class="fb-popover-val" data-ck-tol-val>${chromakeyTolerance}</span></div>`
+  return ''
+}
+
+// plan98-palette renders a 16×8 swatch grid and needs real room — pointerdown
+// and pointerup must land on the *same* button for a pick to register, so a
+// cramped popover doesn't just look bad, it makes clicking fail outright.
+const FB_POPOVER_SIZE = {
+  stroke:  { w: 280, h: 190 },
+  fill:    { w: 280, h: 190 },
+  size:    { w: 200, h: 100 },
+  opacity: { w: 220, h: 90 },
+  fps:     { w: 140, h: 70 },
+  loop:    { w: 150, h: 70 },
+  ckcolor: { w: 150, h: 70 },
+  cktol:   { w: 190, h: 70 },
+}
+
+// anchored popover for accordion value-buttons — kept inside the flip-book
+// element itself (not appended to document.body like data-popover.js) so
+// event.target.closest(tag) still resolves for every existing global handler
+function openFbPopover(target, key, btn) {
+  const pop = target.querySelector('[data-fb-popover]')
+  if (!pop) return
+  $.whisper({ fbPopover: key })
+  pop.innerHTML = fbPopoverContent(key, $.learn())
+  const { w, h } = FB_POPOVER_SIZE[key] || { w: 200, h: 100 }
+  pop.style.width = w + 'px'
+  pop.style.height = 'auto'
+  pop.classList.add('open')
+  const r = btn.getBoundingClientRect()
+  pop.style.left = Math.min(r.right + 6, window.innerWidth - w - 10) + 'px'
+  pop.style.top  = Math.min(r.top, window.innerHeight - h - 10) + 'px'
+}
+
+function closeFbPopover(target) {
+  const pop = target?.querySelector('[data-fb-popover]')
+  if (pop) { pop.classList.remove('open'); pop.innerHTML = '' }
+  $.whisper({ fbPopover: null })
+}
+
 function openPalette(target, colorTarget) {
   $.whisper({ colorTarget, showOverlay: true, view: 'palette' })
   const overlay = target.querySelector('[data-overlay]')
@@ -3519,42 +3666,12 @@ function closeOverlay(target){
 }
 
 function renderView(view){
-  const{thickness,opacity,onion,fps,loopMode,canvasW,canvasH,chromakeyEnabled,chromakeyColor,chromakeyTolerance,videoEnabled,violinMode,baseOctave,bandPreset,octaveInstruments}=$.learn()
-  if(view===VIEWS.brush||view===VIEWS.settings)return`
-    <div class="overlay-title">size</div>
-    <div class="thicknoid-grid">${thicknoids.map(t=>`<button class="thicknoid-btn ${thickness===t?'active':''}" data-thick="${t}">${t}</button>`).join('')}</div>
-    <div class="overlay-title" style="margin-top:.75rem;">opacity</div>
-    <div class="opacity-grid">${[0,.1,.2,.3,.4,.5,.6,.7,.8,.9,1].map(o=>`<button class="opacity-btn ${opacity===o?'active':''}" data-opacity="${o}">${o}</button>`).join('')}</div>
-    <div class="overlay-title" style="margin-top:.75rem;">onion skin</div>
-    <button class="row-btn ${onion?'active':''}" data-toggle-onion>${onion?'● on':'○ off'}</button>
-    <div class="overlay-title" style="margin-top:.75rem;">playback</div>
-    <div class="field-row"><label>fps</label><select class="tl-select" data-fps-select>${[1,2,4,6,8,12,24,30,60].map(v=>`<option value="${v}" ${v===fps?'selected':''}>${v}</option>`).join('')}</select></div>
-    <div class="field-row" style="margin-top:.4rem;"><label>mode</label><select class="tl-select" data-loop-select>${['loop','pingpong','once'].map(v=>`<option value="${v}" ${v===loopMode?'selected':''}>${v}</option>`).join('')}</select></div>
-    <div class="overlay-title" style="margin-top:.75rem;">camera</div>
-    <button class="row-btn ${videoEnabled?'active':''}" data-toggle-camera>${videoEnabled?'● on':'○ off'}</button>
-    <div class="overlay-title" style="margin-top:.75rem;">chromakey</div>
-    <button class="row-btn ${chromakeyEnabled?'active':''}" data-toggle-ck>${chromakeyEnabled?'● on':'○ off'}</button>
-    <div class="ck-color-row" style="margin-top:.5rem;"><div class="ck-preview" style="background:${chromakeyColor};" data-ck-preview></div><input type="color" value="${chromakeyColor}" data-ck-color></div>
-    <div class="field-row" style="margin-top:.4rem;"><label>tolerance</label><input type="range" min="0" max="150" value="${chromakeyTolerance}" data-ck-tolerance><span style="font-size:.6rem;color:#928374;min-width:2rem;">${chromakeyTolerance}</span></div>
-    <div class="overlay-title" style="margin-top:.75rem;">tiniest violin</div>
-    <button class="row-btn ${violinMode?'active':''}" data-toggle-violin>${violinMode?'● on':'○ off'}</button>
-    ${violinMode?`
-      <div class="overlay-title" style="margin-top:.5rem;">base octave</div>
-      <div class="field-row" style="gap:.25rem;">
-        <button class="corner-btn" data-octave-down>−</button>
-        <span data-octave-lbl style="font-size:.65rem;color:#ebdbb2;padding:0 .4rem;flex:1;text-align:center;">oct ${baseOctave} · ${octaveInstruments[baseOctave]}</span>
-        <button class="corner-btn" data-octave-up>+</button>
-      </div>
-      <div class="overlay-title" style="margin-top:.5rem;">band preset</div>
-      <div style="display:flex;gap:4px;">
-        <button class="row-btn ${bandPreset==='clown'?'active':''}" data-band-preset="clown" style="flex:1;text-align:center;">clown orchestra</button>
-        <button class="row-btn ${bandPreset==='circus'?'active':''}" data-band-preset="circus" style="flex:1;text-align:center;">woodwind circus</button>
-      </div>
-    `:''}
-    <div class="overlay-title" style="margin-top:.75rem;">import</div>
-    <button class="row-btn" data-import-file>↑ import file…</button>
-    <input class="import-file-input" type="file" accept=".json,video/*,audio/*" data-file-input>
-  `
+  const{canvasW,canvasH}=$.learn()
+  // VIEWS.brush/VIEWS.settings used to duplicate the whole sidebar control
+  // set here — removed. There was no reachable `data-open-view="brush"`/
+  // `"settings"` trigger anywhere in the UI, only a dead re-render call from
+  // within the violin/band-preset handlers that could only fire if this view
+  // were already open. The accordion sidebar is now the single control surface.
   if(view===VIEWS.canvas)return`
     <div class="overlay-title">preset</div>
     <div class="preset-grid">${PRESETS.map(p=>`<button class="preset-btn ${p.w===canvasW&&p.h===canvasH?'active':''}" data-preset-w="${p.w}" data-preset-h="${p.h}">${p.label}</button>`).join('')}</div>
@@ -3589,67 +3706,15 @@ function renderView(view){
 }
 
 function wireOverlay(inner,target){
-  inner.querySelectorAll('[data-thick]').forEach(btn=>btn.addEventListener('click',()=>{$.whisper({thickness:Integer(btn.dataset.thick)});inner.querySelectorAll('[data-thick]').forEach(b=>b.classList.remove('active'));btn.classList.add('active')}))
-  inner.querySelectorAll('[data-opacity]').forEach(btn=>btn.addEventListener('click',()=>{$.whisper({opacity:parseFloat(btn.dataset.opacity)});inner.querySelectorAll('[data-opacity]').forEach(b=>b.classList.remove('active'));btn.classList.add('active')}))
-  const ob=inner.querySelector('[data-toggle-onion]');if(ob)ob.addEventListener('click',()=>{const n=!$.learn().onion;$.whisper({onion:n});ob.classList.toggle('active',n);ob.textContent=n?'● on':'○ off';renderOnion(target)})
+  // thickness/opacity/onion/fps/loop/chromakey/violin/import are handled by
+  // the global $.when handlers below (they already cover the sidebar +
+  // popover); only canvas presets, export, and gallery are still exclusive
+  // to this centered overlay.
   inner.querySelectorAll('[data-preset-w]').forEach(btn=>btn.addEventListener('click',()=>{applyDims(target,Integer(btn.dataset.presetW),Integer(btn.dataset.presetH));closeOverlay(target)}))
   const ab=inner.querySelector('[data-apply-dims]');if(ab)ab.addEventListener('click',()=>{applyDims(target,Integer(inner.querySelector('[data-cust-w]').value)||320,Integer(inner.querySelector('[data-cust-h]').value)||240);closeOverlay(target)})
-  const fs=inner.querySelector('[data-fps-select]');if(fs)fs.addEventListener('change',e=>$.teach({fps:Integer(e.target.value)}))
-  const ls=inner.querySelector('[data-loop-select]');if(ls)ls.addEventListener('change',e=>$.teach({loopMode:e.target.value}))
-  const ct=inner.querySelector('[data-toggle-ck]');if(ct)ct.addEventListener('click',()=>{const n=!$.learn().chromakeyEnabled;$.whisper({chromakeyEnabled:n});ct.classList.toggle('active',n);ct.textContent=n?'● on':'○ off'})
-  const ckc=inner.querySelector('[data-ck-color]');if(ckc)ckc.addEventListener('input',e=>{$.whisper({chromakeyColor:e.target.value});const p=inner.querySelector('[data-ck-preview]');if(p)p.style.background=e.target.value})
-  const ckt=inner.querySelector('[data-ck-tolerance]');if(ckt)ckt.addEventListener('input',e=>{const v=Integer(e.target.value);$.whisper({chromakeyTolerance:v});ckt.nextElementSibling.textContent=v})
   const de=inner.querySelector('[data-do-export]');if(de)de.addEventListener('click',()=>{closeOverlay(target);exportMp4(target,{download:true,save:false})})
   const ds=inner.querySelector('[data-do-save]');if(ds)ds.addEventListener('click',()=>{closeOverlay(target);exportMp4(target,{download:false,save:true})})
   const dp=inner.querySelector('[data-do-play]');if(dp)dp.addEventListener('click',()=>{closeOverlay(target);openDarkroom(target)})
-
-  // tiniest violin — all state via $.whisper, never synced over the network
-  const vb=inner.querySelector('[data-toggle-violin]')
-  if(vb)vb.addEventListener('click',()=>{
-    const{violinMode,octaveInstruments,baseOctave}=$.learn()
-    const n=!violinMode
-    $.whisper({violinMode:n})
-    if(n)setInstrument(octaveInstruments[baseOctave])
-    openView(target,VIEWS.settings)
-  })
-  inner.querySelectorAll('[data-band-preset]').forEach(btn=>btn.addEventListener('click',()=>{
-    const preset=btn.dataset.bandPreset
-    const instruments=BAND_PRESETS[preset]
-    const{baseOctave}=$.learn()
-    $.whisper({bandPreset:preset,octaveInstruments:instruments})
-    setInstrument(instruments[baseOctave])
-    openView(target,VIEWS.settings)
-  }))
-  const ou=inner.querySelector('[data-octave-up]')
-  if(ou)ou.addEventListener('click',()=>{
-    const{baseOctave,octaveInstruments}=$.learn()
-    const next=Math.min(6,baseOctave+1)
-    $.whisper({baseOctave:next})
-    setInstrument(octaveInstruments[next])
-    const lbl=inner.querySelector('[data-octave-lbl]')
-    if(lbl)lbl.textContent=`oct ${next} · ${octaveInstruments[next]}`
-  })
-  const od=inner.querySelector('[data-octave-down]')
-  if(od)od.addEventListener('click',()=>{
-    const{baseOctave,octaveInstruments}=$.learn()
-    const next=Math.max(1,baseOctave-1)
-    $.whisper({baseOctave:next})
-    setInstrument(octaveInstruments[next])
-    const lbl=inner.querySelector('[data-octave-lbl]')
-    if(lbl)lbl.textContent=`oct ${next} · ${octaveInstruments[next]}`
-  })
-
-  // import
-  const ib=inner.querySelector('[data-import-file]')
-  const fi=inner.querySelector('[data-file-input]')
-  if(ib&&fi){
-    ib.addEventListener('click',()=>fi.click())
-    fi.addEventListener('change',()=>{
-      const files=[...fi.files];if(!files.length)return
-      fi.value=''
-      importFileBatch(target,files)
-    })
-  }
 
   // gallery
   const gl=inner.querySelector('[data-gallery-list]')
@@ -3723,6 +3788,7 @@ Events.
 
 $.when('click','[data-open-view]',event=>{
   const root=event.target.closest(tag);if(!root)return
+  closeFbPopover(root)
   const view=event.target.closest('[data-open-view]').dataset.openView
   if(view==='color'){openPalette(root,'stroke');return}
   const{showOverlay,view:cv}=$.learn()
@@ -3730,11 +3796,37 @@ $.when('click','[data-open-view]',event=>{
   openView(root,view)
 })
 
+// accordion section toggles
+$.when('click','[data-toggle-fb-section]',event=>{
+  const btn=event.target.closest('[data-toggle-fb-section]');if(!btn)return
+  const key=btn.dataset.toggleFbSection
+  const cur=$.learn().sidebarSections||{}
+  $.whisper({sidebarSections:{...cur,[key]:!cur[key]}})
+})
+
+// accordion value-buttons — pop the anchored selector open
+$.when('click','[data-open-popover]',event=>{
+  const btn=event.target.closest('[data-open-popover]');if(!btn)return
+  const root=event.target.closest(tag);if(!root)return
+  const key=btn.dataset.openPopover
+  if($.learn().fbPopover===key){closeFbPopover(root);return}
+  openFbPopover(root,key,btn)
+})
+
+// click anywhere outside the popover (and its trigger) closes it
+$.when('click','*',event=>{
+  if(!$.learn().fbPopover)return
+  if(event.target.closest('[data-fb-popover]')||event.target.closest('[data-open-popover]'))return
+  const root=event.target.closest(tag)||document.querySelector(tag)
+  closeFbPopover(root)
+})
+
 // palette input — routes to stroke or fill based on data-color-target attribute
 $.when('input','plan98-palette',event=>{
   const{color,midi}=event.detail
   const colorTarget=event.target.dataset.colorTarget
   const inSidebar=!!event.target.closest('.fb-sidebar')
+  const inPopover=!!event.target.closest('.fb-popover')
   if(colorTarget==='fill'){
     $.whisper({fillColor:color,...(inSidebar?{}:{showOverlay:false,view:null,colorTarget:null})})
   } else {
@@ -3742,7 +3834,8 @@ $.when('input','plan98-palette',event=>{
   }
   if(midi!=null) $.whisper({lastMidi:midi})
   const root=event.target.closest(tag)
-  if(root&&!inSidebar)closeOverlay(root)
+  if(root&&!inSidebar&&!inPopover)closeOverlay(root)
+  if(root&&inPopover)closeFbPopover(root)
 })
 
 $.when('click','[data-close-overlay]',event=>{const r=event.target.closest(tag);if(r)closeOverlay(r)})
@@ -3844,6 +3937,7 @@ function captureFrame(target) {
 /* ── sidebar toggle ── */
 $.when('click','[data-toggle-sidebar]', event => {
   const root = event.target.closest(tag)
+  closeFbPopover(root)
   if (root?.querySelector('[data-darkroom]')?.classList.contains('open')) {
     closeDarkroom(root)
     $.whisper({ sidebarOpen: true })
@@ -3882,15 +3976,17 @@ $.when('click','[data-sidebar-share]',event=>{
   openView(r,VIEWS.share)
 })
 
-/* ── global settings controls (sidebar + overlay) ── */
+/* ── global settings controls (sidebar + popover + overlay) ── */
 $.when('click','[data-thick]',event=>{
   const btn=event.target.closest('[data-thick]');if(!btn)return
   $.whisper({thickness:Integer(btn.dataset.thick)})
+  const r=event.target.closest(tag);if(r)closeFbPopover(r)
 })
 
 $.when('click','[data-opacity]',event=>{
   const btn=event.target.closest('[data-opacity]');if(!btn)return
   $.whisper({opacity:parseFloat(btn.dataset.opacity)})
+  const r=event.target.closest(tag);if(r)closeFbPopover(r)
 })
 
 $.when('click','[data-toggle-onion]',event=>{
@@ -3902,14 +3998,20 @@ $.when('click','[data-toggle-onion]',event=>{
 
 $.when('change','[data-fps-select]',event=>{
   $.teach({fps:Integer(event.target.value)})
+  const r=event.target.closest(tag);if(r)closeFbPopover(r)
 })
 
 $.when('change','[data-loop-select]',event=>{
   $.teach({loopMode:event.target.value})
+  const r=event.target.closest(tag);if(r)closeFbPopover(r)
 })
 
 $.when('click','[data-toggle-ck]',()=>{
   $.whisper({chromakeyEnabled:!$.learn().chromakeyEnabled})
+})
+
+$.when('change','[data-ck-color]',event=>{
+  const r=event.target.closest(tag);if(r)closeFbPopover(r)
 })
 
 $.when('input','[data-ck-color]',event=>{
