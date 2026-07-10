@@ -254,6 +254,74 @@ function wasTtlPath(id) {
   return `/bulletin-board/${id || 'default'}.ttl`
 }
 
+// ── CSV table view/export ───────────────────────────────────────────────────
+// Unified flat schema across cards, edges, and edge types — one sheet,
+// record_type discriminates the row kind. Attachments and elf-state are
+// blob-shaped and excluded; TTL/JSON remain the source of truth for those.
+
+const CSV_COLUMNS = [
+  'record_type', 'id', 'from_id', 'to_id', 'from_dir', 'to_dir', 'type_id',
+  'text', 'color', 'x', 'y', 'w', 'h', 'saga', 'created_at',
+]
+
+function buildCsvRows(cards, edgeTypes) {
+  const rows = []
+  for (const [id, c] of Object.entries(cards)) {
+    rows.push({
+      record_type: 'card', id, text: c.text || '', color: c.color || '',
+      x: c.x ?? '', y: c.y ?? '', w: c.w ?? '', h: c.h ?? '',
+      saga: c.saga || '', created_at: c.createdAt || '',
+    })
+    for (const [linkId, link] of Object.entries(c.links || {})) {
+      rows.push({
+        record_type: 'edge', id: linkId, from_id: id, to_id: link.to,
+        from_dir: link.fromDir || '', to_dir: link.toDir || '',
+        type_id: link.typeId || HYPER_ID,
+      })
+    }
+  }
+  for (const [id, et] of Object.entries(edgeTypes)) {
+    rows.push({ record_type: 'edge_type', id, text: et.name || '', color: et.color || '' })
+  }
+  return rows
+}
+
+function csvEscape(v) {
+  const s = String(v ?? '')
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+function csvRowsToString(rows) {
+  const lines = [CSV_COLUMNS.join(',')]
+  for (const row of rows) {
+    lines.push(CSV_COLUMNS.map(col => csvEscape(row[col])).join(','))
+  }
+  return lines.join('\n')
+}
+
+function renderCsvTable(rows) {
+  return `
+    <div class="csv-table-wrap">
+      <table class="csv-table">
+        <thead><tr>${CSV_COLUMNS.map(c => `<th>${c}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${rows.map(row => `<tr>${CSV_COLUMNS.map(c => `<td>${escapeHtml(String(row[c] ?? ''))}</td>`).join('')}</tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `
+}
+
+function renderCsvOverlay(rows) {
+  return `
+    <div class="csv-toolbar">
+      <div class="csv-toolbar-title">board table — read only (${rows.length} rows)</div>
+      <button class="io-btn io-btn-primary" data-csv-download>Download .csv</button>
+    </div>
+    ${renderCsvTable(rows)}
+  `
+}
+
 async function upsertBayunGroup(groupId) {
   try {
     const { getSession, bayunCore } = await import('./cyber-security.js')
@@ -1496,7 +1564,8 @@ const MODE_META = {
   pan:    { icon: 'arrows-move',   color: 'mediumseagreen' },
   link:   { icon: 'link-45deg',    color: 'dodgerblue'     },
   manage: { icon: 'pencil-square', color: 'firebrick'      },
-  browse: { icon: 'people-fill',   color: 'darkorange'     },
+  csv:    { icon: 'table',         color: 'darkorange'     },
+  launch: { icon: 'box-arrow-up-right', color: 'darkorange' },
   gallery: { icon: 'images',        color: 'mediumpurple'   },
   share:  { icon: 'question-circle', color: 'gold', textColor: '#333' },
 }
@@ -1506,8 +1575,8 @@ function renderCompassButtons(mode) {
     <button class="c-manage${mode === 'manage' ? ' active' : ''}" data-mode="manage" title="manage cards">
       <sl-icon name="pencil-square"></sl-icon>
     </button>
-    <button class="c-browse${mode === 'browse' ? ' active' : ''}" data-mode="browse" title="team chat">
-      <sl-icon name="people-fill"></sl-icon>
+    <button class="c-table${mode === 'csv' ? ' active' : ''}" data-mode="csv" title="csv table">
+      <sl-icon name="table"></sl-icon>
     </button>
     <button class="c-share${mode === 'share' ? ' active' : ''}" data-mode="share" title="info &amp; share">
       <sl-icon name="question-circle"></sl-icon>
@@ -1663,6 +1732,21 @@ function afterUpdate(target) {
       shareOverlay.style.display = 'none'
     }
   }
+
+  const csvOverlay = target.querySelector('.csv-overlay')
+  if (csvOverlay) {
+    const { launchHref, edgeTypes } = $.learn()
+    if (mode === 'csv' && !launchHref) {
+      csvOverlay.style.display = 'flex'
+      if (csvOverlay._cards !== cards || csvOverlay._edgeTypes !== edgeTypes) {
+        csvOverlay._cards = cards
+        csvOverlay._edgeTypes = edgeTypes
+        csvOverlay.innerHTML = renderCsvOverlay(buildCsvRows(cards, edgeTypes))
+      }
+    } else {
+      csvOverlay.style.display = 'none'
+    }
+  }
 }
 
 
@@ -1702,7 +1786,7 @@ function mount(target) {
       <button class="zoom-btn" data-zoom-in>+</button>
     </div>
     <div class="the-compass" data-open="false" style="--belt-offset-x:0px; --belt-offset-y:0px;">
-      <button class="root" data-toggle-menu title="menu (drag to move)" style="background:${(MODE_META[mode] || MODE_META.pan).color}"><sl-icon name="${(MODE_META[mode] || MODE_META.pan).icon}"></sl-icon></button>
+      <button class="root" data-toggle-menu title="menu (drag to move)"><sl-icon name="${(MODE_META[mode] || MODE_META.pan).icon}"></sl-icon></button>
       ${renderCompassButtons(mode)}
     </div>
     <div class="card-sidebar" data-open="false">
@@ -1717,6 +1801,7 @@ function mount(target) {
     </div>
     <div class="card-launch" data-open="false"></div>
     <div class="camera-overlay" data-open="false"></div>
+    <div class="csv-overlay" style="display:none"></div>
     <div class="share-overlay" style="display:none">
       <div class="share-join"></div>
       <div class="share-io"></div>
@@ -1832,9 +1917,7 @@ function update(target) {
   const rootBtn = compass.querySelector('.root')
   if (rootBtn) {
     rootBtn.dataset.closeLaunch = launchHref ? 'true' : ''
-    const md = launchHref ? MODE_META.browse : (MODE_META[mode] || MODE_META.pan)
-    rootBtn.style.background = md.color
-    rootBtn.style.color = md.textColor || ''
+    const md = launchHref ? MODE_META.launch : (MODE_META[mode] || MODE_META.pan)
     const icon = rootBtn.querySelector('sl-icon')
     if (icon) icon.setAttribute('name', md.icon)
   }
@@ -2196,6 +2279,17 @@ $.when('click', '[data-io-do]', async (e) => {
     input.click()
   }
 
+})
+
+$.when('click', '[data-csv-download]', () => {
+  const { cards, edgeTypes } = $.learn()
+  const csv = csvRowsToString(buildCsvRows(cards, edgeTypes))
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  Object.assign(document.createElement('a'), {
+    href: url, download: `bulletin-board-${_boardId.slice(0, 8)}.csv`
+  }).click()
+  URL.revokeObjectURL(url)
 })
 
 $.when('click', '[data-bsky-tab]', (e) => {
@@ -2875,19 +2969,11 @@ $.when('click', '[data-mode]', e => {
 
   // tear down previous overlay
   if (prev === 'gallery') closeGallery(false)
-  if (prev === 'browse') closeLaunch()
 
   // open new overlay
   if (next === 'gallery') openGallery()
-  else if (next === 'browse') {
-    const { boardGroupId } = $.learn()
-    const href = `/app/group-chat?room=${encodeURIComponent(_boardId)}${boardGroupId ? `&group=${encodeURIComponent(boardGroupId)}` : ''}`
-    openLaunch(href)
-    history.pushState({ type: 'bulletin-board-launch', href }, '', href)
-  }
 
-  if (next !== 'browse') $.teach({ mode: next, menuOpen: false, linkSource: null })
-  else $.teach({ mode: 'pan', menuOpen: false, linkSource: null })
+  $.teach({ mode: next, menuOpen: false, linkSource: null })
 })
 
 // ── sidebar href field ────────────────────────────────────────────────────────
@@ -3269,7 +3355,7 @@ $.style(`
   & .zoom-widget {
     position: absolute;
     bottom: .5rem; right: .5rem;
-    z-index: 200;
+    z-index: 50;
     display: inline-flex; align-items: center;
     background: white; border-radius: 4px;
     box-shadow: 0 1px 6px rgba(0,0,0,.15); overflow: hidden;
@@ -3322,17 +3408,24 @@ $.style(`
 
   & .the-compass .root {
     grid-row: 3/5; grid-column: 3/5;
-    background: #1a1a1a;
-    border: 2px solid rgba(255,255,255,.3);
+    background: lemonchiffon;
+    color: dodgerblue;
+    border: none;
+    border-radius: 0;
     z-index: 1;
     cursor: grab;
     font-size: 1.3rem;
+    filter: none;
+    transition: transform .15s, box-shadow .15s;
   }
+  & .the-compass .root:hover { background: lemonchiffon; filter: none; box-shadow: 0 6px 22px rgba(0,0,0,.4); }
   & .the-compass .root:active { cursor: grabbing; }
+  & .the-compass .root sl-icon { transition: transform .15s; }
+  & .the-compass .root:hover sl-icon { transform: scale(1.2); }
 
   /* hex petals — 1 o'clock clockwise */
   & .the-compass .c-manage { grid-row: 1/3; grid-column: 4/6; background: firebrick; }
-  & .the-compass .c-browse { grid-row: 3/5; grid-column: 5/7; background: darkorange; }
+  & .the-compass .c-table  { grid-row: 3/5; grid-column: 5/7; background: darkorange; }
   & .the-compass .c-share  { grid-row: 5/7; grid-column: 4/6; background: gold; color: #333; }
   & .the-compass .c-move   { grid-row: 5/7; grid-column: 2/4; background: mediumseagreen; }
   & .the-compass .c-os     { grid-row: 3/5; grid-column: 1/3; background: dodgerblue; }
@@ -3952,6 +4045,59 @@ $.style(`
     place-content: center;
     align-items: center;
   }
+  & .csv-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 100;
+    background: #0d0d0d;
+    color: white;
+    box-sizing: border-box;
+    padding: 1.5rem 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    overflow: hidden;
+  }
+  & .csv-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex: 0 0 auto;
+  }
+  & .csv-toolbar-title {
+    font-family: 'Recursive', sans-serif;
+    font-weight: 700;
+    font-size: .95rem;
+    opacity: .85;
+  }
+  & .csv-table-wrap {
+    flex: 1;
+    overflow: auto;
+    font-family: 'Recursive', sans-serif;
+    background: white;
+    border-radius: 8px;
+  }
+  & .csv-table {
+    border-collapse: collapse;
+    font-size: .75rem;
+    white-space: nowrap;
+    color: #222;
+    width: 100%;
+  }
+  & .csv-table th, & .csv-table td {
+    padding: .3rem .6rem;
+    border: 1px solid #e0e0e0;
+    text-align: left;
+  }
+  & .csv-table thead th {
+    position: sticky;
+    top: 0;
+    background: #f4f4f4;
+    font-weight: 700;
+  }
+  & .csv-table tbody tr:nth-child(even) { background: #fafafa; }
+
   & .park-hud {
     position: fixed;
     bottom: 1.5rem; left: 1.5rem;
