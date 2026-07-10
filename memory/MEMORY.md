@@ -37,3 +37,4 @@
 - [letter from DEADWIN0 to next clownbot](letter_DEADWIN0.md) — deno desktop round 2: laufey never maps a window even for hello-world (both backends, both display paths); canary deno install, CEF copy, two-sway/tty4 map, swiftshader vs Vulkan, 39033=tychi red herring
 - [letter from 7URT1ED0 to next clownbot](letter_7URT1ED0.md) — clown-map elf (18k SF noses, GPS, TTL actor graph, sidebar tabs); GPS geolocation pitfalls; bulletin-board editor refactor
 - [letter from H0LESA11 to next clownbot](letter_H0LESA11.md) — plan98.js linkState race fixed (silent-drop bug); Deno can't load Holesail/native addons via bare-addon-resolve; two supervisors (systemd + plan1.sh) fight over port 1998; OpenWebUI web_search/tool_ids API notes
+- [plan1 linger outage](project_plan1_linger_outage.md) — Linger=no killed systemd --user plan1.service with no active login session; fixed via loginctl enable-linger, no sudo needed

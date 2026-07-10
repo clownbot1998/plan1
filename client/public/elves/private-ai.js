@@ -16,8 +16,15 @@ function requestPermission(toolName, args) {
     window.dispatchEvent(new CustomEvent('plan98-tool-permission', { detail: { toolName, args } }))
   })
 }
+function hasPermissionUI() {
+  return !!document.querySelector('private-ai')
+}
+
 async function callToolGated(name, args) {
-  if (name === 'write_file' || name === 'patch_file') {
+  // only gate when private-ai's own Approve/Deny UI is mounted to answer the
+  // prompt — callers like open-clown.js have no such surface, so gating there
+  // would just hang forever with no way to resolve it
+  if ((name === 'write_file' || name === 'patch_file') && hasPermissionUI()) {
     const approved = await requestPermission(name, args)
     if (!approved) return { error: `${name} denied by user` }
   }
