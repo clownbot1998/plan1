@@ -608,7 +608,12 @@ $.when('click', '[data-picker-close]', () => $.teach({ devicePicker: null }))
 
 $.style(`
   & {
-    position: fixed;
+    /* absolute, not fixed: fixed is relative to the viewport, so once
+       bulletin-board is nested (e.g. inside dream-team inside
+       my-dashboard) this HUD floated to the top-left of the whole page
+       instead of the board. absolute is contained by bulletin-board's own
+       position:relative root, same as the compass. */
+    position: absolute;
     top: 0.5rem;
     left: 0.5rem;
     z-index: 9000;
