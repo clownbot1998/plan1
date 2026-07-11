@@ -8,7 +8,7 @@ const SECTIONS = {
       { label: 'Lore Baby',   href: '/app/lore-baby' },
       { label: 'Source Code', href: '/app/source-code' },
       { label: 'ur-shell',    href: '/app/ur-shell' },
-      { label: 'Private AI',  href: '/app/private-ai' },
+      { label: 'Private AI',  href: '/app/accessibility-mode' },
       { label: 'Hail Mary',   href: '/app/hail-mary' },
       { label: 'Drop Saga',   href: '/app/drop-saga' },
       { label: 'My Sagas',   href: '/app/my-sagas' },
@@ -29,6 +29,7 @@ const SECTIONS = {
       { label: 'Couch Coop',   href: '/app/couch-coop' },
       { label: 'Bulletin Board', href: '/app/bulletin-board' },
       { label: 'Clown Map: Circus Mesh SF', href: '/app/clown-map' },
+      { label: 'My Dashboard', href: '/app/my-dashboard' },
     ]
   },
   blog: {
