@@ -9,6 +9,7 @@
   "coding.opening":      "opening js-repl...",
   "clownbot.connecting": "connecting to clownbot...",
   "palette.launching":   "launching palette...",
+  "security.launching":  "launching security...",
 
   "js.entering":         "entering js modality",
   "js.exiting":          "exiting js modality",
@@ -21,7 +22,7 @@
   "load.path":           "load path",
 
   "auth.prompt":         "passphrase:",
-  "auth.success":        "logged in",
+  "auth.success":        "logged in - reloading...",
   "auth.aborted":        "authentication aborted",
   "auth.locked":         "too many attempts - try again later",
   "auth.wrong":          "wrong passphrase{remaining, select, unknown {} other { - {remaining} left}}",

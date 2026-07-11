@@ -629,6 +629,13 @@ async function auth(passphrase, { normalMode }) {
     })
     if (res.ok) {
       normalMode()
+      // the passphrase sets the session cookie, but admin-gated env vars
+      // (Bayun credentials among them) are only baked into the page at
+      // request time — this page already loaded without them, and there's
+      // no live signal to fetch them after the fact. Reload is the only way
+      // an embedded cyber-security (opened via the `security` command) sees
+      // real credentials post-auth.
+      setTimeout(() => location.reload(), 900)
       return fmt('auth.success')
     }
     const data = await res.json().catch(() => ({}))
@@ -1166,6 +1173,10 @@ text: ls
   'color': () => {
     loadModule('<plan98-palette')
     return { body: fmt('palette.launching'), system: true }
+  },
+  'security': () => {
+    loadModule('<cyber-security')
+    return { body: fmt('security.launching'), system: true }
   },
   'art': () => {
     loadPath('/app/flip-book')

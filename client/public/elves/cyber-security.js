@@ -58,6 +58,19 @@ export function getSession() {
   return state['ls/bayun'] || {}
 }
 
+// self-awareness of accessibility-mode as a host: cyber-security is normally
+// reached via the admin-gated /app/cyber-security route, but accessibility-
+// mode's `security` terminal command embeds this element directly (see
+// loadModule in accessibility-mode.js), bypassing that server-side route
+// gate entirely. The Bayun credentials above are still admin-cookie-gated
+// server-side though, so an unauthed visitor gets requirementsMet === false
+// here regardless. Presence-check (not closest()) because showModal mounts
+// this into plan98-modal's own tree, not as a DOM descendant of
+// accessibility-mode — see project memory letter on parent-context idioms.
+function hasAccessibilityParent() {
+  return !!document.querySelector('accessibility-mode')
+}
+
 export function clearSession() {
   state['ls/bayun'] = {}
 }
@@ -569,6 +582,21 @@ export async function blockFollow(moniker, organization) {
 }
 
 const modes = {
+  unavailable: function unavailable(target) {
+    const viaAccessibility = hasAccessibilityParent()
+    return `
+      <div class="wizard">
+        <div class="form-title">
+          Security Not Authenticated
+        </div>
+        <div class="form-description">
+          ${viaAccessibility
+            ? `This is running inside accessibility-mode. Type <code>admin</code> in its terminal, enter the passphrase, then reopen <code>security</code> once the page reloads.`
+            : `Bayun credentials aren't available for this session. Authenticate at <a href="/admin">/admin</a>, then reload.`}
+        </div>
+      </div>
+    `
+  },
   error: function error(target) {
     return `
       <div class="wizard">
@@ -845,6 +873,11 @@ function mount(target) {
   setError('')
   target.innerHTML = ''
   target.mounted = true
+
+  if (!requirementsMet) {
+    $.teach({ mode: 'unavailable', ready: true })
+    return
+  }
 
   schedule(() => {
     init()
