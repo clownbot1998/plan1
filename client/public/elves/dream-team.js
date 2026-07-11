@@ -509,7 +509,7 @@ const viewRenderers = {
         </div>
       </div>
 
-      <plan98-gallery></plan98-gallery>
+      <bulletin-board></bulletin-board>
     </div>
   `,
   [views.preferences]: (target) => `
