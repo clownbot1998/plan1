@@ -592,7 +592,15 @@ document.addEventListener('pointerup', (event) => {
   _gestureStart = null
   const dx = event.clientX - x, dy = event.clientY - y
   const mag = Math.max(Math.abs(dx), Math.abs(dy))
-  if (mag < SWIPE_THRESHOLD) { if (card) stageCard(card); return }
+  if (mag < SWIPE_THRESHOLD) {
+    if (!card) return
+    // staging a card also makes it the active one — a mini you just tapped
+    // shouldn't stay small, that reads as though nothing happened.
+    stageCard(card)
+    const i = orderedHand($.learn().myHand).indexOf(card)
+    if (i !== -1) $.whisper({ focusIdx: i })
+    return
+  }
   if (Math.abs(dx) > Math.abs(dy)) moveRank(dx < 0 ? 1 : -1)
   else moveSuit(dy < 0 ? 1 : -1)
 })
