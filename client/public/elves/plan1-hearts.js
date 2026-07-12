@@ -19,8 +19,8 @@
 import Self, { linkState, broadcastElf, channel } from '@plan98/elf'
 import Cache from '@silly/cache'
 import {
-  GLYPH, RED, rankOf, suitOf, isHeart, sortHand,
-  orderedHand, clampFocus, nextRankFocus, nextSuitFocus, suitRun, suitRunStarts,
+  GLYPH, RED, rankOf, suitOf, isHeart, sortHand, HAND_SUIT_ORDER,
+  orderedHand, clampFocus, nextRankFocus, nextSuitFocus, suitRun,
   shuffledDeck, dealHands, legalPlays, trickWinner, trickPoints, handDeltas, passRecipient,
   generateKeypair, encryptFor, decryptMine,
 } from './hearts-engine.js'
@@ -141,7 +141,7 @@ function editGameName() {
   commit({ seats: { [mySeat]: { ...seat, name: n } } })
 }
 
-// staging: a hold on any visible card moves it into the top-half staging
+// staging: a tap (or hold) on any visible card moves it into the top-half staging
 // tray — one card at a time while playing (holding a different card
 // swaps it), up to three while passing. nothing commits to the network
 // until Confirm; tapping a staged card in the tray un-stages it back to
@@ -434,41 +434,30 @@ function readyRoster(seats) {
   }).join('')
 }
 
-// bottom half: see the whole hand at a glance. the focused suit's cards
-// are shown full-size in a row (the actually-focused one biggest); the
-// suit before it and the suit after it (in HAND_SUIT_ORDER, wrapping) each
-// collapse to a thin strip of corner-marked minis above and below — you
-// can always see every card you hold, just not all at full size. tapping
-// any mini jumps focus straight to it; holding any card (mini or focused)
-// stages it, see stageCard().
+// bottom half: see the whole hand at a glance, always. every suit you
+// hold gets a row, always in the same fixed order (clubs, diamonds,
+// spades, hearts) — nothing reshuffles position when you navigate. only
+// one row is "open" at a time (the current suit): full-size cards, the
+// actually-focused one biggest. the other rows stay put, just collapsed
+// to a strip of corner-marked minis — an accordion, not a carousel.
+// tapping or holding any card (open row or collapsed) stages it, see
+// stageCard(); tapping a mini also jumps focus straight to it.
 function handStack(myHand, focusIdx, faceClassFor) {
   const cards = orderedHand(myHand)
   if (!cards.length) return `<div class="h-empty">no cards</div>`
   const idx = clampFocus(focusIdx, cards)
-  const cur = suitRun(cards, idx)
-  const starts = suitRunStarts(cards)
+  const curSuit = suitOf(cards[idx])
 
-  const curCardsHtml = cards.slice(cur.start, cur.end + 1).map((c, i) => {
-    const cardIdx = cur.start + i
-    return cardIdx === idx
+  return HAND_SUIT_ORDER.filter(suit => cards.some(c => suitOf(c) === suit)).map(suit => {
+    const suitCards = cards.filter(c => suitOf(c) === suit)
+    if (suit !== curSuit) {
+      return `<div class="h-suit-row -collapsed">${suitCards.map(c => cardMini(c, faceClassFor(c))).join('')}</div>`
+    }
+    const openHtml = suitCards.map(c => cards.indexOf(c) === idx
       ? `<div class="h-focus-card" data-hold-card="${esc(c)}">${cardFace(c, faceClassFor(c))}</div>`
-      : cardMini(c, faceClassFor(c) + ' -inrow')
+      : cardMini(c, faceClassFor(c) + ' -inrow')).join('')
+    return `<div class="h-suit-row -open">${openHtml}</div>`
   }).join('')
-
-  if (starts.length <= 1) {
-    return `<div class="h-suit-current">${curCardsHtml}</div>`
-  }
-
-  const curRunPos = starts.indexOf(cur.start)
-  const prevRun = suitRun(cards, starts[(curRunPos - 1 + starts.length) % starts.length])
-  const nextRun = suitRun(cards, starts[(curRunPos + 1) % starts.length])
-  const prevHtml = cards.slice(prevRun.start, prevRun.end + 1).map(c => cardMini(c)).join('')
-  const nextHtml = cards.slice(nextRun.start, nextRun.end + 1).map(c => cardMini(c)).join('')
-
-  return `
-    <div class="h-suit-peek -prev">${prevHtml}</div>
-    <div class="h-suit-current">${curCardsHtml}</div>
-    <div class="h-suit-peek -next">${nextHtml}</div>`
 }
 
 function passDirLabel(round) {
@@ -485,11 +474,11 @@ function stagingArea() {
     const slots = [0, 1, 2].map(i => selected[i]
       ? `<button class="h-staged-card" data-unstage="${esc(selected[i])}">${cardFace(selected[i])}</button>`
       : `<div class="h-staged-slot"></div>`).join('')
-    return `<div class="h-staged-row">${slots}</div><div class="h-hint-text">hold up to 3 cards to pass ${passDirLabel(round)}</div>`
+    return `<div class="h-staged-row">${slots}</div><div class="h-hint-text">tap up to 3 cards to pass ${passDirLabel(round)}</div>`
   }
   if (phase === 'playing') {
     if (turn !== mySeat) return `<div class="h-waiting">${seats[turn] ? esc(seats[turn].name) : 'waiting'}…</div>`
-    if (!selected.length) return `<div class="h-waiting">hold a card below to stage it</div>`
+    if (!selected.length) return `<div class="h-waiting">tap a card below to play it</div>`
     return `<button class="h-staged-card" data-unstage="${esc(selected[0])}">${cardFace(selected[0])}</button>`
   }
   // waiting | hand-end | game-end — ready toggle shows before every deal,
@@ -578,52 +567,37 @@ $.when('click', '[data-jump-card]', e => {
   if (i !== -1) $.whisper({ focusIdx: i })
 })
 
-// === swipe (rank/suit) + hold (stage) ===
+// === swipe (rank/suit) + tap (stage) ===
 // $.when only delegates via exact matches(), not closest() (see saga-pitch's
 // own swipe comment for the same limitation) — that's exactly why "tap to
 // select" never worked here before: the focused card's markup has nested
 // spans (the corner marks), so a tap landing on one of those never matched
 // [data-hold-card] at all. Raw document listeners plus closest() sidestep
-// it, and give both gestures a shared pointerdown/up/move lifecycle without
-// fighting each other: a hold requires the finger to stay essentially still
-// past HOLD_MS (movement cancels it, same threshold logic protects a swipe
-// from ever being misread as a hold), a swipe requires it to travel past
-// SWIPE_THRESHOLD before release. They can't both fire from the same
-// gesture.
+// it: release with barely any movement is a tap (stage the card under the
+// finger), release past SWIPE_THRESHOLD is a swipe (rank/suit nav). One
+// gesture, one outcome — no separate hold timer to race against a swipe.
 const SWIPE_THRESHOLD = 40
-const HOLD_MS = 500
 let _gestureStart = null
-let _holdTimer = null
 
 document.addEventListener('pointerdown', (event) => {
-  const holdEl = event.target.closest('[data-hold-card]')
   const zone = event.target.closest('.h-bottom-half')
   if (!zone || !zone.closest($.link)) return
-  _gestureStart = { x: event.clientX, y: event.clientY }
-  clearTimeout(_holdTimer)
-  if (!holdEl) return
-  _holdTimer = setTimeout(() => stageCard(holdEl.dataset.holdCard), HOLD_MS)
-})
-
-document.addEventListener('pointermove', (event) => {
-  if (!_gestureStart) return
-  const dx = event.clientX - _gestureStart.x, dy = event.clientY - _gestureStart.y
-  if (Math.hypot(dx, dy) > 15) clearTimeout(_holdTimer)
+  const holdEl = event.target.closest('[data-hold-card]')
+  _gestureStart = { x: event.clientX, y: event.clientY, card: holdEl ? holdEl.dataset.holdCard : null }
 })
 
 document.addEventListener('pointerup', (event) => {
-  clearTimeout(_holdTimer)
   if (!_gestureStart) return
-  const { x, y } = _gestureStart
+  const { x, y, card } = _gestureStart
   _gestureStart = null
   const dx = event.clientX - x, dy = event.clientY - y
   const mag = Math.max(Math.abs(dx), Math.abs(dy))
-  if (mag < SWIPE_THRESHOLD) return
+  if (mag < SWIPE_THRESHOLD) { if (card) stageCard(card); return }
   if (Math.abs(dx) > Math.abs(dy)) moveRank(dx < 0 ? 1 : -1)
   else moveSuit(dy < 0 ? 1 : -1)
 })
 
-document.addEventListener('pointercancel', () => { clearTimeout(_holdTimer); _gestureStart = null })
+document.addEventListener('pointercancel', () => { _gestureStart = null })
 
 function scheduleFlashExpiry() {
   clearTimeout(_flashTimer)
@@ -716,10 +690,10 @@ $.style(`
   & .h-staged-card { background: none; border: none; padding: 0; cursor: pointer; }
   & .h-hint-text { color: lemonchiffon; opacity: .6; font-size: .82rem; }
 
-  & .h-bottom-half { touch-action: none; user-select: none; }
-  & .h-suit-current { display: flex; align-items: center; justify-content: center; gap: .4rem; flex-wrap: wrap; }
-  & .h-focus-card .h-card { width: 6.4rem; height: 9rem; font-size: 2.3rem; cursor: pointer; }
-  & .h-focus-card .h-corner-mark { font-size: .85rem; }
+  & .h-bottom-half { touch-action: none; user-select: none; justify-content: space-evenly; overflow-y: auto; }
+  & .h-suit-row.-open { display: flex; align-items: center; justify-content: center; gap: .4rem; flex-wrap: wrap; }
+  & .h-focus-card .h-card { width: 6rem; height: 8.4rem; font-size: 2.15rem; cursor: pointer; }
+  & .h-focus-card .h-corner-mark { font-size: .8rem; }
   & .h-mini-card {
     width: 2.4rem; height: 3.3rem; border-radius: .35rem; background: #fffdf5; border: none; cursor: pointer;
     font-size: .82rem; font-weight: 800; padding: 0;
@@ -729,9 +703,8 @@ $.style(`
   & .h-mini-card.-selected { outline: .18rem solid gold; }
   & .h-mini-card.-legal { outline: .15rem solid #46d369; }
   & .h-mini-card.-illegal { opacity: .35; }
-  & .h-suit-peek { display: flex; justify-content: center; gap: .15rem; opacity: .55; }
-  & .h-suit-peek .h-mini-card { width: 2rem; height: 1.1rem; border-radius: .25rem .25rem 0 0; overflow: hidden; }
-  & .h-suit-peek.-next .h-mini-card { border-radius: 0 0 .25rem .25rem; }
+  & .h-suit-row.-collapsed { display: flex; justify-content: center; gap: .2rem; opacity: .6; }
+  & .h-suit-row.-collapsed .h-mini-card { width: 2.1rem; height: 1.3rem; border-radius: .3rem; overflow: hidden; }
 
   & .h-ready-btn { font-size: 1.1rem; font-weight: 700; padding: .55rem 1.6rem; border-radius: 999px; border: none; cursor: pointer; }
   & .h-ready-btn.-yellow { background: #f1c40f; }
