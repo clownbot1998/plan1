@@ -20,7 +20,7 @@ import Self, { linkState, broadcastElf, channel } from '@plan98/elf'
 import Cache from '@silly/cache'
 import {
   GLYPH, RED, rankOf, suitOf, isHeart, sortHand,
-  orderedHand, clampFocus, nextRankFocus, nextSuitFocus,
+  orderedHand, clampFocus, nextRankFocus, nextSuitFocus, suitRun, suitRunStarts,
   shuffledDeck, dealHands, legalPlays, trickWinner, trickPoints, handDeltas, passRecipient,
   generateKeypair, encryptFor, decryptMine,
 } from './hearts-engine.js'
@@ -67,9 +67,8 @@ const $ = Self(tag, {
   scores: [0, 0, 0, 0],
   lastEvent: null,      // { type, ts, ... } — drives the full-screen flash
   myHand: [],
-  selected: [],
-  focusIdx: 0,       // which card in orderedHand(myHand) is centered in the hand carousel
-  pendingPlay: null, // { card, armedAt } — set by a hold, cleared by Undo or by actually playing
+  selected: [],  // staged for action — up to 3 cards mid-pass, exactly 1 card mid-play
+  focusIdx: 0,   // which card in orderedHand(myHand) is centered in the hand carousel
 })
 
 const ROOM_MERGE = `(state, payload) => {
@@ -142,16 +141,37 @@ function editGameName() {
   commit({ seats: { [mySeat]: { ...seat, name: n } } })
 }
 
-// hold-to-play: a hold ARMS the play (this function) but doesn't commit it
-// — a periodic tick (see the setInterval near the bottom) actually calls
-// playCard() once PLAY_UNDO_MS has passed with no Undo tap. Short enough
-// to keep the table's pace, long enough to catch a wrong card or a "wait,
-// no" — the same trade-off a hold-to-delete confirmation makes anywhere
-// else, just aimed at a card table's specific way of going wrong (bumped
-// the table, meant a different card, someone else needed a beat).
-const PLAY_UNDO_MS = 3000
-function armPlay(card) { $.whisper({ pendingPlay: { card, armedAt: Date.now() } }) }
-function cancelPendingPlay() { $.whisper({ pendingPlay: null }) }
+// staging: a hold on any visible card moves it into the top-half staging
+// tray — one card at a time while playing (holding a different card
+// swaps it), up to three while passing. nothing commits to the network
+// until Confirm; tapping a staged card in the tray un-stages it back to
+// the hand, no timer, no auto-commit. one mechanism, one Confirm button,
+// for both modalities — see confirmAction().
+function stageCard(card) {
+  const { phase, selected, passSubmitted } = $.learn()
+  if (phase === 'passing') {
+    if (passSubmitted[mySeat] || selected.includes(card) || selected.length >= 3) return
+    $.whisper({ selected: [...selected, card] })
+  } else if (phase === 'playing') {
+    $.whisper({ selected: [card] })
+  }
+}
+function unstageCard(card) { $.whisper({ selected: $.learn().selected.filter(c => c !== card) }) }
+
+function canConfirm() {
+  const { phase, selected, turn, myHand, heartsBroken, trick, trickCount, passSubmitted } = $.learn()
+  if (phase === 'passing') return selected.length === 3 && !passSubmitted[mySeat]
+  if (phase === 'playing') return selected.length === 1 && turn === mySeat && legalPlays(myHand, trick, heartsBroken, trickCount === 0).includes(selected[0])
+  return false
+}
+
+function confirmAction() {
+  if (!canConfirm()) return
+  const { phase, selected } = $.learn()
+  if (phase === 'passing') { submitPass(); return }
+  $.whisper({ selected: [] })
+  playCard(selected[0])
+}
 
 function redraw() { $.whisper({ tick: ($.learn().tick || 0) + 1 }) }
 
@@ -311,8 +331,28 @@ async function syncPrivateState() {
 // === rendering ===
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) }
 function glyph(card) { return rankOf(card) + GLYPH[suitOf(card)] }
+
+// the big, focused card: a center pip plus top-left/bottom-right corner
+// marks, same idea real cards use so a partially-covered one is still
+// identifiable — here mostly relevant for the -flash variant on the
+// table, where the card gets shown large but briefly.
 function cardFace(card, extraClass = '') {
-  return `<div class="h-card ${RED[suitOf(card)] ? '-red' : '-black'} ${extraClass}">${esc(glyph(card))}</div>`
+  const g = esc(glyph(card))
+  return `<div class="h-card ${RED[suitOf(card)] ? '-red' : '-black'} ${extraClass}">
+    <span class="h-corner-mark -tl">${g}</span>
+    <span class="h-card-pip">${g}</span>
+    <span class="h-corner-mark -br">${g}</span>
+  </div>`
+}
+
+// the small "just a corner" card used for every non-focused card in the
+// stack — the whole point of it is to be identifiable at a glance without
+// taking up room, so it's plain text with no nested elements (a click's
+// target has to BE this button, not a span inside it — $.when matches the
+// literal event.target, not closest(), same gotcha documented elsewhere
+// in this file and in saga-pitch/lore-game).
+function cardMini(card, extraClass = '') {
+  return `<button class="h-mini-card ${RED[suitOf(card)] ? '-red' : '-black'} ${extraClass}" data-jump-card="${esc(card)}" data-hold-card="${esc(card)}">${esc(glyph(card))}</button>`
 }
 
 const CORNER_CLASS = ['-tl', '-tr', '-br', '-bl']
@@ -394,54 +434,98 @@ function readyRoster(seats) {
   }).join('')
 }
 
-function handView() {
-  const { phase, turn, myHand, selected, trickCount, heartsBroken, trick, seats, pendingPlay, focusIdx } = $.learn()
-  const isPassing = phase === 'passing'
-  const passedAlready = !!$.learn().passSubmitted[mySeat]
-  const legal = phase === 'playing' && turn === mySeat ? legalPlays(myHand, trick, heartsBroken, trickCount === 0) : []
+// bottom half: see the whole hand at a glance. the focused suit's cards
+// are shown full-size in a row (the actually-focused one biggest); the
+// suit before it and the suit after it (in HAND_SUIT_ORDER, wrapping) each
+// collapse to a thin strip of corner-marked minis above and below — you
+// can always see every card you hold, just not all at full size. tapping
+// any mini jumps focus straight to it; holding any card (mini or focused)
+// stages it, see stageCard().
+function handStack(myHand, focusIdx, faceClassFor) {
+  const cards = orderedHand(myHand)
+  if (!cards.length) return `<div class="h-empty">no cards</div>`
+  const idx = clampFocus(focusIdx, cards)
+  const cur = suitRun(cards, idx)
+  const starts = suitRunStarts(cards)
+
+  const curCardsHtml = cards.slice(cur.start, cur.end + 1).map((c, i) => {
+    const cardIdx = cur.start + i
+    return cardIdx === idx
+      ? `<div class="h-focus-card" data-hold-card="${esc(c)}">${cardFace(c, faceClassFor(c))}</div>`
+      : cardMini(c, faceClassFor(c) + ' -inrow')
+  }).join('')
+
+  if (starts.length <= 1) {
+    return `<div class="h-suit-current">${curCardsHtml}</div>`
+  }
+
+  const curRunPos = starts.indexOf(cur.start)
+  const prevRun = suitRun(cards, starts[(curRunPos - 1 + starts.length) % starts.length])
+  const nextRun = suitRun(cards, starts[(curRunPos + 1) % starts.length])
+  const prevHtml = cards.slice(prevRun.start, prevRun.end + 1).map(c => cardMini(c)).join('')
+  const nextHtml = cards.slice(nextRun.start, nextRun.end + 1).map(c => cardMini(c)).join('')
+
+  return `
+    <div class="h-suit-peek -prev">${prevHtml}</div>
+    <div class="h-suit-current">${curCardsHtml}</div>
+    <div class="h-suit-peek -next">${nextHtml}</div>`
+}
+
+function passDirLabel(round) {
+  const dir = round % 4
+  return dir === 0 ? 'left' : dir === 1 ? 'right' : dir === 2 ? 'across' : 'hold'
+}
+
+// top half: whatever's staged for the current phase, plus Confirm. one
+// shape for both modalities — see stageCard()/confirmAction().
+function stagingArea() {
+  const { phase, selected, round, seats, turn } = $.learn()
+  if (phase === 'passing') {
+    if ($.learn().passSubmitted[mySeat]) return `<div class="h-waiting">passed — waiting on the table…</div>`
+    const slots = [0, 1, 2].map(i => selected[i]
+      ? `<button class="h-staged-card" data-unstage="${esc(selected[i])}">${cardFace(selected[i])}</button>`
+      : `<div class="h-staged-slot"></div>`).join('')
+    return `<div class="h-staged-row">${slots}</div><div class="h-hint-text">hold up to 3 cards to pass ${passDirLabel(round)}</div>`
+  }
+  if (phase === 'playing') {
+    if (turn !== mySeat) return `<div class="h-waiting">${seats[turn] ? esc(seats[turn].name) : 'waiting'}…</div>`
+    if (!selected.length) return `<div class="h-waiting">hold a card below to stage it</div>`
+    return `<button class="h-staged-card" data-unstage="${esc(selected[0])}">${cardFace(selected[0])}</button>`
+  }
+  // waiting | hand-end | game-end — ready toggle shows before every deal,
+  // fresh each hand, not just the game's first (see dealHand()'s reset).
   const mySeatData = seats[mySeat]
   const iAmReady = !!(mySeatData && mySeatData.ready)
-
-  const cards = orderedHand(myHand)
-  const idx = clampFocus(focusIdx, cards)
-  const focused = cards[idx]
-  const isSelected = focused && selected.includes(focused)
-  const isLegal = focused && legal.includes(focused)
-  const faceClass = isPassing ? (isSelected ? '-selected' : '') : (legal.length ? (isLegal ? '-legal' : '-illegal') : '')
-
-  const focusHtml = focused
-    ? `<div class="h-focus-card" data-hold-card="${esc(focused)}">${cardFace(focused, faceClass)}</div>
-       ${cards.length > 1 ? `<div class="h-hand-hint">${idx + 1} / ${cards.length}</div>` : ''}`
-    : `<div class="h-empty">no cards</div>`
-
-  const pendingHtml = pendingPlay ? `
-    <div class="h-pending">
-      <div class="h-pending-text">playing ${esc(glyph(pendingPlay.card))} in <span>${Math.max(0, Math.ceil((PLAY_UNDO_MS - (Date.now() - pendingPlay.armedAt)) / 1000))}</span>…</div>
-      <button class="h-undo-btn" data-undo-play>Undo</button>
-    </div>` : ''
-
-  const action = pendingHtml ? pendingHtml
-    : isPassing && !passedAlready
-    ? `<button class="h-pass-btn" ${selected.length === 3 ? '' : 'disabled'} data-pass>Pass ${selected.length}/3 →</button>`
-    : isPassing ? `<div class="h-waiting">passed — waiting on the table…</div>`
-    : phase === 'playing' ? `<div class="h-waiting">${turn === mySeat ? 'hold your card to play it' : (seats[turn] ? esc(seats[turn].name) : 'waiting') + '…'}</div>`
-    : ''
-
-  // the ready toggle shows before every deal (fresh each hand, not just
-  // the game's first) — see dealHand()'s ready reset and maybeAutoDeal().
-  const readyBlock = (phase === 'waiting' || phase === 'hand-end' || phase === 'game-end') ? `
+  return `
     <button class="h-ready-btn -${iAmReady ? 'green' : 'yellow'}" data-ready>${iAmReady ? '✓ Ready' : 'Ready?'}</button>
-    <div class="h-roster">${readyRoster(seats)}</div>` : ''
+    <div class="h-roster">${readyRoster(seats)}</div>`
+}
+
+function handView() {
+  const { phase, turn, myHand, selected, trickCount, heartsBroken, trick, seats, focusIdx } = $.learn()
+  const isPassing = phase === 'passing'
+  const legal = phase === 'playing' && turn === mySeat ? legalPlays(myHand, trick, heartsBroken, trickCount === 0) : []
+  const mySeatData = seats[mySeat]
+
+  function faceClassFor(card) {
+    if (isPassing) return selected.includes(card) ? '-selected' : ''
+    if (legal.length) return legal.includes(card) ? '-legal' : '-illegal'
+    return ''
+  }
+
+  const showConfirm = phase === 'passing' || phase === 'playing'
 
   return `
     <div class="h-felt -hand">
-      <div class="h-hand-header">
-        <span class="h-hand-name">${esc(mySeatData ? mySeatData.name : '')}</span>
-        <button class="h-edit-name" data-edit-name title="Change game name">✎</button>
+      <div class="h-top-half">
+        <div class="h-hand-header">
+          <span class="h-hand-name">${esc(mySeatData ? mySeatData.name : '')}</span>
+          <button class="h-edit-name" data-edit-name title="Change game name">✎</button>
+          ${showConfirm ? `<button class="h-confirm-btn" data-confirm ${canConfirm() ? '' : 'disabled'}>Confirm</button>` : ''}
+        </div>
+        <div class="h-staging">${stagingArea()}</div>
       </div>
-      <div class="h-status-bar">${readyBlock}</div>
-      <div class="h-hand-focus">${focusHtml}</div>
-      <div class="h-hand-actions">${action}</div>
+      <div class="h-bottom-half">${handStack(myHand, focusIdx, faceClassFor)}</div>
       ${flashOverlay()}
     </div>`
 }
@@ -482,48 +566,43 @@ let _flashTimer = null
 $.when('click', '[data-pass]', submitPass)
 $.when('click', '[data-ready]', toggleReady)
 $.when('click', '[data-edit-name]', editGameName)
-$.when('click', '[data-undo-play]', cancelPendingPlay)
-// a plain tap on the focused card only does something during passing
-// (toggle it into/out of the 3 you're sending) — during play, a tap is
-// just a tap; playing a card takes a hold, handled below by raw pointer
-// events since it needs to measure a HOLD duration, not react to a click.
-$.when('click', '[data-hold-card]', e => {
-  const card = e.target.closest('[data-hold-card]').dataset.holdCard
-  const { phase, selected } = $.learn()
-  if (phase !== 'passing') return
-  if (selected.includes(card)) $.whisper({ selected: selected.filter(c => c !== card) })
-  else if (selected.length < 3) $.whisper({ selected: [...selected, card] })
+$.when('click', '[data-confirm]', confirmAction)
+// unstage/jump are both plain buttons with no nested elements (see
+// cardMini's own comment) — a real click target, safe for $.when's
+// literal event.target match.
+$.when('click', '[data-unstage]', e => unstageCard(e.target.closest('[data-unstage]').dataset.unstage))
+$.when('click', '[data-jump-card]', e => {
+  const card = e.target.closest('[data-jump-card]').dataset.jumpCard
+  const cards = orderedHand($.learn().myHand)
+  const i = cards.indexOf(card)
+  if (i !== -1) $.whisper({ focusIdx: i })
 })
 
-// === swipe (rank/suit) + hold (play) ===
+// === swipe (rank/suit) + hold (stage) ===
 // $.when only delegates via exact matches(), not closest() (see saga-pitch's
-// own swipe comment for the same limitation) — raw document listeners plus
-// closest() sidestep it, and give both gestures a shared pointerdown/up/move
-// lifecycle without fighting each other: a hold requires the finger to stay
-// essentially still past HOLD_MS (movement cancels it, same threshold logic
-// protects a swipe from ever being misread as a hold), a swipe requires it
-// to travel past SWIPE_THRESHOLD before release. They can't both fire from
-// the same gesture.
+// own swipe comment for the same limitation) — that's exactly why "tap to
+// select" never worked here before: the focused card's markup has nested
+// spans (the corner marks), so a tap landing on one of those never matched
+// [data-hold-card] at all. Raw document listeners plus closest() sidestep
+// it, and give both gestures a shared pointerdown/up/move lifecycle without
+// fighting each other: a hold requires the finger to stay essentially still
+// past HOLD_MS (movement cancels it, same threshold logic protects a swipe
+// from ever being misread as a hold), a swipe requires it to travel past
+// SWIPE_THRESHOLD before release. They can't both fire from the same
+// gesture.
 const SWIPE_THRESHOLD = 40
-const HOLD_MS = 550
+const HOLD_MS = 500
 let _gestureStart = null
 let _holdTimer = null
 
 document.addEventListener('pointerdown', (event) => {
   const holdEl = event.target.closest('[data-hold-card]')
-  const zone = event.target.closest('.h-hand-focus')
+  const zone = event.target.closest('.h-bottom-half')
   if (!zone || !zone.closest($.link)) return
-  _gestureStart = { x: event.clientX, y: event.clientY, card: holdEl ? holdEl.dataset.holdCard : null }
+  _gestureStart = { x: event.clientX, y: event.clientY }
   clearTimeout(_holdTimer)
   if (!holdEl) return
-  _holdTimer = setTimeout(() => {
-    const { phase, turn, myHand, heartsBroken, trick, trickCount, pendingPlay } = $.learn()
-    if (pendingPlay || mySeat === null) return
-    if (phase !== 'playing' || turn !== mySeat) return
-    const card = holdEl.dataset.holdCard
-    if (!legalPlays(myHand, trick, heartsBroken, trickCount === 0).includes(card)) return
-    armPlay(card)
-  }, HOLD_MS)
+  _holdTimer = setTimeout(() => stageCard(holdEl.dataset.holdCard), HOLD_MS)
 })
 
 document.addEventListener('pointermove', (event) => {
@@ -554,20 +633,7 @@ function scheduleFlashExpiry() {
   if (remaining > 0) _flashTimer = setTimeout(redraw, remaining + 50)
 }
 
-// resolves an armed play once its undo window has actually elapsed, and
-// redraws every tick in between so the visible countdown keeps ticking.
-function tickPendingPlay() {
-  const { pendingPlay } = $.learn()
-  if (!pendingPlay) return
-  if (Date.now() - pendingPlay.armedAt >= PLAY_UNDO_MS) {
-    $.whisper({ pendingPlay: null })
-    playCard(pendingPlay.card)
-  } else {
-    redraw()
-  }
-}
-
-setInterval(() => { scheduleFlashExpiry(); maybeAutoDeal(); tickPendingPlay() }, 250)
+setInterval(() => { scheduleFlashExpiry(); maybeAutoDeal() }, 250)
 
 // === felt, cards, corners ===
 $.style(`
@@ -614,6 +680,7 @@ $.style(`
   & .h-trick-slot.-bl { bottom: 0; left: 0; }
 
   & .h-card {
+    position: relative;
     width: 3.6rem; height: 5rem; border-radius: .5rem; background: #fffdf5;
     display: grid; place-items: center; font-size: 1.4rem; font-weight: 800;
     box-shadow: 0 .15rem .4rem rgba(0,0,0,.35);
@@ -621,30 +688,51 @@ $.style(`
   & .h-card.-red { color: #b3273c; }
   & .h-card.-black { color: #1a1a1a; }
   & .h-card.-flash { width: 7rem; height: 9.6rem; font-size: 2.6rem; }
+  & .h-corner-mark { position: absolute; font-size: .62rem; font-weight: 800; line-height: 1; }
+  & .h-corner-mark.-tl { top: .3rem; left: .3rem; }
+  & .h-corner-mark.-br { bottom: .3rem; right: .3rem; transform: rotate(180deg); }
+  & .h-card.-flash .h-corner-mark { font-size: 1rem; }
 
-  & .h-felt.-hand { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.2rem; padding: 4.5rem 1rem 1.5rem; box-sizing: border-box; }
-  & .h-card.-selected { outline: .25rem solid gold; transform: translateY(-.6rem); }
+  & .h-card.-selected { outline: .25rem solid gold; }
   & .h-card.-legal { outline: .2rem solid #46d369; }
   & .h-card.-illegal { opacity: .35; }
-  & .h-hand-actions { display: flex; justify-content: center; min-height: 3rem; align-items: center; }
-  & .h-pass-btn { font-size: 1.1rem; font-weight: 700; padding: .6rem 1.4rem; border-radius: 999px; border: none; background: lemonchiffon; cursor: pointer; }
-  & .h-pass-btn:disabled { opacity: .4; cursor: default; }
   & .h-waiting { color: lemonchiffon; opacity: .8; }
 
-  & .h-hand-header { position: absolute; top: 1rem; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: .5rem; }
+  /* hand: top half (staging + confirm) / bottom half (the whole hand) */
+  & .h-felt.-hand { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
+  & .h-top-half, & .h-bottom-half { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .8rem; padding: .8rem; box-sizing: border-box; }
+  & .h-top-half { border-bottom: 1px solid rgba(255,255,255,.12); }
+
+  & .h-hand-header { width: 100%; display: flex; align-items: center; justify-content: center; gap: .5rem; }
   & .h-hand-name { color: lemonchiffon; font-weight: 700; font-size: 1.05rem; }
   & .h-edit-name { background: none; border: none; color: lemonchiffon; opacity: .7; font-size: 1rem; cursor: pointer; padding: 0; }
   & .h-edit-name:hover { opacity: 1; }
+  & .h-confirm-btn { margin-left: auto; font-size: 1rem; font-weight: 700; padding: .5rem 1.2rem; border-radius: 999px; border: none; background: #2ecc40; color: #06341a; cursor: pointer; }
+  & .h-confirm-btn:disabled { background: rgba(255,255,255,.2); color: rgba(255,255,255,.5); cursor: default; }
 
-  & .h-hand-focus { touch-action: none; user-select: none; display: flex; flex-direction: column; align-items: center; gap: .6rem; }
-  & .h-focus-card .h-card { width: 7rem; height: 9.8rem; font-size: 2.6rem; cursor: pointer; }
-  & .h-hand-hint { color: lemonchiffon; opacity: .55; font-size: .8rem; }
+  & .h-staging { display: flex; flex-direction: column; align-items: center; gap: .5rem; }
+  & .h-staged-row { display: flex; gap: .5rem; }
+  & .h-staged-slot { width: 3.6rem; height: 5rem; border-radius: .5rem; border: .15rem dashed rgba(255,255,255,.3); }
+  & .h-staged-card { background: none; border: none; padding: 0; cursor: pointer; }
+  & .h-hint-text { color: lemonchiffon; opacity: .6; font-size: .82rem; }
 
-  & .h-pending { display: flex; flex-direction: column; align-items: center; gap: .4rem; }
-  & .h-pending-text { color: gold; font-weight: 700; }
-  & .h-undo-btn { font-size: 1rem; font-weight: 700; padding: .45rem 1.4rem; border-radius: 999px; border: none; background: #e74c3c; color: #fff; cursor: pointer; }
+  & .h-bottom-half { touch-action: none; user-select: none; }
+  & .h-suit-current { display: flex; align-items: center; justify-content: center; gap: .4rem; flex-wrap: wrap; }
+  & .h-focus-card .h-card { width: 6.4rem; height: 9rem; font-size: 2.3rem; cursor: pointer; }
+  & .h-focus-card .h-corner-mark { font-size: .85rem; }
+  & .h-mini-card {
+    width: 2.4rem; height: 3.3rem; border-radius: .35rem; background: #fffdf5; border: none; cursor: pointer;
+    font-size: .82rem; font-weight: 800; padding: 0;
+  }
+  & .h-mini-card.-red { color: #b3273c; }
+  & .h-mini-card.-black { color: #1a1a1a; }
+  & .h-mini-card.-selected { outline: .18rem solid gold; }
+  & .h-mini-card.-legal { outline: .15rem solid #46d369; }
+  & .h-mini-card.-illegal { opacity: .35; }
+  & .h-suit-peek { display: flex; justify-content: center; gap: .15rem; opacity: .55; }
+  & .h-suit-peek .h-mini-card { width: 2rem; height: 1.1rem; border-radius: .25rem .25rem 0 0; overflow: hidden; }
+  & .h-suit-peek.-next .h-mini-card { border-radius: 0 0 .25rem .25rem; }
 
-  & .h-status-bar { position: absolute; top: 3.6rem; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: .6rem; }
   & .h-ready-btn { font-size: 1.1rem; font-weight: 700; padding: .55rem 1.6rem; border-radius: 999px; border: none; cursor: pointer; }
   & .h-ready-btn.-yellow { background: #f1c40f; }
   & .h-ready-btn.-green { background: #2ecc40; color: #06341a; }
