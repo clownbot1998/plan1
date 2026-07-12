@@ -71,10 +71,18 @@ const $ = Self(tag, {
   focusIdx: 0,   // which card in orderedHand(myHand) is centered in the hand carousel
 })
 
+// a null value under any of these fields is a tombstone (deletion) —
+// needed now that a stale seat actually has to disappear, not just get
+// overwritten. same convention lore-game's own ROOM_MERGE already uses.
 const ROOM_MERGE = `(state, payload) => {
   var out = Object.assign({}, state, payload)
   ;['seats','dealCipher','passCipher','passSubmitted'].forEach(function (field) {
-    if (payload[field]) out[field] = Object.assign({}, state[field] || {}, payload[field])
+    if (payload[field]) {
+      var base = Object.assign({}, state[field] || {})
+      var inc = payload[field]
+      Object.keys(inc).forEach(function (k) { if (inc[k] === null) { delete base[k] } else { base[k] = inc[k] } })
+      out[field] = base
+    }
   })
   return out
 }`
@@ -122,7 +130,38 @@ async function claimSeat() {
     return n
   })()
   const publicKeyJwk = await crypto.subtle.exportKey('jwk', myKeypair.publicKey)
-  commit({ seats: { [mySeat]: { name, publicKeyJwk, ready: false } } })
+  commit({ seats: { [mySeat]: { name, publicKeyJwk, ready: false, lastSeen: Date.now() } } })
+}
+
+// presence: every claimed seat heartbeats itself into shared state. the
+// table (and only the table — see maybeReleaseStaleSeats) watches for a
+// seat that's gone quiet for HEARTBEAT_TIMEOUT_MS and releases it, so a
+// dead phone or a dropped tab doesn't permanently lock a corner. a device
+// that reconnects on its own (same tab, brief network blip) just re-heart-
+// beats before that ever trips — nothing to recover, nothing lost. A
+// genuinely new device re-claiming a released seat gets a fresh keypair,
+// which can't decrypt whatever hand was already dealt to the old one —
+// syncPrivateState() catches that decrypt failure rather than crashing;
+// the new claim is caught up cleanly on the next deal.
+const HEARTBEAT_TIMEOUT_MS = 5000
+function heartbeat() {
+  if (mySeat === null) return
+  const seat = $.learn().seats[mySeat]
+  if (!seat) return
+  commit({ seats: { [mySeat]: { ...seat, lastSeen: Date.now() } } })
+}
+setInterval(heartbeat, 2000)
+
+function maybeReleaseStaleSeats() {
+  if ($.learn().view !== 'table') return
+  const { seats } = $.learn()
+  const now = Date.now()
+  const stale = {}
+  ;[0, 1, 2, 3].forEach(i => {
+    const s = seats[i]
+    if (s && now - (s.lastSeen || 0) > HEARTBEAT_TIMEOUT_MS) stale[i] = null
+  })
+  if (Object.keys(stale).length) commit({ seats: stale })
 }
 
 function toggleReady() {
@@ -307,19 +346,27 @@ async function syncPrivateState() {
   if (mySeat === null || !myKeypair) return
   const { dealCipher, passCipher, phase, passSubmitted, round } = $.learn()
 
+  // a released-and-reclaimed seat gets a brand new keypair that cannot
+  // decrypt whatever was dealt to the OLD one — that's expected, not a
+  // bug, so this fails quiet rather than throwing: the new claim just
+  // waits for the next deal instead of crashing the render loop.
   const mine = dealCipher[mySeat]
   if (mine && mine !== _lastDealSeen) {
     _lastDealSeen = mine
     _lastPassSeen = null
-    const hand = await decryptMine(myKeypair.privateKey, mine)
-    $.teach({ myHand: sortHand(hand) })
+    try {
+      const hand = await decryptMine(myKeypair.privateKey, mine)
+      $.teach({ myHand: sortHand(hand) })
+    } catch (e) { console.warn('hearts: could not decrypt this deal (reclaimed seat?):', e.message) }
   }
 
   const incoming = passCipher[mySeat]
   if (incoming && incoming !== _lastPassSeen) {
     _lastPassSeen = incoming
-    const cards = await decryptMine(myKeypair.privateKey, incoming)
-    $.teach({ myHand: sortHand([...$.learn().myHand, ...cards]) })
+    try {
+      const cards = await decryptMine(myKeypair.privateKey, incoming)
+      $.teach({ myHand: sortHand([...$.learn().myHand, ...cards]) })
+    } catch (e) { console.warn('hearts: could not decrypt an incoming pass (reclaimed seat?):', e.message) }
   }
 
   if (phase === 'passing' && Object.keys(passSubmitted).length === 4 && _passFlipRound !== round) {
@@ -615,7 +662,7 @@ function scheduleFlashExpiry() {
   if (remaining > 0) _flashTimer = setTimeout(redraw, remaining + 50)
 }
 
-setInterval(() => { scheduleFlashExpiry(); maybeAutoDeal() }, 250)
+setInterval(() => { scheduleFlashExpiry(); maybeAutoDeal(); maybeReleaseStaleSeats() }, 250)
 
 // === felt, cards, corners ===
 $.style(`
