@@ -53,18 +53,22 @@ function _sandbox({ mergeHandler, parameters, bypassSecurity = false }) {
 const _MERGE_SPREAD = '(state, payload) => ({ ...state, ...payload })'
 
 function _udpUpload(elf, knowledge, mergeStr = _MERGE_SPREAD) {
-  if (!_peerReady || !channel) return
   const id = _elfRooms[elf]
   if (!id) return
-  channel.emit('stateUpload', {
-    id,
-    data: {
-      __plan98_sender_id: PLAN98_NODE_ID,
-      elf,
-      knowledge: knowledge ?? store.get(elf),
-      serializedNuance: mergeStr,
-    }
-  })
+  // snapshot now — knowledge/store.get(elf) reflect this call's intent, not
+  // whatever the store happens to hold once the connection finally opens.
+  const data = {
+    __plan98_sender_id: PLAN98_NODE_ID,
+    elf,
+    knowledge: knowledge ?? store.get(elf),
+    serializedNuance: mergeStr,
+  }
+  // same fix linkState() already needed: bailing out on `!_peerReady` here
+  // silently dropped the broadcast forever, no retry, no error — fine for
+  // callers that re-broadcast on every keystroke, but fatal for a one-shot
+  // commit (e.g. claiming a seat) that races the geckos handshake and never
+  // gets a second chance. _connect() already queues until _peerReady.
+  _connect(() => { channel.emit('stateUpload', { id, data }) })
 }
 
 const logs = {}
