@@ -662,7 +662,7 @@ function subscribe(target) {
   }).catch(() => {})
 }
 
-function save(target) {
+export function save(target) {
   const { cards, edgeTypes } = $.learn()
   const author = getKeycard()?.asJSON?.controller || null
   fetch(boardUrl(_boardId), {
@@ -676,7 +676,7 @@ function save(target) {
 
 // ── card operations ──────────────────────────────────────────────────────────
 
-function createCard(x, y, w, h) {
+export function createCard(x, y, w, h) {
   const id = crypto.randomUUID()
   const { cards, trayZ } = $.learn()
   const author = getKeycard()?.asJSON?.controller || null
@@ -705,7 +705,7 @@ function createCard(x, y, w, h) {
   return id
 }
 
-function updateCard(id, updates) {
+export function updateCard(id, updates) {
   const { cards } = $.learn()
   if (!cards[id]) return
   const old = {}

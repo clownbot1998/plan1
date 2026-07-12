@@ -16,6 +16,18 @@
 
 import Self, { linkState, broadcastElf, channel } from '@plan98/elf'
 import Cache from '@silly/cache'
+// bulletin-board and lore-game are separate elves with separate stores, even
+// when they share a ?id= — that id only threads through bulletin-board's own
+// WAS/braid persistence (see solid-utils.js), it doesn't bridge state. A
+// dispatched DOM event won't work either: the Oracle revealing something
+// doesn't guarantee a live <bulletin-board> element exists anywhere right
+// then (players are expected to be the ones with it mounted). Importing
+// these three functions directly works regardless of whether the tag is
+// mounted — ES modules are singletons, and bulletin-board.js has no
+// throwing top-level side effects (verified: linkState/wasLoad/geckosJoin
+// are all called from lifecycle hooks, never at module scope), so importing
+// it early just defines its functions without touching the network.
+import { createCard as bbCreateCard, updateCard as bbUpdateCard, save as bbSave } from './bulletin-board.js'
 
 const tag = 'lore-game'
 const cache = Cache(tag)
@@ -83,6 +95,11 @@ let refData = { monsters: [], items: [], places: [], actions: [], conditions: []
 // dot) regenerates this same template with no other reason to change —
 // putting this in reactive state would just make redraw fight itself.
 const openAccordions = new Set()
+
+// the single, persistent <bulletin-board> DOM node for the Board screen —
+// created once, ever, and moved (not recreated) into place each render.
+// See afterUpdate's mounting comment for why this exists.
+let _boardElement = null
 
 // per-character undo/redo — same shape as flip-book's per-frame stacks
 // (client/public/elves/flip-book.js: _getUndoStack/_getRedoStack/captureUndo),
@@ -231,9 +248,15 @@ function consumeClaimParam(id) {
 // can't drift out of sync with each other.
 function restoreLocalIdentity(id) {
   return {
-    role: sessionStorage.getItem('lore-game-role-' + id) || null,
+    // no manual picker anymore — a fresh session with no claim param and
+    // no cached role is, definitionally, whoever created or is managing
+    // the game (Oracle). Players only ever exist by way of a claim link,
+    // which consumeClaimParam() already sets 'player' from before this
+    // runs — so this default is never wrong, and there's no remaining
+    // path where a human needs to choose between the two by hand.
+    role: sessionStorage.getItem('lore-game-role-' + id) || 'oracle',
     activePlayerId: sessionStorage.getItem('lore-game-me-' + id) || null,
-    screen: sessionStorage.getItem('lore-game-screen-' + id) || 'home',
+    screen: sessionStorage.getItem('lore-game-screen-' + id) || 'board',
     sheetHandbookTab: sessionStorage.getItem('lore-game-hbtab-' + id) || 'actions',
   }
 }
@@ -299,8 +322,22 @@ function deleteLoreGame(id) {
   $.whisper({ loading: false })
 })()
 
-// bump rev every 2s so the live/offline indicator stays fresh
-setInterval(redraw, 2000)
+// poll for the live/offline dot every 2s, but only actually trigger a
+// full-tree redraw when the connection state has genuinely flipped — an
+// unconditional redraw() here forces diffHTML to re-diff *everything*,
+// including embedded elves like the board (bulletin-board manages its own
+// internal DOM outside diffHTML's tracking; re-diffing a tree that names
+// its tag with no children wipes whatever it built — see boardTab()'s own
+// comment for the fix that patched that specific instance). Checking
+// first isn't just an optimization, it shrinks how often *any* embedded
+// child gets a gratuitous re-diff at all.
+let _lastLiveState = null
+setInterval(() => {
+  const live = !!(typeof channel !== 'undefined' && channel && channel.id)
+  if (live === _lastLiveState) return
+  _lastLiveState = live
+  redraw()
+}, 2000)
 
 // === Self ===
 // shared fields (players, reveals) sync to the geckos room via commit().
@@ -320,23 +357,6 @@ export default $
 // pure functions — read state, return HTML strings. no side effects.
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) }
-
-function needRole() {
-  return `
-    <div class="lg-rolepick">
-      <h2>Who are you at this table?</h2>
-      <div class="lg-rolecards">
-        <button class="lg-rolecard" data-pick-role="oracle">
-          <span class="lg-rolecard-title">🔮 Oracle</span>
-          <span class="lg-rolecard-desc">Run the table — see every player, browse locations/monsters/items, reveal what the party discovers.</span>
-        </button>
-        <button class="lg-rolecard" data-pick-role="player">
-          <span class="lg-rolecard-title">🗡️ Player</span>
-          <span class="lg-rolecard-desc">Your own character sheet, plus the feed of everything the Oracle has revealed.</span>
-        </button>
-      </div>
-    </div>`
-}
 
 function needPlayer() {
   return `<div class="lg-empty">Ask your Oracle for a claim link or QR code to attach a character to this device.</div>`
@@ -547,18 +567,27 @@ function playersTab() {
     </div>`
 }
 
-function feedTab() {
-  const reveals = Object.values($.learn().reveals).sort((a, b) => b.revealedAt - a.revealedAt)
-  return `
-    <div class="lg-screen">
-      <div class="lg-sec-head"><h2>📜 Feed</h2></div>
-      ${reveals.length ? reveals.map(r => `
-        <div class="lg-feed-row">
-          <span class="lg-feed-kind">${REF_KINDS[r.kind]?.icon || ''}</span>
-          <span class="lg-feed-name">${esc(r.name)}</span>
-          <span class="lg-hint">${new Date(r.revealedAt).toLocaleTimeString()}</span>
-        </div>`).join('') : `<div class="lg-empty">Nothing revealed yet.</div>`}
-    </div>`
+// the board IS the shared table now — no id="" attribute on purpose, same
+// trick my-dashboard's dash uses: bulletin-board.js's own id resolution
+// (element attr → ?id= on the current page → mint one) reads location.search
+// of whatever page it's embedded in, and since this is a same-DOM embed
+// (not an iframe), "the page" is still /app/lore-game — so the board shares
+// lore-game's own ?id= with zero id-passing code. Full height wrapper since
+// bulletin-board expects to fill its container, same as the dash/dream-team
+// chain.
+// deliberately an EMPTY mount point, never mentioning <bulletin-board> in
+// the diffed string — see afterUpdate. Same trick my-dashboard already
+// uses for its own embedded elves (dream-team/cyber-security/etc): if the
+// tag itself appears in the string diffHTML compares against, diffHTML
+// enforces "this element has zero children" on every re-render (the
+// periodic redraw() alone is every 2s) and wipes whatever bulletin-board
+// manages internally via its own target.innerHTML= (a separate, unrelated
+// rendering system diffHTML has no visibility into). Keeping the tag out
+// of the string entirely means diffHTML only ever sees "same empty div,
+// same attrs" and reuses the node in place without touching its actual
+// (imperatively-inserted, diffHTML-invisible) children.
+function boardTab() {
+  return `<div class="lg-board-embed" data-board-mount></div>`
 }
 
 function sheetScreen() {
@@ -653,8 +682,8 @@ function sheetScreen() {
     </div>`
 }
 
-const ORACLE_SCREENS = { locations: () => referenceTab('locations'), monsters: () => referenceTab('monsters'), items: () => referenceTab('items'), players: playersTab, sheet: sheetScreen, feed: feedTab }
-const PLAYER_SCREENS = { sheet: sheetScreen, feed: feedTab }
+const ORACLE_SCREENS = { locations: () => referenceTab('locations'), monsters: () => referenceTab('monsters'), items: () => referenceTab('items'), players: playersTab, sheet: sheetScreen, board: boardTab }
+const PLAYER_SCREENS = { board: boardTab, sheet: sheetScreen }
 
 function modalView() {
   const { modal } = $.learn()
@@ -722,7 +751,7 @@ function playerShell() {
         </div>
       </aside>
       ${sidebarToggleButton(sidebarOpen)}
-      <main class="lg-main">${(PLAYER_SCREENS[screen] || PLAYER_SCREENS.sheet)()}</main>
+      <main class="lg-main">${(PLAYER_SCREENS[screen] || PLAYER_SCREENS.board)()}</main>
     </div>`
 }
 
@@ -756,23 +785,20 @@ function renderApp() {
   const { role } = $.learn()
   const g = registry.games.find(p => p.id === currentId)
   const live = !!(typeof channel !== 'undefined' && channel && channel.id)
+  const tabs = role === 'oracle'
+    ? ['board', 'locations', 'monsters', 'items', 'players', 'sheet']
+    : ['board', 'sheet']
   return `
     <div class="lg-shell">
       <div class="lg-topbar">
         <button class="lg-home-btn" data-goto-index>Back</button>
-        <button class="lg-pl-title" data-choose-role>${esc(g ? g.name : 'Lore Game')}</button>
-        ${role === 'oracle' ? `
-          <nav class="lg-nav">
-            ${['locations', 'monsters', 'items', 'players', 'sheet', 'feed'].map(s => `<button class="lg-tab ${$.learn().screen === s ? 'on' : ''}" data-screen="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
-          </nav>` : role === 'player' ? `
-          <nav class="lg-nav">
-            ${['sheet', 'feed'].map(s => `<button class="lg-tab ${$.learn().screen === s ? 'on' : ''}" data-screen="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
-          </nav>` : ''}
+        <span class="lg-pl-title">${esc(g ? g.name : 'Lore Game')}</span>
+        <nav class="lg-nav">
+          ${tabs.map(s => `<button class="lg-tab ${$.learn().screen === s ? 'on' : ''}" data-screen="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
+        </nav>
         <span class="lg-live ${live ? 'on' : ''}" title="realtime connection">${live ? '● live' : '○ offline'}</span>
       </div>
-      ${!role ? `<div class="lg-body"><main class="lg-main">${needRole()}</main></div>`
-        : role === 'oracle' ? oracleShell()
-        : playerShell()}
+      ${role === 'oracle' ? oracleShell() : playerShell()}
     </div>`
 }
 
@@ -787,6 +813,26 @@ function afterUpdate(target) {
       else openAccordions.delete(key)
     }
   })
+
+  // re-attach the SAME cached bulletin-board element every time, rather
+  // than creating a fresh one whenever the mount div looks empty. A
+  // childElementCount check alone still flickered a few times in
+  // practice: navigating to Board fires a burst of renders in quick
+  // succession (screen change, the 800ms defensive identity resync,
+  // etc), and if diffHTML rebuilds the mount div itself on any of those
+  // (rather than reusing it in place), a fresh div reads as "empty" and
+  // a NEW <bulletin-board> got created+mounted+re-hydrated from WAS each
+  // time — a real, visible remount, not just a wasted diff. Holding the
+  // actual DOM node in module scope and moving it into place sidesteps
+  // that entirely: appendChild on an already-attached node MOVES it
+  // without recreating it, so bulletin-board's own module state and
+  // internal DOM are never torn down no matter how many times the
+  // surrounding mount div gets rebuilt.
+  const boardMount = target.querySelector('.lg-board-embed[data-board-mount]')
+  if (boardMount) {
+    if (!_boardElement) _boardElement = document.createElement('bulletin-board')
+    if (boardMount.firstElementChild !== _boardElement) boardMount.appendChild(_boardElement)
+  }
 }
 
 $.draw(() => {
@@ -813,8 +859,6 @@ $.when('click', '[data-new-game]',     () => newLoreGame())
 $.when('click', '[data-open-game]',    e => openLoreGame(e.target.closest('[data-open-game]').dataset.openGame))
 $.when('click', '[data-del-game]',     e => deleteLoreGame(e.target.closest('[data-del-game]').dataset.delGame))
 $.when('click', '[data-rename-game]',  onRenameGame)
-$.when('click', '[data-choose-role]',  () => $.whisper({ role: null }))
-$.when('click', '[data-pick-role]',    onPickRole)
 $.when('click', '[data-screen]',       e => setScreen(e.target.closest('[data-screen]').dataset.screen))
 $.when('click', '[data-new-player]',   onNewCharacter)
 $.when('click', '[data-set-active]',   onSetActive)
@@ -904,12 +948,6 @@ function onRenameGame(e) {
   persistRegistry()
 }
 
-function onPickRole(e) {
-  const role = e.target.closest('[data-pick-role]').dataset.pickRole
-  sessionStorage.setItem('lore-game-role-' + currentId, role)
-  $.whisper({ role, screen: role === 'oracle' ? 'locations' : 'sheet' })
-}
-
 // setting activePlayerId ALWAYS has to go through here, never a bare
 // $.whisper — loadLoreGame's 800ms post-join resync (a defense borrowed
 // from pot-luck, for a real race where the room join can briefly clobber
@@ -982,12 +1020,35 @@ function onDelPlayer(e) {
 }
 
 
+// same golden-angle spiral bulletin-board's own dropMediaSpiral uses for
+// multi-item drops, just computed here since we only imported the card
+// functions, not bulletin-board's pan/zoom state (module-private, not
+// exported — and not needed: dropping around the 5000×5000 canvas's own
+// center is a fine default, the Oracle/players can drag from there).
+let _revealDropCount = 0
+const REVEAL_CARD_COLOR = { locations: '#dbe9ff', monsters: '#ffe0e0', items: '#fff3cd' }
+
+function dropRevealCard(kind, entry) {
+  const W = 200, H = 140, spacing = 220
+  const angleStep = Math.PI * (3 - Math.sqrt(5))
+  const i = _revealDropCount++
+  const r = i === 0 ? 0 : spacing * Math.sqrt(i)
+  const angle = i * angleStep
+  const cx = 2500, cy = 2500
+  const x = cx + r * Math.cos(angle) - W / 2
+  const y = cy + r * Math.sin(angle) - H / 2
+  const cardId = bbCreateCard(x, y, W, H)
+  bbUpdateCard(cardId, { text: `${REF_KINDS[kind].icon} ${entry.name}`, color: REVEAL_CARD_COLOR[kind] || '#fffde7' })
+  bbSave()
+}
+
 function onReveal(e) {
   const [kind, refId] = e.target.closest('[data-reveal]').dataset.reveal.split(':')
   const entry = REF_KINDS[kind].list().find(x => x.id === refId)
   if (!entry) return
   const id = nextId('r_')
   commit({ reveals: { [id]: { id, kind, refId, name: entry.name, revealedAt: Date.now() } } })
+  dropRevealCard(kind, entry)
 }
 
 // === styles ===
@@ -1007,7 +1068,7 @@ $.style(`
   & .lg-tab.on { background:#8b5cf6; }
   & .lg-live { font-size:.72rem; opacity:.6; }
   & .lg-live.on { color:#46d369; opacity:1; }
-  & .lg-pl-title { background:rgba(255,255,255,.12); color:#fff; border:none; padding:.3rem .7rem; border-radius:.4rem; cursor:pointer; font-weight:600; }
+  & .lg-pl-title { display:inline-block; background:rgba(255,255,255,.12); color:#fff; padding:.3rem .7rem; border-radius:.4rem; font-weight:600; }
   & .lg-body { display:flex; flex:1; min-height:0; }
   & .lg-sidebar { width:14rem; flex:0 0 14rem; background:#e7e3d8; border-right:1px solid #d3cdbd; padding:.7rem; display:flex; flex-direction:column; gap:.5rem; overflow-y:auto; overflow-x:hidden; transition:width .15s, flex-basis .15s, padding .15s; }
   & .lg-body[data-sidebar-open="false"] .lg-sidebar { width:0; flex-basis:0; padding:0; border-right:none; }
@@ -1033,7 +1094,12 @@ $.style(`
   & .lg-userrow-name { flex:1; }
   & .lg-userrow.on { border-color:#8b5cf6; box-shadow:0 0 0 1px #8b5cf6 inset; }
   & .lg-dot { font-size:.6rem; text-transform:uppercase; letter-spacing:.04em; color:#fff; background:#8b5cf6; border-radius:.25rem; padding:.1rem .35rem; }
-  & .lg-main { flex:1; min-width:0; overflow:auto; padding:1rem 1.2rem; }
+  & .lg-main { flex:1; min-width:0; overflow:auto; padding:1rem 1.2rem; position:relative; }
+  /* bulletin-board wants to fill its container edge-to-edge (own pan/zoom
+     canvas, own scrolling) — override .lg-main's padding for this one
+     screen rather than give every other screen's text content 0 padding. */
+  & .lg-board-embed { position:absolute; inset:0; }
+  & .lg-board-embed bulletin-board { display:block; width:100%; height:100%; }
   & .lg-screen { display:flex; flex-direction:column; gap:.6rem; max-width:900px; }
   & .lg-sec-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
   & h1 { margin:.2rem 0; } & h2 { margin:.2rem 0; font-size:1.15rem; }
@@ -1045,11 +1111,6 @@ $.style(`
   & .lg-new { background:#8b5cf6; }
   & .lg-prow { display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.5rem; }
   & .lg-empty { opacity:.55; padding:.6rem 0; font-size:.9rem; }
-  & .lg-rolepick { display:flex; flex-direction:column; gap:1.2rem; align-items:center; padding:2rem 1rem; }
-  & .lg-rolecards { display:flex; gap:1rem; flex-wrap:wrap; justify-content:center; }
-  & .lg-rolecard { width:16rem; min-height:9rem; background:#fff; border:1px solid #d8d2c2; border-radius:.7rem; padding:1rem; display:flex; flex-direction:column; gap:.5rem; cursor:pointer; text-align:left; }
-  & .lg-rolecard:hover { border-color:#8b5cf6; transform:translateY(-2px); transition:.12s; }
-  & .lg-rolecard-title { font-size:1.1rem; font-weight:700; } & .lg-rolecard-desc { opacity:.7; font-size:.88rem; }
   & .lg-search { padding:.35rem .6rem; border:1px solid #c9c2af; border-radius:.35rem; font:inherit; min-width:14rem; }
   & .lg-accordions { display:flex; flex-direction:column; gap:.4rem; }
   & .lg-accordion { background:#fff; border:1px solid #d8d2c2; border-radius:.5rem; padding:.4rem .6rem; }
