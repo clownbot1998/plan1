@@ -196,15 +196,28 @@ function consumeClaimParam() {
   history.replaceState(null, '', qs ? `?${qs}` : location.pathname)
 }
 
+// "what's your game name?" — the one prompt every plan1-hearts player sees,
+// worth keeping as a fixed phrase rather than reinventing "your name"/
+// "display name"/"username" per elf. if another card-table-shaped elf ever
+// asks a player to name themselves, borrow this line verbatim.
+function gameNamePrompt(seat) { return prompt("What's your game name?") || `Seat ${seat + 1}` }
+
 async function claimSeat() {
   myKeypair = await ensureKeypair(gameId, mySeat)
   const name = sessionStorage.getItem('hearts-name-' + gameId) || (() => {
-    const n = prompt('Your name at the table:') || `Seat ${mySeat + 1}`
+    const n = gameNamePrompt(mySeat)
     sessionStorage.setItem('hearts-name-' + gameId, n)
     return n
   })()
   const publicKeyJwk = await crypto.subtle.exportKey('jwk', myKeypair.publicKey)
-  commit({ seats: { [mySeat]: { name, publicKeyJwk } } })
+  commit({ seats: { [mySeat]: { name, publicKeyJwk, ready: false } } })
+}
+
+function toggleReady() {
+  if (mySeat === null) return
+  const seat = $.learn().seats[mySeat]
+  if (!seat) return
+  commit({ seats: { [mySeat]: { ...seat, ready: !seat.ready } } })
 }
 
 function redraw() { $.whisper({ tick: ($.learn().tick || 0) + 1 }) }
@@ -216,7 +229,10 @@ function redraw() { $.whisper({ tick: ($.learn().tick || 0) + 1 }) }
     const saved = sessionStorage.getItem('hearts-seat-' + gameId)
     if (saved !== null) mySeat = Number(saved)
   }
-  linkState(tag, gameId)
+  // awaiting the join snapshot before claiming: claimSeat()'s commit() can
+  // no longer race stateCache's blind-replace merge, because the snapshot
+  // is already applied by the time claimSeat() writes anything.
+  await linkState(tag, gameId)
   if (mySeat !== null) await claimSeat()
   $.whisper({ view: mySeat === null ? 'table' : 'hand' })
 })()
@@ -345,6 +361,17 @@ function cardFace(card, extraClass = '') {
 
 const CORNER_CLASS = ['-tl', '-tr', '-br', '-bl']
 
+// red/yellow/green is the one status paradigm this whole elf uses for a
+// seat: red = nobody's claimed it yet, yellow = claimed (this device did
+// successfully reach the room at least once — broadcastElf only lands a
+// seat here after its own connection was live) but hasn't readied up,
+// green = readied up. There's no live "went back to red" detection for a
+// seat that claimed and then closed their phone mid-game — that would need
+// server-side presence tracking for linkState rooms, which doesn't exist
+// yet — named here rather than silently pretended away.
+function seatStatus(seat) { return !seat ? 'red' : seat.ready ? 'green' : 'yellow' }
+function statusDot(seat) { return `<span class="h-dot -${seatStatus(seat)}"></span>` }
+
 function splashView() {
   return `
     <div class="h-splash">
@@ -362,7 +389,7 @@ function seatCorner(seat) {
   const { turn, tricksWon } = $.learn()
   return `
     <div class="h-corner ${CORNER_CLASS[seat]} ${turn === seat ? '-turn' : ''}">
-      <div class="h-corner-name">${esc(s.name)}</div>
+      <div class="h-corner-name">${statusDot(s)}${esc(s.name)}</div>
       <div class="h-corner-tricks">${(tricksWon[seat] || []).length} pts: ${trickPoints(tricksWon[seat] || [])}</div>
     </div>`
 }
@@ -370,6 +397,7 @@ function seatCorner(seat) {
 function tableCenter() {
   const { phase, seats, trick, scores } = $.learn()
   const allClaimed = Object.keys(seats).length === 4
+  const allReady = allClaimed && [0, 1, 2, 3].every(i => seats[i].ready)
 
   if (!allClaimed) {
     const open = 4 - Object.keys(seats).length
@@ -378,6 +406,21 @@ function tableCenter() {
         <div class="h-waiting-hero">
           <div class="h-waiting-title">WAITING FOR PLAYERS</div>
           <div class="h-waiting-seats">${open} Seat${open === 1 ? '' : 's'} Open</div>
+        </div>
+      </div>`
+  }
+
+  // the ready-up gate only guards the FIRST deal of a game — once a table
+  // has actually played a hand, redeal/new-game stay one click, no need to
+  // make four people re-confirm they're still at the table they're
+  // already sitting at.
+  if (phase === 'waiting' && !allReady) {
+    const readyCount = [0, 1, 2, 3].filter(i => seats[i].ready).length
+    return `
+      <div class="h-center">
+        <div class="h-waiting-hero">
+          <div class="h-waiting-title">WAITING FOR READY</div>
+          <div class="h-waiting-seats">${readyCount}/4 Ready</div>
         </div>
       </div>`
   }
@@ -408,11 +451,21 @@ function tableView() {
     </div>`
 }
 
+function readyRoster(seats) {
+  return [0, 1, 2, 3].map(i => {
+    const s = seats[i]
+    const label = s ? esc(s.name) : `Seat ${i + 1} — open`
+    return `<div class="h-roster-row">${statusDot(s)}${label}</div>`
+  }).join('')
+}
+
 function handView() {
   const { phase, turn, myHand, selected, trickCount, heartsBroken, trick, seats } = $.learn()
   const isPassing = phase === 'passing'
   const passedAlready = !!$.learn().passSubmitted[mySeat]
   const legal = phase === 'playing' && turn === mySeat ? legalPlays(myHand, trick, heartsBroken, trickCount === 0) : []
+  const mySeatData = seats[mySeat]
+  const iAmReady = !!(mySeatData && mySeatData.ready)
 
   const cards = myHand.map(card => {
     const isSelected = selected.includes(card)
@@ -427,8 +480,16 @@ function handView() {
     : phase === 'playing' ? `<div class="h-waiting">${turn === mySeat ? 'your lead' : (seats[turn] ? esc(seats[turn].name) : 'waiting') + '…'}</div>`
     : ''
 
+  // the ready toggle only matters before the first deal of a game — once
+  // play has actually started, showing it invites clicking your own hand
+  // into an "unready" state mid-round for no reason.
+  const readyBlock = phase === 'waiting' ? `
+    <button class="h-ready-btn -${iAmReady ? 'green' : 'yellow'}" data-ready>${iAmReady ? '✓ Ready' : 'Ready?'}</button>
+    <div class="h-roster">${readyRoster(seats)}</div>` : ''
+
   return `
     <div class="h-felt -hand">
+      <div class="h-status-bar">${readyBlock}</div>
       <div class="h-hand-row">${cards}</div>
       <div class="h-hand-actions">${action}</div>
       ${flashOverlay()}
@@ -473,6 +534,7 @@ $.when('click', '[data-play]', startTable)
 $.when('click', '[data-deal]', () => dealHand(false))
 $.when('click', '[data-new-game]', () => dealHand(true))
 $.when('click', '[data-pass]', submitPass)
+$.when('click', '[data-ready]', toggleReady)
 $.when('click', '[data-card]', e => {
   const card = e.target.closest('[data-card]').dataset.card
   const { phase, selected } = $.learn()
@@ -518,7 +580,11 @@ $.style(`
   & .h-corner { position: absolute; width: 8rem; display: flex; flex-direction: column; align-items: center; gap: .3rem; color: lemonchiffon; }
   & .h-corner qr-code { width: 6rem; height: 6rem; border-radius: .6rem; overflow: hidden; }
   & .h-corner-label { font-size: .8rem; opacity: .8; }
-  & .h-corner-name { font-weight: 700; }
+  & .h-corner-name { font-weight: 700; display: flex; align-items: center; gap: .35rem; }
+  & .h-dot { width: .65rem; height: .65rem; border-radius: 50%; display: inline-block; flex: none; }
+  & .h-dot.-red { background: #e74c3c; }
+  & .h-dot.-yellow { background: #f1c40f; box-shadow: 0 0 .4rem rgba(241,196,15,.7); }
+  & .h-dot.-green { background: #2ecc40; box-shadow: 0 0 .4rem rgba(46,204,64,.7); }
   & .h-corner-tricks { font-size: .75rem; opacity: .7; }
   & .h-corner.-turn { text-shadow: 0 0 .6rem gold; }
   & .h-corner.-tl { top: 1rem; left: 1rem; }
@@ -561,6 +627,13 @@ $.style(`
   & .h-pass-btn { font-size: 1.1rem; font-weight: 700; padding: .6rem 1.4rem; border-radius: 999px; border: none; background: lemonchiffon; cursor: pointer; }
   & .h-pass-btn:disabled { opacity: .4; cursor: default; }
   & .h-waiting { color: lemonchiffon; opacity: .8; }
+
+  & .h-status-bar { position: absolute; top: 1rem; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: .6rem; }
+  & .h-ready-btn { font-size: 1.1rem; font-weight: 700; padding: .55rem 1.6rem; border-radius: 999px; border: none; cursor: pointer; }
+  & .h-ready-btn.-yellow { background: #f1c40f; }
+  & .h-ready-btn.-green { background: #2ecc40; color: #06341a; }
+  & .h-roster { display: flex; flex-direction: column; gap: .3rem; background: rgba(0,0,0,.25); border-radius: .6rem; padding: .5rem .9rem; }
+  & .h-roster-row { display: flex; align-items: center; gap: .5rem; color: lemonchiffon; font-size: .9rem; }
 
   & .h-flash { position: absolute; inset: 0; background: rgba(0,0,0,.85); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; z-index: 20; }
   & .h-flash-text { color: #fff; font-size: 1.4rem; font-weight: 700; text-align: center; }
