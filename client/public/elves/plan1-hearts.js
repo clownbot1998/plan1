@@ -8,10 +8,12 @@
 //
 // four seats, numbered clockwise from the corner they occupy on the table
 // screen: 0 top-left, 1 top-right, 2 bottom-right, 3 bottom-left. whoever
-// presses PLAY becomes the table — a spectator, not a fifth seat — and
+// opens the root URL with no ?id= at all becomes the table — a spectator,
+// not a fifth seat, minted the instant the page loads, no button — and
 // hands out a QR per empty corner. scanning one claims that seat forever
 // (for this browser tab's lifetime) and nowhere else in the whole app does
-// a device hold more than one seat.
+// a device hold more than one seat. the table itself never takes an
+// action: consensus (see maybeAutoDeal) is the only thing that moves it.
 //
 // === imports ===
 import Self, { linkState, broadcastElf, channel } from '@plan98/elf'
@@ -49,7 +51,7 @@ async function ensureKeypair(gameId, seat) {
 // only ever has one legitimate writer at a time (whoever's turn it is,
 // or the table dealing), so a plain overwrite is correct, not just simple.
 const $ = Self(tag, {
-  view: 'boot',       // boot | splash | table | hand
+  view: 'boot',       // boot | table | hand
   seats: {},           // { [seat]: { name, publicKeyJwk } }
   phase: 'waiting',    // waiting | passing | playing | hand-end | game-end
   round: 0,
@@ -154,7 +156,16 @@ function cancelPendingPlay() { $.whisper({ pendingPlay: null }) }
 function redraw() { $.whisper({ tick: ($.learn().tick || 0) + 1 }) }
 
 ;(async function boot() {
-  if (!gameId) { $.whisper({ view: 'splash' }); return }
+  // no ?id= at all means nobody's claiming a seat — this device IS about
+  // to become the table. minting one here and rewriting the URL to match
+  // is the same thing PLAY used to do by hand; there's no reason a human
+  // needs to be the one who presses it. "JUST FING HRTS" then shows up
+  // on the very first paint as the live status screen, not a separate
+  // splash in front of it.
+  if (!gameId) {
+    gameId = crypto.randomUUID()
+    history.replaceState(null, '', '?id=' + gameId)
+  }
   consumeClaimParam()
   if (mySeat === null) {
     const saved = sessionStorage.getItem('hearts-seat-' + gameId)
@@ -167,13 +178,6 @@ function redraw() { $.whisper({ tick: ($.learn().tick || 0) + 1 }) }
   if (mySeat !== null) await claimSeat()
   $.whisper({ view: mySeat === null ? 'table' : 'hand' })
 })()
-
-function startTable() {
-  gameId = crypto.randomUUID()
-  history.replaceState(null, '', '?id=' + gameId)
-  linkState(tag, gameId)
-  $.whisper({ view: 'table' })
-}
 
 // === dealing & passing (table-and-hand actions) ===
 // the table never clicks anything — dealing is a consequence of consensus
@@ -324,14 +328,6 @@ const CORNER_CLASS = ['-tl', '-tr', '-br', '-bl']
 function seatStatus(seat) { return !seat ? 'red' : seat.ready ? 'green' : 'yellow' }
 function statusDot(seat) { return `<span class="h-dot -${seatStatus(seat)}"></span>` }
 
-function splashView() {
-  return `
-    <div class="h-splash">
-      <div class="h-title">JUST<br>FING<br>HRTS</div>
-      <button class="h-play" data-play>PLAY</button>
-    </div>`
-}
-
 function seatCorner(seat) {
   const s = $.learn().seats[seat]
   if (!s) {
@@ -465,7 +461,6 @@ function flashOverlay() {
 
 function renderApp() {
   const { view } = $.learn()
-  if (view === 'splash') return splashView()
   if (view === 'table') return tableView()
   if (view === 'hand') return handView()
   return `<div class="h-empty">loading…</div>`
@@ -484,7 +479,6 @@ export default $
 // a fresh flash schedules its own expiry redraw — nothing else in this
 // file polls on a timer, so there's no periodic tick fighting this one.
 let _flashTimer = null
-$.when('click', '[data-play]', startTable)
 $.when('click', '[data-pass]', submitPass)
 $.when('click', '[data-ready]', toggleReady)
 $.when('click', '[data-edit-name]', editGameName)
@@ -579,13 +573,7 @@ setInterval(() => { scheduleFlashExpiry(); maybeAutoDeal(); tickPendingPlay() },
 $.style(`
   & { position: relative; display: block; height: 100%; width: 100%; overflow: hidden; font-family: inherit; }
 
-  & .h-splash {
-    height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2rem;
-    background: radial-gradient(ellipse at center, #2f6f4f 0%, #1f4d34 65%, #123023 100%);
-  }
   & .h-title { color: lemonchiffon; font-size: clamp(2.5rem, 12vw, 6rem); font-weight: 800; line-height: 1; text-align: center; letter-spacing: .05em; }
-  & .h-play { font-size: 1.6rem; font-weight: 700; padding: .8rem 3rem; border-radius: 999px; border: none; background: lemonchiffon; cursor: pointer; }
-  & .h-play:hover { transform: scale(1.04); }
 
   & .h-felt {
     position: relative; height: 100%; width: 100%;
