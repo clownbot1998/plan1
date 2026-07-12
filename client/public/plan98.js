@@ -4,6 +4,9 @@ export let channel = null
 let _peerReady = false
 const _pendingSubs = []
 const _elfRooms = {}
+// resolved once per elf, the moment ITS join snapshot (stateCache) has
+// actually been applied — see linkState()'s return value.
+const _stateCacheWaiters = {}
 
 function _connect(fn) {
   if (_peerReady) { fn(); return }
@@ -24,6 +27,8 @@ import('@geckos.io/client').then(({ default: geckos }) => {
     _pendingSubs.length = 0
     channel.on('stateCache', ({ elf, data }) => {
       if (data) store.set(elf, data, '(state, payload) => ({ ...state, ...payload })')
+      const waiters = _stateCacheWaiters[elf]
+      if (waiters) { delete _stateCacheWaiters[elf]; waiters.forEach(fn => fn()) }
     })
     channel.on('stateDownload', (data) => {
       if (!data?.elf) return
@@ -403,8 +408,21 @@ function createStore(initialState = {}, broadcast = () => null) {
   }
 }
 
+// returns a promise that resolves once THIS join's snapshot (stateCache)
+// has actually landed and been applied — not a fixed delay, the real
+// event. a caller that awaits this before writing its own state can never
+// lose the race that used to exist: stateCache's own merge is a blind
+// top-level replace (see the handler above), so a local write that landed
+// before the snapshot arrived could get silently stomped back out the
+// moment the snapshot showed up late. awaiting linkState() first means
+// the snapshot is already applied by the time any local write happens, so
+// there's nothing left for it to clobber. (plan1-hearts.js hit this
+// bug directly — a seat's own claim would vanish from ITS OWN local view,
+// though the server's authoritative copy, and every other peer's view,
+// stayed correct throughout.)
 export function linkState(elf, id) {
   _elfRooms[elf] = id
+  const ready = new Promise(resolve => { (_stateCacheWaiters[elf] ||= []).push(resolve) })
   // no `if (!channel) return` here — channel is assigned asynchronously
   // (geckos import resolves after this can run), and bailing out early
   // silently dropped the room-join forever with no retry. _connect()
@@ -414,6 +432,7 @@ export function linkState(elf, id) {
   _connect(() => {
     channel.emit('linkState', { elf, id, data: store.get(elf) })
   })
+  return ready
 }
 
 function uuidv4() {
