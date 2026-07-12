@@ -8,6 +8,7 @@
     "compile:desktop": "deno desktop scripts/desktop-bridge.js --backend webview",
     "desktop": "./scripts/laufey --runtime ./server/server.so",
     "test": "deno test --no-check --allow-net --allow-env --env-file=.env debugging_utilities/test_was_e2e.ts",
+    "test:hearts": "deno test --allow-read client/public/elves/hearts-engine.test.js",
     "wallet-service": "./scripts/wallet-service.sh",
     "9p": "deno run --allow-net --allow-read --allow-write --allow-env server/9p/main.ts"
   }
