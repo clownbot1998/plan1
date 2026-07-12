@@ -16,120 +16,29 @@
 // === imports ===
 import Self, { linkState, broadcastElf, channel } from '@plan98/elf'
 import Cache from '@silly/cache'
+import {
+  GLYPH, RED, rankOf, suitOf, isHeart, sortHand,
+  orderedHand, clampFocus, nextRankFocus, nextSuitFocus,
+  shuffledDeck, dealHands, legalPlays, trickWinner, trickPoints, handDeltas, passRecipient,
+  generateKeypair, encryptFor, decryptMine,
+} from './hearts-engine.js'
 
 const tag = 'plan1-hearts'
 const cache = Cache('hearts-keys') // one record per seat's RSA keypair, keyed `${gameId}:${seat}`
 
-// === the deck ===
-// ascii suit letters, not the unicode glyphs, all the way through shuffling,
-// dealing, encryption and rules — the glyph only gets substituted in at
-// render time (glyph()/color() below). three reasons: rank/suit slicing
-// stays trivial (suit is always the last ascii char), the encrypted payload
-// stays small (RSA-OAEP-2048 tops out at 190 bytes of plaintext — a
-// unicode ♥/♠/♦/♣ costs 3 UTF-8 bytes each, ascii costs 1), and a diff of
-// two card arrays is a diff of two ascii strings, nothing more.
-const RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A']
-const SUITS = ['S','H','D','C']
-const DECK = RANKS.flatMap(r => SUITS.map(s => r + s))
-const GLYPH = { S: '♠', H: '♥', D: '♦', C: '♣' }
-const RED = { H: true, D: true }
+function moveRank(dir) { $.whisper({ focusIdx: nextRankFocus(orderedHand($.learn().myHand), $.learn().focusIdx, dir) }) }
+function moveSuit(dir) { $.whisper({ focusIdx: nextSuitFocus(orderedHand($.learn().myHand), $.learn().focusIdx, dir) }) }
 
-function rankOf(card) { return card.slice(0, -1) }
-function suitOf(card) { return card.slice(-1) }
-function rankIndex(card) { return RANKS.indexOf(rankOf(card)) }
-function isHeart(card) { return suitOf(card) === 'H' }
-function isQueenSpades(card) { return card === 'QS' }
-function sortHand(hand) { return [...hand].sort((a, b) => (suitOf(a) === suitOf(b) ? rankIndex(a) - rankIndex(b) : suitOf(a).localeCompare(suitOf(b)))) }
-
-// Fisher-Yates over crypto.getRandomValues — this is the one place in the
-// whole game where "good enough" randomness isn't good enough. a shuffled
-// deck IS the secret; Math.random() is seedable/predictable in ways that
-// would make "airtight" a lie the moment someone actually checked.
-function shuffledDeck() {
-  const deck = [...DECK]
-  const rand = new Uint32Array(deck.length)
-  crypto.getRandomValues(rand)
-  for (let i = deck.length - 1; i > 0; i--) {
-    const j = rand[i] % (i + 1)
-    ;[deck[i], deck[j]] = [deck[j], deck[i]]
-  }
-  return deck
-}
-
-function dealHands(deck) { return [0, 1, 2, 3].map(seat => deck.slice(seat * 13, seat * 13 + 13)) }
-
-// which cards a seat may legally play right now. the two house rules that
-// exist purely to stop the first trick from being decided by luck of the
-// draw (no hearts, no Q♠, unless that's literally all you were dealt) live
-// here and nowhere else.
-function legalPlays(hand, trick, heartsBroken, isFirstTrick) {
-  if (trick.length === 0) {
-    if (isFirstTrick) return hand.includes('2C') ? ['2C'] : hand
-    if (!heartsBroken) {
-      const nonHearts = hand.filter(c => !isHeart(c))
-      return nonHearts.length ? nonHearts : hand
-    }
-    return hand
-  }
-  const ledSuit = suitOf(trick[0].card)
-  const following = hand.filter(c => suitOf(c) === ledSuit)
-  if (following.length) return following
-  if (isFirstTrick) {
-    const safe = hand.filter(c => !isHeart(c) && !isQueenSpades(c))
-    return safe.length ? safe : hand
-  }
-  return hand
-}
-
-function trickWinner(trick) {
-  const ledSuit = suitOf(trick[0].card)
-  return trick.filter(p => suitOf(p.card) === ledSuit).sort((a, b) => rankIndex(b.card) - rankIndex(a.card))[0].seat
-}
-
-function trickPoints(cards) { return cards.filter(isHeart).length + (cards.some(isQueenSpades) ? 13 : 0) }
-
-// shoot-the-moon: whoever swept every point card this hand gets 0, and
-// hangs 26 on the other three instead of taking them.
-function handDeltas(tricksWon) {
-  const totals = [0, 1, 2, 3].map(s => trickPoints(tricksWon[s] || []))
-  const moonSeat = totals.findIndex(t => t === 26)
-  if (moonSeat === -1) return totals
-  return totals.map((_, s) => (s === moonSeat ? 0 : 26))
-}
-
-// === crypto ===
-// each seat holds one RSA-OAEP keypair for the lifetime of a game: the
-// public half rides in the room's broadcast state (safe — it's a lock, not
-// a key), the private half never leaves the device that generated it and
-// never touches the network. dealing = the table encrypting a hand FOR a
-// seat's public key; passing = one seat doing the same thing for another
-// seat. nobody but the intended reader can open either envelope — that's
-// the whole security model, and it's the same primitive Signal-style
-// clients use, just called directly instead of through a library, because
-// the browser has shipped it natively for a decade.
-const RSA_PARAMS = { name: 'RSA-OAEP', hash: 'SHA-256' }
-
+// this device's own keypair never leaves it — IndexedDB persistence (via
+// Cache, browser-only) is the one part of the crypto flow that belongs
+// here rather than in hearts-engine.js, which stays platform-agnostic.
 async function ensureKeypair(gameId, seat) {
   const cacheKey = `${gameId}:${seat}`
   const found = await cache.get(cacheKey)
   if (found && found.data) return found.data
-  const pair = await crypto.subtle.generateKey({ ...RSA_PARAMS, modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) }, true, ['encrypt', 'decrypt'])
+  const pair = await generateKeypair()
   await cache.put(cacheKey, pair)
   return pair
-}
-
-function buf2b64(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))) }
-function b642buf(b64) { return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer }
-
-async function encryptFor(publicJwk, cards) {
-  const key = await crypto.subtle.importKey('jwk', publicJwk, RSA_PARAMS, false, ['encrypt'])
-  const bytes = new TextEncoder().encode(JSON.stringify(cards))
-  return buf2b64(await crypto.subtle.encrypt(RSA_PARAMS, key, bytes))
-}
-
-async function decryptMine(privateKey, cipherB64) {
-  const bytes = await crypto.subtle.decrypt(RSA_PARAMS, privateKey, b642buf(cipherB64))
-  return JSON.parse(new TextDecoder().decode(bytes))
 }
 
 // === state ===
@@ -157,6 +66,8 @@ const $ = Self(tag, {
   lastEvent: null,      // { type, ts, ... } — drives the full-screen flash
   myHand: [],
   selected: [],
+  focusIdx: 0,       // which card in orderedHand(myHand) is centered in the hand carousel
+  pendingPlay: null, // { card, armedAt } — set by a hold, cleared by Undo or by actually playing
 })
 
 const ROOM_MERGE = `(state, payload) => {
@@ -220,6 +131,26 @@ function toggleReady() {
   commit({ seats: { [mySeat]: { ...seat, ready: !seat.ready } } })
 }
 
+function editGameName() {
+  if (mySeat === null) return
+  const seat = $.learn().seats[mySeat]
+  if (!seat) return
+  const n = gameNamePrompt(mySeat)
+  sessionStorage.setItem('hearts-name-' + gameId, n)
+  commit({ seats: { [mySeat]: { ...seat, name: n } } })
+}
+
+// hold-to-play: a hold ARMS the play (this function) but doesn't commit it
+// — a periodic tick (see the setInterval near the bottom) actually calls
+// playCard() once PLAY_UNDO_MS has passed with no Undo tap. Short enough
+// to keep the table's pace, long enough to catch a wrong card or a "wait,
+// no" — the same trade-off a hold-to-delete confirmation makes anywhere
+// else, just aimed at a card table's specific way of going wrong (bumped
+// the table, meant a different card, someone else needed a beat).
+const PLAY_UNDO_MS = 3000
+function armPlay(card) { $.whisper({ pendingPlay: { card, armedAt: Date.now() } }) }
+function cancelPendingPlay() { $.whisper({ pendingPlay: null }) }
+
 function redraw() { $.whisper({ tick: ($.learn().tick || 0) + 1 }) }
 
 ;(async function boot() {
@@ -245,27 +176,47 @@ function startTable() {
 }
 
 // === dealing & passing (table-and-hand actions) ===
+// the table never clicks anything — dealing is a consequence of consensus
+// (see maybeAutoDeal), not an action. resetScores only ever means "the
+// previous game just ended," never a manual choice.
 async function dealHand(resetScores) {
   const { seats, round, scores } = $.learn()
   const hands = dealHands(shuffledDeck())
   const dealCipher = {}
   for (let seat = 0; seat < 4; seat++) dealCipher[seat] = await encryptFor(seats[seat].publicKeyJwk, hands[seat])
   const leader = hands.findIndex(h => h.includes('2C'))
-  const dir = round % 4 // 0 left · 1 right · 2 across · 3 hold — see passRecipient()
+  const nextRound = resetScores ? 0 : round
+  const dir = nextRound % 4 // 0 left · 1 right · 2 across · 3 hold — see passRecipient()
+  // ready is per-hand, not per-game: everyone confirms fresh before every
+  // deal, this one included — it's the only gate left now that there's no
+  // DEAL button anywhere to press instead.
+  const seatsReset = Object.fromEntries([0, 1, 2, 3].map(i => [i, { ...seats[i], ready: false }]))
   commit({
     phase: dir === 3 ? 'playing' : 'passing',
-    dealCipher, passCipher: {}, passSubmitted: {},
+    dealCipher, passCipher: {}, passSubmitted: {}, seats: seatsReset,
     trick: [], trickCount: 0, trickLeader: leader, turn: dir === 3 ? leader : null,
     heartsBroken: false, tricksWon: { 0: [], 1: [], 2: [], 3: [] },
     scores: resetScores ? [0, 0, 0, 0] : scores,
-    round: resetScores ? 0 : round,
+    round: nextRound,
     lastEvent: null,
   })
 }
 
-function passRecipient(seat, round) {
-  const dir = round % 4
-  return dir === 0 ? (seat + 1) % 4 : dir === 1 ? (seat + 3) % 4 : (seat + 2) % 4
+// runs on every connected client, but only the table (view === 'table')
+// acts on it — exactly one such device exists per game, so there's no
+// double-deal race to guard against beyond "don't re-trigger for a round
+// we already dealt," which _autoDealtKey covers.
+let _autoDealtKey = null
+function maybeAutoDeal() {
+  if ($.learn().view !== 'table') return
+  const { seats, phase, round } = $.learn()
+  if (Object.keys(seats).length !== 4) return
+  if (![0, 1, 2, 3].every(i => seats[i].ready)) return
+  if (phase !== 'waiting' && phase !== 'hand-end' && phase !== 'game-end') return
+  const key = phase + ':' + round
+  if (_autoDealtKey === key) return
+  _autoDealtKey = key
+  dealHand(phase === 'game-end')
 }
 
 async function submitPass() {
@@ -307,6 +258,7 @@ async function playCard(card) {
     commit({
       trick: [], trickCount: count, tricksWon: won, heartsBroken: brokenNow,
       scores, phase: gameOver ? 'game-end' : 'hand-end',
+      round: $.learn().round + 1, // rotates next deal's pass direction — see passRecipient()
       lastEvent: gameOver
         ? { type: 'game-end', ts: Date.now(), winner: scores.indexOf(Math.min(...scores)) }
         : { type: moonSeat !== null ? 'moon-shot' : 'hand-end', ts: Date.now(), seat: moonSeat, deltas },
@@ -394,41 +346,29 @@ function seatCorner(seat) {
     </div>`
 }
 
+// the table is a pure spectator display — nothing on it is ever clicked.
+// dealing is a consequence of device consensus (maybeAutoDeal), not a
+// button, so this only ever has two things to show: the branded "not
+// dealt yet" screen (seats filling, then readying up), or the live hand.
 function tableCenter() {
   const { phase, seats, trick, scores } = $.learn()
   const allClaimed = Object.keys(seats).length === 4
   const allReady = allClaimed && [0, 1, 2, 3].every(i => seats[i].ready)
+  const dealt = phase === 'passing' || phase === 'playing'
 
-  if (!allClaimed) {
+  if (!dealt) {
     const open = 4 - Object.keys(seats).length
+    const readyCount = allClaimed ? [0, 1, 2, 3].filter(i => seats[i].ready).length : 0
+    const subtitle = !allClaimed ? `${open} Seat${open === 1 ? '' : 's'} Open`
+      : !allReady ? `${readyCount}/4 Ready`
+      : 'Dealing…'
     return `
       <div class="h-center">
-        <div class="h-waiting-hero">
-          <div class="h-waiting-title">WAITING FOR PLAYERS</div>
-          <div class="h-waiting-seats">${open} Seat${open === 1 ? '' : 's'} Open</div>
-        </div>
+        <div class="h-title">JUST<br>FING<br>HRTS</div>
+        <div class="h-waiting-seats">${subtitle}</div>
+        ${allClaimed ? `<div class="h-scores">${scores.map((s, i) => `<span>${esc(seats[i].name)}: ${s}</span>`).join('  ·  ')}</div>` : ''}
       </div>`
   }
-
-  // the ready-up gate only guards the FIRST deal of a game — once a table
-  // has actually played a hand, redeal/new-game stay one click, no need to
-  // make four people re-confirm they're still at the table they're
-  // already sitting at.
-  if (phase === 'waiting' && !allReady) {
-    const readyCount = [0, 1, 2, 3].filter(i => seats[i].ready).length
-    return `
-      <div class="h-center">
-        <div class="h-waiting-hero">
-          <div class="h-waiting-title">WAITING FOR READY</div>
-          <div class="h-waiting-seats">${readyCount}/4 Ready</div>
-        </div>
-      </div>`
-  }
-
-  const dealBtn = phase === 'waiting' ? `<button class="h-deal" data-deal>DEAL</button>`
-    : phase === 'hand-end' ? `<button class="h-deal" data-deal>DEAL NEXT HAND</button>`
-    : phase === 'game-end' ? `<button class="h-deal" data-new-game>NEW GAME</button>`
-    : ''
 
   const trickHtml = trick.length
     ? `<div class="h-trick">${trick.map(p => `<div class="h-trick-slot ${CORNER_CLASS[p.seat]}">${cardFace(p.card)}</div>`).join('')}</div>`
@@ -436,9 +376,8 @@ function tableCenter() {
 
   return `
     <div class="h-center">
-      <div class="h-scores">${scores.map((s, i) => `<span>${esc(seats[i] ? seats[i].name : 'Seat ' + (i + 1))}: ${s}</span>`).join('  ·  ')}</div>
+      <div class="h-scores">${scores.map((s, i) => `<span>${esc(seats[i].name)}: ${s}</span>`).join('  ·  ')}</div>
       ${trickHtml}
-      ${dealBtn}
     </div>`
 }
 
@@ -460,37 +399,52 @@ function readyRoster(seats) {
 }
 
 function handView() {
-  const { phase, turn, myHand, selected, trickCount, heartsBroken, trick, seats } = $.learn()
+  const { phase, turn, myHand, selected, trickCount, heartsBroken, trick, seats, pendingPlay, focusIdx } = $.learn()
   const isPassing = phase === 'passing'
   const passedAlready = !!$.learn().passSubmitted[mySeat]
   const legal = phase === 'playing' && turn === mySeat ? legalPlays(myHand, trick, heartsBroken, trickCount === 0) : []
   const mySeatData = seats[mySeat]
   const iAmReady = !!(mySeatData && mySeatData.ready)
 
-  const cards = myHand.map(card => {
-    const isSelected = selected.includes(card)
-    const isLegal = legal.includes(card)
-    const cls = isPassing ? (isSelected ? '-selected' : '') : (legal.length ? (isLegal ? '-legal' : '-illegal') : '')
-    return `<button class="h-hand-card" data-card="${esc(card)}">${cardFace(card, cls)}</button>`
-  }).join('')
+  const cards = orderedHand(myHand)
+  const idx = clampFocus(focusIdx, cards)
+  const focused = cards[idx]
+  const isSelected = focused && selected.includes(focused)
+  const isLegal = focused && legal.includes(focused)
+  const faceClass = isPassing ? (isSelected ? '-selected' : '') : (legal.length ? (isLegal ? '-legal' : '-illegal') : '')
 
-  const action = isPassing && !passedAlready
+  const focusHtml = focused
+    ? `<div class="h-focus-card" data-hold-card="${esc(focused)}">${cardFace(focused, faceClass)}</div>
+       ${cards.length > 1 ? `<div class="h-hand-hint">${idx + 1} / ${cards.length}</div>` : ''}`
+    : `<div class="h-empty">no cards</div>`
+
+  const pendingHtml = pendingPlay ? `
+    <div class="h-pending">
+      <div class="h-pending-text">playing ${esc(glyph(pendingPlay.card))} in <span>${Math.max(0, Math.ceil((PLAY_UNDO_MS - (Date.now() - pendingPlay.armedAt)) / 1000))}</span>…</div>
+      <button class="h-undo-btn" data-undo-play>Undo</button>
+    </div>` : ''
+
+  const action = pendingHtml ? pendingHtml
+    : isPassing && !passedAlready
     ? `<button class="h-pass-btn" ${selected.length === 3 ? '' : 'disabled'} data-pass>Pass ${selected.length}/3 →</button>`
     : isPassing ? `<div class="h-waiting">passed — waiting on the table…</div>`
-    : phase === 'playing' ? `<div class="h-waiting">${turn === mySeat ? 'your lead' : (seats[turn] ? esc(seats[turn].name) : 'waiting') + '…'}</div>`
+    : phase === 'playing' ? `<div class="h-waiting">${turn === mySeat ? 'hold your card to play it' : (seats[turn] ? esc(seats[turn].name) : 'waiting') + '…'}</div>`
     : ''
 
-  // the ready toggle only matters before the first deal of a game — once
-  // play has actually started, showing it invites clicking your own hand
-  // into an "unready" state mid-round for no reason.
-  const readyBlock = phase === 'waiting' ? `
+  // the ready toggle shows before every deal (fresh each hand, not just
+  // the game's first) — see dealHand()'s ready reset and maybeAutoDeal().
+  const readyBlock = (phase === 'waiting' || phase === 'hand-end' || phase === 'game-end') ? `
     <button class="h-ready-btn -${iAmReady ? 'green' : 'yellow'}" data-ready>${iAmReady ? '✓ Ready' : 'Ready?'}</button>
     <div class="h-roster">${readyRoster(seats)}</div>` : ''
 
   return `
     <div class="h-felt -hand">
+      <div class="h-hand-header">
+        <span class="h-hand-name">${esc(mySeatData ? mySeatData.name : '')}</span>
+        <button class="h-edit-name" data-edit-name title="Change game name">✎</button>
+      </div>
       <div class="h-status-bar">${readyBlock}</div>
-      <div class="h-hand-row">${cards}</div>
+      <div class="h-hand-focus">${focusHtml}</div>
       <div class="h-hand-actions">${action}</div>
       ${flashOverlay()}
     </div>`
@@ -531,20 +485,72 @@ export default $
 // file polls on a timer, so there's no periodic tick fighting this one.
 let _flashTimer = null
 $.when('click', '[data-play]', startTable)
-$.when('click', '[data-deal]', () => dealHand(false))
-$.when('click', '[data-new-game]', () => dealHand(true))
 $.when('click', '[data-pass]', submitPass)
 $.when('click', '[data-ready]', toggleReady)
-$.when('click', '[data-card]', e => {
-  const card = e.target.closest('[data-card]').dataset.card
+$.when('click', '[data-edit-name]', editGameName)
+$.when('click', '[data-undo-play]', cancelPendingPlay)
+// a plain tap on the focused card only does something during passing
+// (toggle it into/out of the 3 you're sending) — during play, a tap is
+// just a tap; playing a card takes a hold, handled below by raw pointer
+// events since it needs to measure a HOLD duration, not react to a click.
+$.when('click', '[data-hold-card]', e => {
+  const card = e.target.closest('[data-hold-card]').dataset.holdCard
   const { phase, selected } = $.learn()
-  if (phase === 'passing') {
-    if (selected.includes(card)) $.whisper({ selected: selected.filter(c => c !== card) })
-    else if (selected.length < 3) $.whisper({ selected: [...selected, card] })
-    return
-  }
-  playCard(card)
+  if (phase !== 'passing') return
+  if (selected.includes(card)) $.whisper({ selected: selected.filter(c => c !== card) })
+  else if (selected.length < 3) $.whisper({ selected: [...selected, card] })
 })
+
+// === swipe (rank/suit) + hold (play) ===
+// $.when only delegates via exact matches(), not closest() (see saga-pitch's
+// own swipe comment for the same limitation) — raw document listeners plus
+// closest() sidestep it, and give both gestures a shared pointerdown/up/move
+// lifecycle without fighting each other: a hold requires the finger to stay
+// essentially still past HOLD_MS (movement cancels it, same threshold logic
+// protects a swipe from ever being misread as a hold), a swipe requires it
+// to travel past SWIPE_THRESHOLD before release. They can't both fire from
+// the same gesture.
+const SWIPE_THRESHOLD = 40
+const HOLD_MS = 550
+let _gestureStart = null
+let _holdTimer = null
+
+document.addEventListener('pointerdown', (event) => {
+  const holdEl = event.target.closest('[data-hold-card]')
+  const zone = event.target.closest('.h-hand-focus')
+  if (!zone || !zone.closest($.link)) return
+  _gestureStart = { x: event.clientX, y: event.clientY, card: holdEl ? holdEl.dataset.holdCard : null }
+  clearTimeout(_holdTimer)
+  if (!holdEl) return
+  _holdTimer = setTimeout(() => {
+    const { phase, turn, myHand, heartsBroken, trick, trickCount, pendingPlay } = $.learn()
+    if (pendingPlay || mySeat === null) return
+    if (phase !== 'playing' || turn !== mySeat) return
+    const card = holdEl.dataset.holdCard
+    if (!legalPlays(myHand, trick, heartsBroken, trickCount === 0).includes(card)) return
+    armPlay(card)
+  }, HOLD_MS)
+})
+
+document.addEventListener('pointermove', (event) => {
+  if (!_gestureStart) return
+  const dx = event.clientX - _gestureStart.x, dy = event.clientY - _gestureStart.y
+  if (Math.hypot(dx, dy) > 15) clearTimeout(_holdTimer)
+})
+
+document.addEventListener('pointerup', (event) => {
+  clearTimeout(_holdTimer)
+  if (!_gestureStart) return
+  const { x, y } = _gestureStart
+  _gestureStart = null
+  const dx = event.clientX - x, dy = event.clientY - y
+  const mag = Math.max(Math.abs(dx), Math.abs(dy))
+  if (mag < SWIPE_THRESHOLD) return
+  if (Math.abs(dx) > Math.abs(dy)) moveRank(dx < 0 ? 1 : -1)
+  else moveSuit(dy < 0 ? 1 : -1)
+})
+
+document.addEventListener('pointercancel', () => { clearTimeout(_holdTimer); _gestureStart = null })
 
 function scheduleFlashExpiry() {
   clearTimeout(_flashTimer)
@@ -553,7 +559,21 @@ function scheduleFlashExpiry() {
   const remaining = FLASH_MS - (Date.now() - lastEvent.ts)
   if (remaining > 0) _flashTimer = setTimeout(redraw, remaining + 50)
 }
-setInterval(scheduleFlashExpiry, 500)
+
+// resolves an armed play once its undo window has actually elapsed, and
+// redraws every tick in between so the visible countdown keeps ticking.
+function tickPendingPlay() {
+  const { pendingPlay } = $.learn()
+  if (!pendingPlay) return
+  if (Date.now() - pendingPlay.armedAt >= PLAY_UNDO_MS) {
+    $.whisper({ pendingPlay: null })
+    playCard(pendingPlay.card)
+  } else {
+    redraw()
+  }
+}
+
+setInterval(() => { scheduleFlashExpiry(); maybeAutoDeal(); tickPendingPlay() }, 250)
 
 // === felt, cards, corners ===
 $.style(`
@@ -596,10 +616,7 @@ $.style(`
   & .h-scores { color: lemonchiffon; font-size: .9rem; opacity: .85; }
   & .h-empty { color: lemonchiffon; opacity: .7; }
 
-  & .h-waiting-hero { display: flex; flex-direction: column; align-items: center; gap: .5rem; text-align: center; }
-  & .h-waiting-title { color: lemonchiffon; font-size: clamp(1.6rem, 6vw, 3.2rem); font-weight: 800; letter-spacing: .04em; line-height: 1.1; }
-  & .h-waiting-seats { color: gold; font-size: clamp(2.4rem, 10vw, 5.5rem); font-weight: 800; line-height: 1; text-shadow: 0 0 1.2rem rgba(255,215,0,.5); }
-  & .h-deal { font-size: 1.2rem; font-weight: 700; padding: .6rem 1.6rem; border-radius: 999px; border: none; background: lemonchiffon; cursor: pointer; }
+  & .h-waiting-seats { color: gold; font-size: clamp(1.6rem, 6vw, 3rem); font-weight: 800; line-height: 1; text-shadow: 0 0 1.2rem rgba(255,215,0,.5); }
 
   & .h-trick { position: relative; width: 14rem; height: 10rem; }
   & .h-trick-slot { position: absolute; }
@@ -617,18 +634,29 @@ $.style(`
   & .h-card.-black { color: #1a1a1a; }
   & .h-card.-flash { width: 7rem; height: 9.6rem; font-size: 2.6rem; }
 
-  & .h-felt.-hand { display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 1rem; }
-  & .h-hand-row { display: flex; justify-content: center; flex-wrap: wrap; gap: .4rem .3rem; padding: 0 .5rem; }
-  & .h-hand-card { background: none; border: none; padding: 0; cursor: pointer; }
-  & .h-hand-card:disabled, & .h-card.-illegal { opacity: .35; pointer-events: none; }
+  & .h-felt.-hand { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.2rem; padding: 4.5rem 1rem 1.5rem; box-sizing: border-box; }
   & .h-card.-selected { outline: .25rem solid gold; transform: translateY(-.6rem); }
   & .h-card.-legal { outline: .2rem solid #46d369; }
-  & .h-hand-actions { display: flex; justify-content: center; padding-top: .8rem; }
+  & .h-card.-illegal { opacity: .35; }
+  & .h-hand-actions { display: flex; justify-content: center; min-height: 3rem; align-items: center; }
   & .h-pass-btn { font-size: 1.1rem; font-weight: 700; padding: .6rem 1.4rem; border-radius: 999px; border: none; background: lemonchiffon; cursor: pointer; }
   & .h-pass-btn:disabled { opacity: .4; cursor: default; }
   & .h-waiting { color: lemonchiffon; opacity: .8; }
 
-  & .h-status-bar { position: absolute; top: 1rem; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: .6rem; }
+  & .h-hand-header { position: absolute; top: 1rem; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: .5rem; }
+  & .h-hand-name { color: lemonchiffon; font-weight: 700; font-size: 1.05rem; }
+  & .h-edit-name { background: none; border: none; color: lemonchiffon; opacity: .7; font-size: 1rem; cursor: pointer; padding: 0; }
+  & .h-edit-name:hover { opacity: 1; }
+
+  & .h-hand-focus { touch-action: none; user-select: none; display: flex; flex-direction: column; align-items: center; gap: .6rem; }
+  & .h-focus-card .h-card { width: 7rem; height: 9.8rem; font-size: 2.6rem; cursor: pointer; }
+  & .h-hand-hint { color: lemonchiffon; opacity: .55; font-size: .8rem; }
+
+  & .h-pending { display: flex; flex-direction: column; align-items: center; gap: .4rem; }
+  & .h-pending-text { color: gold; font-weight: 700; }
+  & .h-undo-btn { font-size: 1rem; font-weight: 700; padding: .45rem 1.4rem; border-radius: 999px; border: none; background: #e74c3c; color: #fff; cursor: pointer; }
+
+  & .h-status-bar { position: absolute; top: 3.6rem; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: .6rem; }
   & .h-ready-btn { font-size: 1.1rem; font-weight: 700; padding: .55rem 1.6rem; border-radius: 999px; border: none; cursor: pointer; }
   & .h-ready-btn.-yellow { background: #f1c40f; }
   & .h-ready-btn.-green { background: #2ecc40; color: #06341a; }
