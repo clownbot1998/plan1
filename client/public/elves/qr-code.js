@@ -43,11 +43,14 @@ $.style(`
   }
   & .portal {
     display: flex;
+    box-sizing: border-box;
     height: 100%;
     width: 100%;
+    padding: 1rem;
     place-items: center;
     border: 0;
-    background: transparent;
+    border-radius: 8px;
+    background: white;
   }
   & img { max-height: 100%; }
 `)
