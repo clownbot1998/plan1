@@ -171,12 +171,21 @@ const CARD_LINES_NFL = {
   RB: c => [`Rush Yds ${c.rushYards}`, `Rush TD ${c.rushTouchdowns}`, `Rec ${c.receptions}`],
   WR: c => [`Rec ${c.receptions}`, `Rec Yds ${c.receivingYards}`, `Rec TD ${c.receivingTouchdowns}`],
   TE: c => [`Rec ${c.receptions}`, `Rec Yds ${c.receivingYards}`, `Rec TD ${c.receivingTouchdowns}`],
-  K: c => [`FG ${c.fieldGoalsMade}/${c.fieldGoalAttempts}`, `Long ${c.longestFieldGoal}`, `XP ${c.extraPointsMade}`],
+  // XP is shown as "—", not a fabricated 0 — the vendored source file has
+  // no extra-points-made column at all (logged in cdn/nfl/ATTRIBUTION.md),
+  // so every kicker would otherwise read as having missed every XP, which
+  // isn't true, it's just not in this data.
+  K: c => [`FG ${c.fieldGoalsMade}/${c.fieldGoalAttempts}`, `Long ${c.longestFieldGoal}`, `XP —`],
   P: c => [`Punts ${c.punts}`, `Yds ${c.puntYards}`, `Avg ${c.avgPuntYards}`],
-  DST: c => [`Sacks ${c.sacks}`, `INT ${c.interceptions}`, `TD ${c.defensiveTouchdowns}`, `Allowed ${c.pointsAllowed}`],
+  // same honesty for DST: this source has no team-level points-allowed
+  // data (also logged in ATTRIBUTION.md) — no roster player currently
+  // resolves to position DST (it's a team-level construct, not populated
+  // in this pull), so this branch is dormant today, kept correct for
+  // whenever team-level defense data gets added.
+  DST: c => [`Sacks ${c.sacks}`, `INT ${c.interceptions}`, `TD ${c.defensiveTouchdowns}`, `Allowed —`],
   LB: c => [`Tkl ${c.tackles}`, `Sacks ${c.sacks}`, `INT ${c.interceptions}`],
-  DE: dlLine, DT: dlLine, DL: dlLine,
-  CB: dbLine, S: dbLine, FS: dbLine, SS: dbLine, DB: dbLine,
+  DE: dlLine, DT: dlLine, DL: dlLine, NT: dlLine,
+  CB: dbLine, S: dbLine, FS: dbLine, SS: dbLine, DB: dbLine, SAF: dbLine,
 }
 
 // quick cross-team slices — the "Shawn Childs" shape from the research
@@ -197,7 +206,7 @@ const NFL_SLICES = [
   { key: 'TE', label: 'Tight Ends', match: p => p === 'TE' },
   { key: 'K', label: 'Kickers', match: p => p === 'K' },
   { key: 'P', label: 'Punters', match: p => p === 'P' },
-  { key: 'IDP', label: 'Defense (IDP)', match: p => ['LB', 'DE', 'DT', 'DL', 'CB', 'S', 'FS', 'SS', 'DB'].includes(p) },
+  { key: 'IDP', label: 'Defense (IDP)', match: p => ['LB', 'DE', 'DT', 'DL', 'NT', 'CB', 'S', 'FS', 'SS', 'DB', 'SAF'].includes(p) },
 ]
 
 function cardLines(card, sport) {
@@ -500,10 +509,27 @@ function searchResultRow(d) {
     </button>`
 }
 
-function deckListView(deckSearch) {
+// the MVP's main entry point — find any player, any team, and jump
+// straight to staging them — so it's rendered as the FIRST thing on the
+// top-level transmitter screen, not buried under the deck grids.
+function globalSearchBox(deckSearch) {
+  const q = (deckSearch || '').trim()
+  // MLB is 30 live team+roster+stat fetches, not instant — searching
+  // before it lands would silently miss every MLB player with no
+  // explanation. NFL's one vendored fetch is fast enough not to need
+  // the same callout.
+  const stillIndexing = _mlbLoadStarted && !MLB_TEAMS
+  return `
+    <div class="ss-search -hero">
+      <input type="text" class="ss-search-input" data-deck-search placeholder="find any player, any team…" value="${esc(deckSearch)}" autofocus>
+      ${stillIndexing ? `<div class="ss-search-status">still indexing live MLB rosters — MLB results will be incomplete until this finishes</div>` : ''}
+      ${q ? `<div class="ss-card-list">${searchSportsIndex(q).map(searchResultRow).join('') || `<div class="ss-empty">no match</div>`}</div>` : ''}
+    </div>`
+}
+
+function deckListView() {
   ensureMlbLoaded()
   ensureNflLoaded()
-  const q = (deckSearch || '').trim()
   return `
     <div class="ss-deck-picker">
       <h3>⚾ MLB — quick slices</h3>
@@ -514,10 +540,6 @@ function deckListView(deckSearch) {
       ${sliceGrid(NFL_TEAMS, 'NFL', NFL_SLICES, 'loading NFL rosters…')}
       <h3>🏈 NFL Teams (2025 season)</h3>
       ${teamGrid(NFL_TEAMS, 'NFL', 'loading NFL rosters…')}
-      <div class="ss-search">
-        <input type="text" class="ss-search-input" data-deck-search placeholder="find any player, any team…" value="${esc(deckSearch)}">
-        ${q ? `<div class="ss-card-list">${searchSportsIndex(q).map(searchResultRow).join('') || `<div class="ss-empty">no match</div>`}</div>` : ''}
-      </div>
     </div>`
 }
 
@@ -558,15 +580,15 @@ function handView(activeDeck, stagedCardIdx, cardSearch) {
             </div>` : `<div class="ss-empty">tap a card to stage it</div>`}
         </div>
       </div>
+      <div class="ss-search">
+        <input type="text" class="ss-search-input" data-card-search placeholder="filter this roster…" value="${esc(cardSearch)}">
+      </div>
       <div class="ss-card-list">
         ${rows.map(([c, i]) => `
           <button class="ss-card-row ${i === stagedCardIdx ? '-selected' : ''}" data-select-card="${i}">
             <span class="ss-card-name">${esc(c.name)}</span>
             <span class="ss-card-meta">${esc(c.team)} · ${esc(c.position)}</span>
           </button>`).join('') || `<div class="ss-empty">no match</div>`}
-      </div>
-      <div class="ss-search">
-        <input type="text" class="ss-search-input" data-card-search placeholder="filter this roster…" value="${esc(cardSearch)}">
       </div>
     </div>`
 }
@@ -592,13 +614,14 @@ function transmitterView() {
   return `
     <div class="ss-shell -transmitter">
       <div class="ss-panel">
+        ${globalSearchBox(deckSearch)}
         <div class="ss-tx-header">
           <span class="ss-role-name">${esc(me ? me.name : '')}</span>
           <button class="ss-edit-name" data-edit-name title="Change operator name">✎</button>
         </div>
         <h3>Casting to</h3>
         <div class="ss-role-list">${receiverListRows(receivers, effectiveTarget)}</div>
-        ${deckListView(deckSearch)}
+        ${deckListView()}
         <details class="ss-recover" data-acc-key="transmitter-recover" ${accordionOpenAttr('transmitter-recover')}>
           <summary>Pass the torch (share my control)</summary>
           <div class="ss-qr-block -small">
@@ -749,14 +772,12 @@ $.style(`
   & .ss-cast-name { font-size: 1.4rem; }
   & .ss-cast-meta { opacity: .6; font-size: .85rem; margin-top: .2rem; text-transform: uppercase; letter-spacing: .04em; }
   & .ss-cast-lines { margin-top: .6rem; display: flex; flex-direction: column; gap: .2rem; font-size: 1rem; }
-  /* hidden in the clean broadcast feed by default — this is the layer
-     OBS/a TV actually captures, so a visible gear icon sitting on top of
-     it isn't acceptable at rest. Only reveals on hover/focus, for the
-     operator checking it in a real browser tab; a pure capture surface
-     (OBS browser source, no cursor) never triggers either, so it stays
-     invisible there permanently. */
-  & .ss-corner-btn { position: absolute; top: .8rem; right: .8rem; background: white; color: black; border: 1px solid black; width: 2.2rem; height: 2.2rem; cursor: pointer; font-size: 1.1rem; opacity: 0; transition: opacity .15s; }
-  & .ss-live:hover .ss-corner-btn, & .ss-corner-btn:focus { opacity: 1; }
+  /* the receiver is a screen-only presentation surface — a display with
+     a cursor always resting somewhere on it, so a hover-to-reveal trick
+     never actually stays hidden. Permanently invisible and inert; access
+     to setup/recovery is deferred to a future controller-input path
+     (a remote/gamepad button), not an on-screen affordance at all. */
+  & .ss-corner-btn { display: none; }
 
   /* === transmitter: deck browsing + hand + staging ===
      the panel itself is the only scroll box (see &, overflow: auto,
@@ -785,8 +806,16 @@ $.style(`
 
   /* === search: bottom-of-list filter, both the cross-team lunr box and
      the plain in-roster filter share this look === */
-  & .ss-search { margin-top: .8rem; padding-top: .8rem; border-top: 1px solid black; display: flex; flex-direction: column; gap: .5rem; }
-  & .ss-search-input { width: 100%; box-sizing: border-box; font-family: inherit; font-size: .95rem; padding: .5rem .7rem; border: 1px solid black; background: white; color: black; }
-  & .ss-search-input:focus { outline: 2px solid black; outline-offset: -1px; }
+  & .ss-search { display: flex; flex-direction: column; gap: .5rem; }
+  & .ss-search:not(.-hero) { margin-top: .8rem; padding-top: .8rem; border-top: 1px solid black; }
+  /* extreme contrast on purpose — this is the MVP's main entry point
+     (find any player, jump straight to staging), so it should read as
+     the loudest thing on screen, not blend into the grayscale rest of
+     the panel. */
+  & .ss-search-input { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 1rem; padding: .7rem .8rem; border: 1px solid black; background: black; color: white; }
+  & .ss-search-input::placeholder { color: rgba(255,255,255,.55); }
+  & .ss-search-input:focus { outline: 2px solid black; outline-offset: 2px; }
+  & .ss-search.-hero { margin-bottom: .8rem; padding-bottom: .8rem; border-bottom: 1px solid black; }
+  & .ss-search-status { font-size: .78rem; opacity: .6; }
   & .ss-search .ss-card-list { margin-top: .2rem; }
 `)

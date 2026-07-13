@@ -231,3 +231,61 @@ means the browser can just ask MLB Stats API directly, every time,
 always current. Two working data patterns in one app, on purpose.
 
 ---
+
+## 2026-07-13 — search-first MVP pass: a real bug found, two fixed for
+## honesty, two logged and deliberately held off
+
+Added a runtime lunr index (players from both loaded sports) so the
+transmitter's top-level screen leads with a "find any player, any team"
+box instead of only browsing one team/slice at a time, then went back
+through the card-line rendering while touching it and found a real bug,
+not just a polish item:
+
+**Bug, not a data gap — fixed:** `sports-stats.js`'s own
+`CARD_LINES_NFL` dispatch table (which line-items render per position)
+and the `NFL_SLICES` "Defense (IDP)" filter both silently omitted `SAF`
+(140 real safeties) and `NT` (7 real nose tackles) — even though
+`sports-engine.js`'s `POSITION_CAST_NFL` casts both correctly as
+`DefensiveBack`/`DefensiveLineman` with real tackle/INT/sack numbers
+already on the card. Net effect before this fix: 147 real players with
+real stats rendered "no stat line" and were invisible from the IDP
+quick-slice entirely. Fixed by adding both keys to both tables. Worth
+naming: this was a second, independent dispatch table (sports-stats.js
+duplicating position keys sports-engine.js already owns) quietly
+drifting out of sync — the exact failure mode the file's own header
+comment warns about for the MLB/NFL position-collision split, just in
+a different direction (an alias missing from a copy, not a collision
+between two sports).
+
+**Honesty fixes (not new data, just not pretending):** Kicker's `XP`
+line and DST's `Allowed` line rendered a fabricated-looking `0` for
+fields this source genuinely doesn't have (already logged in
+`cdn/nfl/ATTRIBUTION.md`). Both now render `—` instead of a real-looking
+zero. DST itself is currently dead code in practice — no roster player
+resolves to position `DST` in this pull (it's a team-level construct,
+not populated), so no card currently exercises that line — fixed
+anyway so it's correct whenever team-level defense data gets added,
+not silently wrong-by-omission again.
+
+**Logged, not fixed — deliberately held off, flagged to tychi rather
+than snuck in:**
+- **No loading/error state distinction for MLB.** `ensureMlbLoaded()`
+  retries silently on failure (`_mlbLoadStarted` resets, next deck-view
+  call tries again) — an operator mid-broadcast with a flaky connection
+  just sees a stuck "loading…" with no visible retry affordance or
+  error message. A real fix needs actual UI (a retry button, a visible
+  error state), not a one-line patch.
+- **No engine test coverage for `resolveDeck`/slice matching or the
+  lunr index.** Every other layer of this app
+  (`sports-engine.js`, `sports-stats-engine.js`, `hearts-engine.js`) has
+  a paired zero-import `deno test` suite; the position-slice logic and
+  search index that grew this session are the one part that doesn't
+  yet. Same "second dispatch table can drift" risk that just caused the
+  SAF/NT bug above — a test asserting "every `POSITION_CAST_NFL` key has
+  a `CARD_LINES_NFL` entry" would have caught it immediately instead of
+  needing a manual re-read to find.
+
+Neither is MVP-blocking; both are real follow-up work, not scope creep
+to fold in silently.
+
+---
