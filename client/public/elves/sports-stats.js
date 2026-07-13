@@ -136,6 +136,27 @@ const CARD_LINES_NFL = {
   CB: dbLine, S: dbLine, FS: dbLine, SS: dbLine, DB: dbLine,
 }
 
+// quick cross-team slices — the "Shawn Childs" shape from the research
+// log (bullpen report, position-group comparisons) rather than only
+// browsing one team's roster at a time. Same roster/card shape as a team
+// deck, just flattened across every loaded team and filtered by position.
+const MLB_SLICES = [
+  { key: 'P', label: 'Pitchers', match: p => p === 'P' },
+  { key: 'C', label: 'Catchers', match: p => p === 'C' },
+  { key: 'IF', label: 'Infield', match: p => ['1B', '2B', '3B', 'SS'].includes(p) },
+  { key: 'OF', label: 'Outfield', match: p => p === 'OF' },
+  { key: 'DH', label: 'DH', match: p => p === 'DH' },
+]
+const NFL_SLICES = [
+  { key: 'QB', label: 'Quarterbacks', match: p => p === 'QB' },
+  { key: 'RB', label: 'Running Backs', match: p => p === 'RB' },
+  { key: 'WR', label: 'Wide Receivers', match: p => p === 'WR' },
+  { key: 'TE', label: 'Tight Ends', match: p => p === 'TE' },
+  { key: 'K', label: 'Kickers', match: p => p === 'K' },
+  { key: 'P', label: 'Punters', match: p => p === 'P' },
+  { key: 'IDP', label: 'Defense (IDP)', match: p => ['LB', 'DE', 'DT', 'DL', 'CB', 'S', 'FS', 'SS', 'DB'].includes(p) },
+]
+
 function cardLines(card, sport) {
   const table = sport === 'NFL' ? CARD_LINES_NFL : CARD_LINES_MLB
   const fn = table[card.position]
@@ -152,7 +173,7 @@ const $ = Self(tag, {
   receivers: {},       // { [id]: { name, lastSeen, cast: { full, left, right } } }
   transmitters: {},    // { [id]: { name, lastSeen } }
   modalReceiverId: null, // local-only — which receiver's reconnect code is on screen
-  activeDeck: null,      // local-only — { sport: 'MLB'|'NFL', teamIdx } the transmitter has open
+  activeDeck: null,      // local-only — { sport: 'MLB'|'NFL', mode: 'team'|'slice', key } the transmitter has open
   stagedCardIdx: null,   // local-only — index into the active deck's cards
   targetReceiverId: null, // local-only — which receiver Send acts on
   showSetup: false,       // local-only — receiver's setup/recovery overlay
@@ -266,12 +287,28 @@ const EMPTY_CAST = { full: null, left: null, right: null }
 // even before anyone's touched the picker.
 function deckTeams(sport) { return sport === 'NFL' ? NFL_TEAMS : MLB_TEAMS }
 
+// activeDeck.mode is 'team' (one roster) or 'slice' (a position group
+// flattened across every loaded team, sorted by team so it reads like a
+// real comparison sheet, not shuffled roster order).
+function resolveDeck(activeDeck) {
+  const teams = deckTeams(activeDeck.sport)
+  if (!teams) return null
+  if (activeDeck.mode === 'team') {
+    const team = teams[activeDeck.key]
+    return team ? { name: team.name, roster: team.roster } : null
+  }
+  const slices = activeDeck.sport === 'NFL' ? NFL_SLICES : MLB_SLICES
+  const slice = slices.find(s => s.key === activeDeck.key)
+  if (!slice) return null
+  return { name: slice.label, roster: teams.flatMap(t => t.roster.filter(c => slice.match(c.position))) }
+}
+
 function castTo(zone) {
   const { activeDeck, stagedCardIdx, targetReceiverId, receivers } = $.learn()
   if (!activeDeck || stagedCardIdx == null) return
   const targetId = targetReceiverId || Object.keys(receivers)[0]
   if (!targetId || !receivers[targetId]) return
-  const card = deckTeams(activeDeck.sport)?.[activeDeck.teamIdx]?.roster?.[stagedCardIdx]
+  const card = resolveDeck(activeDeck)?.roster?.[stagedCardIdx]
   if (!card) return
   // sport rides along with the card, not just its bare position string —
   // MLB's Pitcher and NFL's Punter are both position 'P' (and MLB's
@@ -399,7 +436,12 @@ function receiverListRows(receivers, effectiveTarget) {
 // lazy way.
 function teamGrid(teams, sport, loadingLabel) {
   if (!teams) return `<div class="ss-empty">${loadingLabel}</div>`
-  return `<div class="ss-deck-grid">${teams.map((t, i) => `<button class="ss-deck-card" data-open-deck="${sport}:${i}">${esc(t.name)}</button>`).join('')}</div>`
+  return `<div class="ss-deck-grid">${teams.map((t, i) => `<button class="ss-deck-card" data-open-deck="${sport}:team:${i}">${esc(t.name)}</button>`).join('')}</div>`
+}
+
+function sliceGrid(teams, sport, slices, loadingLabel) {
+  if (!teams) return `<div class="ss-empty">${loadingLabel}</div>`
+  return `<div class="ss-deck-grid">${slices.map(s => `<button class="ss-deck-card" data-open-deck="${sport}:slice:${s.key}">${esc(s.label)}</button>`).join('')}</div>`
 }
 
 function deckListView() {
@@ -407,49 +449,69 @@ function deckListView() {
   ensureNflLoaded()
   return `
     <div class="ss-deck-picker">
+      <h3>⚾ MLB — quick slices</h3>
+      ${sliceGrid(MLB_TEAMS, 'MLB', MLB_SLICES, 'loading live MLB rosters…')}
       <h3>⚾ MLB Teams (live)</h3>
       ${teamGrid(MLB_TEAMS, 'MLB', 'loading live MLB rosters…')}
+      <h3>🏈 NFL — quick slices</h3>
+      ${sliceGrid(NFL_TEAMS, 'NFL', NFL_SLICES, 'loading NFL rosters…')}
       <h3>🏈 NFL Teams (2025 season)</h3>
       ${teamGrid(NFL_TEAMS, 'NFL', 'loading NFL rosters…')}
     </div>`
 }
 
+// staging (back button + staged preview + send row) is sticky at the top
+// of the ONE scrolling box the whole panel already is — the roster list
+// just flows underneath it in normal document flow, not a second nested
+// scroll container of its own.
 function handView(activeDeck, stagedCardIdx) {
-  const team = deckTeams(activeDeck.sport)?.[activeDeck.teamIdx]
-  if (!team) return `<div class="ss-empty">team not loaded</div>`
-  const cards = team.roster
+  const deck = resolveDeck(activeDeck)
+  if (!deck) return `<div class="ss-empty">team not loaded</div>`
+  const cards = deck.roster
   const staged = stagedCardIdx != null ? cards[stagedCardIdx] : null
   return `
     <div class="ss-hand">
-      <div class="ss-hand-header">
-        <button class="ss-back-btn" data-back-to-decks>← Back</button>
-        <span class="ss-hand-title">${esc(team.name)}</span>
+      <div class="ss-hand-sticky">
+        <div class="ss-hand-header">
+          <button class="ss-back-btn" data-back-to-decks>← Back</button>
+          <span class="ss-hand-title">${esc(deck.name)}</span>
+        </div>
+        <div class="ss-staging">
+          ${staged ? `
+            <div class="ss-staged-preview">
+              <div class="ss-staged-name">${esc(staged.name)}</div>
+              <div class="ss-staged-lines">${cardLines(staged, activeDeck.sport).map(l => `<span>${esc(l)}</span>`).join(' · ')}</div>
+            </div>
+            <div class="ss-send-row">
+              <button class="ss-send-btn" data-send="left">Send Left</button>
+              <button class="ss-send-btn -full" data-send="full">Send Full</button>
+              <button class="ss-send-btn" data-send="right">Send Right</button>
+            </div>` : `<div class="ss-empty">tap a card to stage it</div>`}
+        </div>
       </div>
       <div class="ss-card-list">
         ${cards.map((c, i) => `
           <button class="ss-card-row ${i === stagedCardIdx ? '-selected' : ''}" data-select-card="${i}">
             <span class="ss-card-name">${esc(c.name)}</span>
-            <span class="ss-card-meta">${esc(c.position)}</span>
+            <span class="ss-card-meta">${esc(c.team)} · ${esc(c.position)}</span>
           </button>`).join('')}
-      </div>
-      <div class="ss-staging">
-        ${staged ? `
-          <div class="ss-staged-preview">
-            <div class="ss-staged-name">${esc(staged.name)}</div>
-            <div class="ss-staged-lines">${cardLines(staged, activeDeck.sport).map(l => `<span>${esc(l)}</span>`).join(' · ')}</div>
-          </div>
-          <div class="ss-send-row">
-            <button class="ss-send-btn" data-send="left">Send Left</button>
-            <button class="ss-send-btn -full" data-send="full">Send Full</button>
-            <button class="ss-send-btn" data-send="right">Send Right</button>
-          </div>` : `<div class="ss-empty">tap a card to stage it</div>`}
       </div>
     </div>`
 }
 
+// "casting to" (receiver picker + reconnect) and "pass the torch" are
+// top-level-only — once a deck is open the screen is just back + staging
+// + roster, nothing else competing for the sticky header's space.
 function transmitterView() {
   const { receivers, transmitters, activeDeck, stagedCardIdx, targetReceiverId } = $.learn()
   if (receivers[_pendingReceiverInvite]) _pendingReceiverInvite = mintRoleId()
+
+  if (activeDeck) {
+    return `
+      <div class="ss-shell -transmitter">
+        <div class="ss-panel">${handView(activeDeck, stagedCardIdx)}</div>
+      </div>`
+  }
 
   const receiverIds = Object.keys(receivers)
   const effectiveTarget = targetReceiverId || receiverIds[0] || null
@@ -464,7 +526,7 @@ function transmitterView() {
         </div>
         <h3>Casting to</h3>
         <div class="ss-role-list">${receiverListRows(receivers, effectiveTarget)}</div>
-        ${activeDeck ? handView(activeDeck, stagedCardIdx) : deckListView()}
+        ${deckListView()}
         <details class="ss-recover" data-acc-key="transmitter-recover" ${accordionOpenAttr('transmitter-recover')}>
           <summary>Pass the torch (share my control)</summary>
           <div class="ss-qr-block -small">
@@ -555,8 +617,8 @@ $.when('click', '[data-show-reconnect]', e => {
 $.when('click', '[data-close-modal]', () => $.whisper({ modalReceiverId: null }))
 $.when('click', '[data-toggle-setup]', () => $.whisper({ showSetup: !$.learn().showSetup }))
 $.when('click', '[data-open-deck]', e => {
-  const [sport, teamIdx] = e.target.closest('[data-open-deck]').dataset.openDeck.split(':')
-  $.whisper({ activeDeck: { sport, teamIdx: Number(teamIdx) }, stagedCardIdx: null })
+  const [sport, mode, key] = e.target.closest('[data-open-deck]').dataset.openDeck.split(':')
+  $.whisper({ activeDeck: { sport, mode, key: mode === 'team' ? Number(key) : key }, stagedCardIdx: null })
 })
 $.when('click', '[data-back-to-decks]', () => $.whisper({ activeDeck: null, stagedCardIdx: null }))
 $.when('click', '[data-select-card]', e => $.whisper({ stagedCardIdx: Number(e.target.closest('[data-select-card]').dataset.selectCard) }))
@@ -570,8 +632,8 @@ $.when('click', '[data-pick-receiver]', e => $.whisper({ targetReceiverId: e.tar
 // compositing), so it stays exactly what it is regardless of theme.
 $.style(`
   & { display: block; height: 100%; width: 100%; overflow: auto; font-family: Courier, 'Courier New', monospace; background: white; color: black; }
-  & .ss-shell { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 1.2rem; box-sizing: border-box; }
-  & .ss-panel { width: min(100%, 26rem); display: flex; flex-direction: column; gap: .8rem; }
+  & .ss-shell { min-height: 100%; padding: 1.2rem; box-sizing: border-box; }
+  & .ss-panel { width: min(100%, 26rem); margin: 0 auto; display: flex; flex-direction: column; gap: .8rem; }
   & h2 { margin: 0; font-weight: normal; } & h3 { margin: .4rem 0 0; font-size: .85rem; font-weight: normal; text-transform: uppercase; letter-spacing: .04em; opacity: .55; }
   & .ss-qr-block { display: flex; flex-direction: column; align-items: center; gap: .4rem; background: white; border: 1px solid black; padding: 1rem; }
   & .ss-qr-block.-small qr-code { width: 7rem; height: 7rem; }
@@ -590,7 +652,7 @@ $.style(`
   & .ss-edit-name { background: none; border: none; color: inherit; opacity: .6; cursor: pointer; font-family: inherit; }
   & .ss-edit-name:hover { opacity: 1; }
   & .ss-deck-picker { border-top: 1px solid black; padding-top: .8rem; }
-  & .ss-deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: .4rem; max-height: 9rem; overflow-y: auto; }
+  & .ss-deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: .4rem; }
   & .ss-deck-card { font-size: .85rem; padding: .6rem .5rem; border: 1px solid black; background: white; color: black; cursor: pointer; font-family: inherit; }
   & .ss-deck-card:hover { background: black; color: white; }
   & .ss-modal-bg { position: fixed; inset: 0; background: rgba(255,255,255,.85); display: flex; align-items: center; justify-content: center; z-index: 50; }
@@ -611,13 +673,18 @@ $.style(`
   & .ss-cast-lines { margin-top: .6rem; display: flex; flex-direction: column; gap: .2rem; font-size: 1rem; }
   & .ss-corner-btn { position: absolute; top: .8rem; right: .8rem; background: white; color: black; border: 1px solid black; width: 2.2rem; height: 2.2rem; cursor: pointer; font-size: 1.1rem; }
 
-  /* === transmitter: deck browsing + hand + staging === */
-  & .ss-hand { display: flex; flex-direction: column; gap: .6rem; border-top: 1px solid black; padding-top: .8rem; }
+  /* === transmitter: deck browsing + hand + staging ===
+     the panel itself is the only scroll box (see &, overflow: auto,
+     above) — the roster list is plain flow content, and the sticky
+     block just pins itself to the top of that same scroll as it passes,
+     rather than owning a second overflow area of its own. */
+  & .ss-hand { display: flex; flex-direction: column; }
+  & .ss-hand-sticky { position: sticky; top: 0; background: white; z-index: 5; padding-bottom: .6rem; margin-bottom: .6rem; border-bottom: 1px solid black; display: flex; flex-direction: column; gap: .6rem; }
   & .ss-hand-header { display: flex; align-items: center; gap: .6rem; }
   & .ss-back-btn { background: white; border: 1px solid black; color: black; padding: .3rem .6rem; cursor: pointer; font-family: inherit; }
   & .ss-back-btn:hover { background: black; color: white; }
   & .ss-hand-title { font-weight: normal; }
-  & .ss-card-list { display: flex; flex-direction: column; gap: .3rem; max-height: 12rem; overflow-y: auto; }
+  & .ss-card-list { display: flex; flex-direction: column; gap: .3rem; }
   & .ss-card-row { display: flex; justify-content: space-between; gap: .5rem; background: white; border: 1px solid black; padding: .5rem .7rem; color: inherit; cursor: pointer; text-align: left; font-family: inherit; }
   & .ss-card-row.-selected { background: black; color: white; }
   & .ss-card-name { font-weight: normal; }
