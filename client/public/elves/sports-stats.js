@@ -563,61 +563,71 @@ $.when('click', '[data-select-card]', e => $.whisper({ stagedCardIdx: Number(e.t
 $.when('click', '[data-send]', e => castTo(e.target.closest('[data-send]').dataset.send))
 $.when('click', '[data-pick-receiver]', e => $.whisper({ targetReceiverId: e.target.closest('[data-pick-receiver]').dataset.pickReceiver }))
 
+// black, white, Courier New — same base accessibility-mode already uses
+// (plain text, thin black rules, no color doing the work of hierarchy).
+// the one deliberate exception is CHROMA_GREEN: that fill isn't a design
+// choice, it's a broadcast requirement (a real keying color for OBS/
+// compositing), so it stays exactly what it is regardless of theme.
 $.style(`
-  & { display: block; height: 100%; width: 100%; overflow: auto; font-family: inherit; background: #0f1720; color: #e8edf3; }
+  & { display: block; height: 100%; width: 100%; overflow: auto; font-family: Courier, 'Courier New', monospace; background: white; color: black; }
   & .ss-shell { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 1.2rem; box-sizing: border-box; }
   & .ss-panel { width: min(100%, 26rem); display: flex; flex-direction: column; gap: .8rem; }
-  & h2 { margin: 0; } & h3 { margin: .4rem 0 0; font-size: .95rem; opacity: .75; }
-  & .ss-qr-block { display: flex; flex-direction: column; align-items: center; gap: .4rem; background: #182432; border-radius: .6rem; padding: 1rem; }
+  & h2 { margin: 0; font-weight: normal; } & h3 { margin: .4rem 0 0; font-size: .85rem; font-weight: normal; text-transform: uppercase; letter-spacing: .04em; opacity: .55; }
+  & .ss-qr-block { display: flex; flex-direction: column; align-items: center; gap: .4rem; background: white; border: 1px solid black; padding: 1rem; }
   & .ss-qr-block.-small qr-code { width: 7rem; height: 7rem; }
   & .ss-qr-mount { width: 11rem; height: 11rem; }
-  & .ss-qr-mount qr-code { width: 11rem; height: 11rem; display: block; border-radius: .5rem; overflow: hidden; }
-  & .ss-qr-label { font-size: .8rem; opacity: .7; text-align: center; }
-  & .ss-role-list { display: flex; flex-direction: column; gap: .35rem; }
-  & .ss-role-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; background: #182432; border-radius: .4rem; padding: .5rem .7rem; }
-  & .ss-role-name { font-weight: 600; }
-  & .ss-empty { opacity: .55; font-size: .85rem; padding: .3rem 0; }
-  & .ss-recover { background: #182432; border-radius: .5rem; padding: .5rem .7rem; }
-  & .ss-recover summary { cursor: pointer; font-size: .85rem; opacity: .8; }
-  & .ss-mini-btn { font-size: .78rem; background: lemonchiffon; color: #222; border: none; border-radius: .4rem; padding: .3rem .6rem; cursor: pointer; }
+  & .ss-qr-mount qr-code { width: 11rem; height: 11rem; display: block; }
+  & .ss-qr-label { font-size: .78rem; opacity: .6; text-align: center; }
+  & .ss-role-list { display: flex; flex-direction: column; gap: .3rem; }
+  & .ss-role-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; border: 1px solid black; padding: .5rem .7rem; }
+  & .ss-role-name { font-weight: normal; }
+  & .ss-empty { opacity: .5; font-size: .85rem; padding: .3rem 0; }
+  & .ss-recover { border: 1px solid black; padding: .5rem .7rem; }
+  & .ss-recover summary { cursor: pointer; font-size: .85rem; opacity: .75; }
+  & .ss-mini-btn { font-size: .78rem; background: white; color: black; border: 1px solid black; padding: .3rem .6rem; cursor: pointer; font-family: inherit; }
+  & .ss-mini-btn:hover { background: black; color: white; }
   & .ss-tx-header { display: flex; align-items: center; gap: .5rem; }
-  & .ss-edit-name { background: none; border: none; color: inherit; opacity: .7; cursor: pointer; }
+  & .ss-edit-name { background: none; border: none; color: inherit; opacity: .6; cursor: pointer; font-family: inherit; }
   & .ss-edit-name:hover { opacity: 1; }
-  & .ss-deck-picker { border-top: 1px solid rgba(255,255,255,.12); padding-top: .8rem; }
-  & .ss-deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: .5rem; max-height: 9rem; overflow-y: auto; }
-  & .ss-deck-card { font-size: .92rem; font-weight: 700; padding: .7rem .5rem; border-radius: .6rem; border: none; background: lemonchiffon; color: #222; cursor: pointer; }
-  & .ss-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 50; }
-  & .ss-modal { background: #182432; border-radius: .6rem; padding: 1.2rem; display: flex; flex-direction: column; align-items: center; gap: .6rem; max-height: 90vh; overflow-y: auto; }
+  & .ss-deck-picker { border-top: 1px solid black; padding-top: .8rem; }
+  & .ss-deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: .4rem; max-height: 9rem; overflow-y: auto; }
+  & .ss-deck-card { font-size: .85rem; padding: .6rem .5rem; border: 1px solid black; background: white; color: black; cursor: pointer; font-family: inherit; }
+  & .ss-deck-card:hover { background: black; color: white; }
+  & .ss-modal-bg { position: fixed; inset: 0; background: rgba(255,255,255,.85); display: flex; align-items: center; justify-content: center; z-index: 50; }
+  & .ss-modal { background: white; border: 1px solid black; padding: 1.2rem; display: flex; flex-direction: column; align-items: center; gap: .6rem; max-height: 90vh; overflow-y: auto; }
 
-  & .ss-role-row.-active { outline: .12rem solid lemonchiffon; }
-  & .ss-role-select { background: none; border: none; color: inherit; font-weight: 600; cursor: pointer; padding: 0; text-align: left; }
+  & .ss-role-row.-active { outline: 2px solid black; outline-offset: -1px; }
+  & .ss-role-select { background: none; border: none; color: inherit; cursor: pointer; padding: 0; text-align: left; font-family: inherit; }
 
   /* === receiver: live zones, chroma-key when empty === */
-  & .ss-live { position: relative; height: 100%; width: 100%; }
+  & .ss-live { position: relative; height: 100%; width: 100%; background: white; }
   & .ss-zones { display: flex; height: 100%; width: 100%; }
   & .ss-zone { flex: 1; display: flex; align-items: center; justify-content: center; padding: 1rem; box-sizing: border-box; }
   & .ss-zone.-full { height: 100%; width: 100%; }
   & .ss-zone.-key { background: ${CHROMA_GREEN}; }
-  & .ss-cast-card { background: rgba(15,23,32,.9); border-radius: .8rem; padding: 1.4rem 1.8rem; text-align: center; }
-  & .ss-cast-name { font-size: 1.4rem; font-weight: 800; }
-  & .ss-cast-meta { opacity: .7; font-size: .9rem; margin-top: .2rem; }
-  & .ss-cast-lines { margin-top: .6rem; display: flex; flex-direction: column; gap: .2rem; font-size: 1.05rem; }
-  & .ss-corner-btn { position: absolute; top: .8rem; right: .8rem; background: rgba(0,0,0,.4); color: #fff; border: none; border-radius: 50%; width: 2.2rem; height: 2.2rem; cursor: pointer; font-size: 1.1rem; }
+  & .ss-cast-card { background: white; border: 1px solid black; padding: 1.4rem 1.8rem; text-align: center; }
+  & .ss-cast-name { font-size: 1.4rem; }
+  & .ss-cast-meta { opacity: .6; font-size: .85rem; margin-top: .2rem; text-transform: uppercase; letter-spacing: .04em; }
+  & .ss-cast-lines { margin-top: .6rem; display: flex; flex-direction: column; gap: .2rem; font-size: 1rem; }
+  & .ss-corner-btn { position: absolute; top: .8rem; right: .8rem; background: white; color: black; border: 1px solid black; width: 2.2rem; height: 2.2rem; cursor: pointer; font-size: 1.1rem; }
 
   /* === transmitter: deck browsing + hand + staging === */
-  & .ss-hand { display: flex; flex-direction: column; gap: .6rem; border-top: 1px solid rgba(255,255,255,.12); padding-top: .8rem; }
+  & .ss-hand { display: flex; flex-direction: column; gap: .6rem; border-top: 1px solid black; padding-top: .8rem; }
   & .ss-hand-header { display: flex; align-items: center; gap: .6rem; }
-  & .ss-back-btn { background: none; border: 1px solid rgba(255,255,255,.3); color: inherit; border-radius: .4rem; padding: .3rem .6rem; cursor: pointer; }
-  & .ss-hand-title { font-weight: 700; }
-  & .ss-card-list { display: flex; flex-direction: column; gap: .35rem; max-height: 12rem; overflow-y: auto; }
-  & .ss-card-row { display: flex; justify-content: space-between; gap: .5rem; background: #182432; border: none; border-radius: .4rem; padding: .5rem .7rem; color: inherit; cursor: pointer; text-align: left; }
-  & .ss-card-row.-selected { outline: .12rem solid lemonchiffon; }
-  & .ss-card-name { font-weight: 600; }
-  & .ss-card-meta { opacity: .65; font-size: .85rem; }
-  & .ss-staging { background: #182432; border-radius: .5rem; padding: .7rem; display: flex; flex-direction: column; gap: .5rem; align-items: center; }
-  & .ss-staged-name { font-weight: 700; }
-  & .ss-staged-lines { opacity: .8; font-size: .85rem; margin-top: .2rem; }
+  & .ss-back-btn { background: white; border: 1px solid black; color: black; padding: .3rem .6rem; cursor: pointer; font-family: inherit; }
+  & .ss-back-btn:hover { background: black; color: white; }
+  & .ss-hand-title { font-weight: normal; }
+  & .ss-card-list { display: flex; flex-direction: column; gap: .3rem; max-height: 12rem; overflow-y: auto; }
+  & .ss-card-row { display: flex; justify-content: space-between; gap: .5rem; background: white; border: 1px solid black; padding: .5rem .7rem; color: inherit; cursor: pointer; text-align: left; font-family: inherit; }
+  & .ss-card-row.-selected { background: black; color: white; }
+  & .ss-card-name { font-weight: normal; }
+  & .ss-card-meta { opacity: .6; font-size: .85rem; }
+  & .ss-staging { border: 1px solid black; padding: .7rem; display: flex; flex-direction: column; gap: .5rem; align-items: center; }
+  & .ss-staged-name { font-weight: normal; }
+  & .ss-staged-lines { opacity: .75; font-size: .85rem; margin-top: .2rem; }
   & .ss-send-row { display: flex; gap: .5rem; width: 100%; }
-  & .ss-send-btn { flex: 1; font-weight: 700; padding: .55rem 0; border-radius: .4rem; border: none; background: lemonchiffon; color: #222; cursor: pointer; }
-  & .ss-send-btn.-full { background: #2ecc40; }
+  & .ss-send-btn { flex: 1; padding: .55rem 0; border: 1px solid black; background: white; color: black; cursor: pointer; font-family: inherit; }
+  & .ss-send-btn:hover { background: black; color: white; }
+  & .ss-send-btn.-full { background: black; color: white; }
+  & .ss-send-btn.-full:hover { background: white; color: black; }
 `)
