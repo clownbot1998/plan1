@@ -8,18 +8,20 @@
 // whoever holds a role can re-share its join code so a new device claims
 // that exact role and continues it.
 //
-// decks/staging/casting are wired now too — see plans/sports-stats/
-// data-research-log.md for where the real-data side stands. THIS DECK IS
-// REAL DATA, pulled directly (curl, not paraphrased) from the MLB Stats
-// API and ESPN's athlete API on 2026-07-12 — logged there with sources,
-// player IDs, and exact query params. MLB numbers are 2026 season-to-date
-// (mid-season, live); NFL numbers are the completed 2025 season, since
-// the 2026 NFL season hadn't started yet at pull time (real off-season,
-// not a bug). This is still a hand-picked slice of 7 players, not a full
-// roster/team pipeline — that's the next step up from here.
+// decks are full league data now, sourced two different ways on purpose —
+// see plans/sports-stats/data-research-log.md for the full story:
+//   MLB  — LIVE. MLB Stats API sends real CORS headers, so this fetches
+//          all 30 teams + full active rosters + batch-hydrated season
+//          stats straight from the browser, every time. No vendoring.
+//   NFL  — VENDORED. ESPN's API sends no CORS headers at all (a direct
+//          browser fetch would be blocked, not just rate-limited), so
+//          this loads client/public/cdn/nfl/teams.json — all 32 teams,
+//          pulled from nflverse (CC0) via plans/sports-stats/etl_nfl.ts,
+//          2025 regular season (the completed season — 2026 NFL hadn't
+//          started at pull time).
 import Self, { linkState, broadcastElf } from '@plan98/elf'
 import { ROLE_TIMEOUT_MS, mintRoleId, joinUrl, parseJoinParam, ROOM_MERGE } from './sports-stats-engine.js'
-import { Pitcher, Catcher, Batter, QuarterBack, RunningBack, WideReceiver, TightEnd } from './sports-engine.js'
+import { BaseballTeam } from './sports-engine.js'
 
 const tag = 'sports-stats'
 
@@ -29,37 +31,120 @@ const tag = 'sports-stats'
 // unrelated live-draw feature). reused, not reinvented.
 const CHROMA_GREEN = '#00b140'
 
-const DECKS = {
-  baseball: {
-    label: '⚾ Baseball',
-    cards: [
-      Pitcher({ sourceIds: { mlb: '675911' }, name: 'Spencer Strider', team: 'ATL', era: 5.31, whip: 1.36, wins: 4, losses: 2, strikeouts: 46 }),
-      Catcher({ sourceIds: { mlb: '669257' }, name: 'Will Smith', team: 'LAD', avg: 0.249, homeRuns: 6, rbi: 23 }),
-      Batter({ sourceIds: { mlb: '518692' }, name: 'Freddie Freeman', team: 'LAD', position: '1B', avg: 0.290, homeRuns: 15, rbi: 49 }),
-    ],
-  },
-  football: {
-    label: '🏈 Football',
-    cards: [
-      QuarterBack({ sourceIds: { espn: '3918298' }, name: 'Josh Allen', team: 'BUF', passYards: 3668, passTouchdowns: 25, interceptions: 10, rushYards: 579, rushTouchdowns: 14 }),
-      RunningBack({ sourceIds: { espn: '4430807' }, name: 'Bijan Robinson', team: 'ATL', rushYards: 1478, rushTouchdowns: 7, receptions: 79 }),
-      WideReceiver({ sourceIds: { espn: '4241389' }, name: 'CeeDee Lamb', team: 'DAL', receptions: 75, receivingYards: 1077, receivingTouchdowns: 3 }),
-      TightEnd({ sourceIds: { espn: '4430027' }, name: 'Sam LaPorta', team: 'DET', receptions: 40, receivingYards: 489, receivingTouchdowns: 3 }),
-    ],
-  },
+const MLB_SEASON = 2026
+
+// module-scope, not $ state — this is fetched data, not shared game
+// state; every device loads its own copy independently, same reasoning
+// plan1-hearts gives gameId/mySeat. null = not loaded yet.
+let MLB_TEAMS = null
+let NFL_TEAMS = null
+let _mlbLoadStarted = false
+
+function mlbStatLine(person, group) {
+  const entry = (person.stats || []).find(s => s.group?.displayName === group)
+  return entry?.splits?.[0]?.stat || {}
 }
 
-// position-aware — a Pitcher and a QuarterBack don't share a stat line,
-// so this just asks the card what it is instead of assuming a shape.
-function cardLines(card) {
-  switch (card.position) {
-    case 'P': return [`ERA ${card.era}`, `WHIP ${card.whip}`, `W ${card.wins}`, `K ${card.strikeouts}`]
-    case 'C': return [`AVG ${card.avg}`, `HR ${card.homeRuns}`, `RBI ${card.rbi}`]
-    case 'QB': return [`Pass Yds ${card.passYards}`, `Pass TD ${card.passTouchdowns}`, `Rush Yds ${card.rushYards}`]
-    case 'RB': return [`Rush Yds ${card.rushYards}`, `Rush TD ${card.rushTouchdowns}`, `Rec ${card.receptions}`]
-    case 'WR': case 'TE': return [`Rec ${card.receptions}`, `Rec Yds ${card.receivingYards}`, `Rec TD ${card.receivingTouchdowns}`]
-    default: return [`AVG ${card.avg}`, `HR ${card.homeRuns}`, `RBI ${card.rbi}`]
+// raw field names Pitcher/Catcher/etc expect, NOT a call to those
+// functions directly — BaseballTeam(data).roster already dispatches by
+// position (see sports-engine.js), so building the flat input and letting
+// IT cast avoids a second dispatch table that could drift out of sync.
+function mlbRosterInput(rosterEntry, person, teamName) {
+  const pitching = mlbStatLine(person, 'pitching')
+  const hitting = mlbStatLine(person, 'hitting')
+  return {
+    sourceIds: { mlb: String(person.id) }, name: person.fullName, team: teamName,
+    position: rosterEntry.position.abbreviation,
+    era: Number(pitching.era) || 0, whip: Number(pitching.whip) || 0,
+    wins: pitching.wins || 0, losses: pitching.losses || 0, saves: pitching.saves || 0,
+    holds: pitching.holds || 0, blownSaves: pitching.blownSaves || 0,
+    strikeouts: pitching.strikeOuts || 0, inningsPitched: Number(pitching.inningsPitched) || 0,
+    appearances: pitching.gamesPlayed || 0, qualityStarts: pitching.qualityStarts || 0,
+    avg: Number(hitting.avg) || 0, obp: Number(hitting.obp) || 0, slg: Number(hitting.slg) || 0,
+    homeRuns: hitting.homeRuns || 0, rbi: hitting.rbi || 0, stolenBases: hitting.stolenBases || 0,
+    caughtStealingPct: Number(hitting.stolenBasePercentage) || 0, passedBalls: hitting.passedBall || 0,
   }
+}
+
+async function ensureMlbLoaded() {
+  if (MLB_TEAMS || _mlbLoadStarted) return
+  _mlbLoadStarted = true
+  try {
+    const teamsRes = await fetch(`https://statsapi.mlb.com/api/v1/teams?sportId=1&season=${MLB_SEASON}&activeStatus=Y`).then(r => r.json())
+    const teams = teamsRes.teams
+    const rosterEntries = await Promise.all(teams.map(async team => {
+      const res = await fetch(`https://statsapi.mlb.com/api/v1/teams/${team.id}/roster?rosterType=active&season=${MLB_SEASON}`).then(r => r.json())
+      return [team.id, res.roster || []]
+    }))
+    const rosterByTeam = Object.fromEntries(rosterEntries)
+    const allIds = Object.values(rosterByTeam).flat().map(r => r.person.id)
+    const peopleById = new Map()
+    for (let i = 0; i < allIds.length; i += 50) {
+      const chunk = allIds.slice(i, i + 50)
+      const url = `https://statsapi.mlb.com/api/v1/people?personIds=${chunk.join(',')}` +
+        `&hydrate=${encodeURIComponent(`stats(group=[hitting,pitching],type=season,season=${MLB_SEASON})`)}`
+      const data = await fetch(url).then(r => r.json())
+      for (const p of data.people || []) peopleById.set(p.id, p)
+    }
+    MLB_TEAMS = teams.map(team => BaseballTeam({
+      sourceIds: { mlb: String(team.id) },
+      name: team.name,
+      league: (team.league?.name || '').replace('American League', 'AL').replace('National League', 'NL'),
+      division: (team.division?.name || '').replace(/^(AL|NL) /, ''),
+      roster: rosterByTeam[team.id].filter(r => peopleById.has(r.person.id)).map(r => mlbRosterInput(r, peopleById.get(r.person.id), team.name)),
+    }))
+  } catch (e) {
+    console.error('sports-stats: live MLB load failed, will retry on next deck view', e)
+    _mlbLoadStarted = false
+    return
+  }
+  redraw()
+}
+
+async function ensureNflLoaded() {
+  if (NFL_TEAMS) return
+  try {
+    NFL_TEAMS = await fetch('/cdn/nfl/teams.json').then(r => r.json())
+    redraw()
+  } catch (e) { console.error('sports-stats: NFL vendor load failed', e) }
+}
+
+// scoped per sport ON PURPOSE, not one shared switch on card.position —
+// MLB's Pitcher and NFL's Punter are both position 'P', and MLB's
+// ShortStop / NFL's Strong Safety are both 'SS'. A single switch keyed on
+// position alone would silently render one sport's fields on the other's
+// card the moment both appeared side by side. Same lesson sports-engine.js
+// already encoded with its two separate POSITION_CAST tables.
+const battingFallback = c => [`AVG ${c.avg}`, `HR ${c.homeRuns}`, `RBI ${c.rbi}`, `SB ${c.stolenBases}`]
+const dlLine = c => [`Tkl ${c.tackles}`, `Sacks ${c.sacks}`, `QB Hits ${c.qbHits}`]
+const dbLine = c => [`Tkl ${c.tackles}`, `INT ${c.interceptions}`, `PD ${c.passesDefended}`]
+
+const CARD_LINES_MLB = {
+  P: c => [`ERA ${c.era}`, `WHIP ${c.whip}`, `${c.role} ${c.wins}-${c.losses}`, `K ${c.strikeouts}`],
+  C: c => [`AVG ${c.avg}`, `HR ${c.homeRuns}`, `RBI ${c.rbi}`, `CS% ${c.caughtStealingPct}`],
+}
+const CARD_LINES_NFL = {
+  QB: c => [`Pass Yds ${c.passYards}`, `Pass TD ${c.passTouchdowns}`, `INT ${c.interceptions}`, `Rush Yds ${c.rushYards}`],
+  RB: c => [`Rush Yds ${c.rushYards}`, `Rush TD ${c.rushTouchdowns}`, `Rec ${c.receptions}`],
+  WR: c => [`Rec ${c.receptions}`, `Rec Yds ${c.receivingYards}`, `Rec TD ${c.receivingTouchdowns}`],
+  TE: c => [`Rec ${c.receptions}`, `Rec Yds ${c.receivingYards}`, `Rec TD ${c.receivingTouchdowns}`],
+  K: c => [`FG ${c.fieldGoalsMade}/${c.fieldGoalAttempts}`, `Long ${c.longestFieldGoal}`, `XP ${c.extraPointsMade}`],
+  P: c => [`Punts ${c.punts}`, `Yds ${c.puntYards}`, `Avg ${c.avgPuntYards}`],
+  DST: c => [`Sacks ${c.sacks}`, `INT ${c.interceptions}`, `TD ${c.defensiveTouchdowns}`, `Allowed ${c.pointsAllowed}`],
+  LB: c => [`Tkl ${c.tackles}`, `Sacks ${c.sacks}`, `INT ${c.interceptions}`],
+  DE: dlLine, DT: dlLine, DL: dlLine,
+  CB: dbLine, S: dbLine, FS: dbLine, SS: dbLine, DB: dbLine,
+}
+
+function cardLines(card, sport) {
+  const table = sport === 'NFL' ? CARD_LINES_NFL : CARD_LINES_MLB
+  const fn = table[card.position]
+  if (fn) return fn(card)
+  // MLB fallback covers every position that shares battingLine (1B/2B/3B/
+  // SS/OF/DH/generic Batter) — football has no equivalent shared shape,
+  // so an unrecognized NFL position (an O-lineman, a long snapper) just
+  // shows what it is, honestly, since there's no real stat line for it.
+  return sport === 'NFL' ? [card.position || 'no stat line'] : battingFallback(card)
 }
 
 const $ = Self(tag, {
@@ -67,7 +152,7 @@ const $ = Self(tag, {
   receivers: {},       // { [id]: { name, lastSeen, cast: { full, left, right } } }
   transmitters: {},    // { [id]: { name, lastSeen } }
   modalReceiverId: null, // local-only — which receiver's reconnect code is on screen
-  activeDeck: null,      // local-only — which deck the transmitter has open
+  activeDeck: null,      // local-only — { sport: 'MLB'|'NFL', teamIdx } the transmitter has open
   stagedCardIdx: null,   // local-only — index into the active deck's cards
   targetReceiverId: null, // local-only — which receiver Send acts on
   showSetup: false,       // local-only — receiver's setup/recovery overlay
@@ -77,6 +162,11 @@ function commit(patch) {
   $.teach(patch, ROOM_MERGE)
   try { broadcastElf(tag, patch, ROOM_MERGE) } catch (e) { console.warn('sports-stats sync:', e) }
 }
+
+// MLB_TEAMS/NFL_TEAMS live outside $ (they're fetched data, not shared
+// game state), so setting them doesn't trigger a re-render on its own —
+// this forces one once they've actually loaded.
+function redraw() { $.whisper({ tick: ($.learn().tick || 0) + 1 }) }
 
 // navigation identity, not shared data — same reasoning plan1-hearts
 // gives gameId/mySeat: every device computes these independently from its
@@ -174,17 +264,25 @@ const EMPTY_CAST = { full: null, left: null, right: null }
 // file header. targetReceiverId defaults to whichever receiver comes
 // first if none has been explicitly picked, so Send works immediately
 // even before anyone's touched the picker.
+function deckTeams(sport) { return sport === 'NFL' ? NFL_TEAMS : MLB_TEAMS }
+
 function castTo(zone) {
   const { activeDeck, stagedCardIdx, targetReceiverId, receivers } = $.learn()
   if (!activeDeck || stagedCardIdx == null) return
   const targetId = targetReceiverId || Object.keys(receivers)[0]
   if (!targetId || !receivers[targetId]) return
-  const card = DECKS[activeDeck].cards[stagedCardIdx]
+  const card = deckTeams(activeDeck.sport)?.[activeDeck.teamIdx]?.roster?.[stagedCardIdx]
+  if (!card) return
+  // sport rides along with the card, not just its bare position string —
+  // MLB's Pitcher and NFL's Punter are both position 'P' (and MLB's
+  // ShortStop / NFL's Strong Safety are both 'SS'), so cardLines() needs
+  // real sport context, not a guess from an ambiguous position code.
+  const cast = { sport: activeDeck.sport, card }
   const role = receivers[targetId]
-  const cast = zone === 'full'
-    ? { full: card, left: null, right: null }
-    : { ...(role.cast || EMPTY_CAST), full: null, [zone]: card }
-  commit({ receivers: { [targetId]: { ...role, cast } } })
+  const nextCast = zone === 'full'
+    ? { full: cast, left: null, right: null }
+    : { ...(role.cast || EMPTY_CAST), full: null, [zone]: cast }
+  commit({ receivers: { [targetId]: { ...role, cast: nextCast } } })
 }
 
 function clearCast(zone) {
@@ -212,12 +310,12 @@ function roleRow(id, role, actions = '') {
 const openAccordions = new Set()
 function accordionOpenAttr(key) { return openAccordions.has(key) ? 'open' : '' }
 
-function cardCard(card) {
+function cardCard({ sport, card }) {
   return `
     <div class="ss-cast-card">
       <div class="ss-cast-name">${esc(card.name)}</div>
       <div class="ss-cast-meta">${esc(card.team)} · ${esc(card.position)}</div>
-      <div class="ss-cast-lines">${cardLines(card).map(l => `<div>${esc(l)}</div>`).join('')}</div>
+      <div class="ss-cast-lines">${cardLines(card, sport).map(l => `<div>${esc(l)}</div>`).join('')}</div>
     </div>`
 }
 
@@ -294,37 +392,51 @@ function receiverListRows(receivers, effectiveTarget) {
     </div>`).join('') || `<div class="ss-empty">no receivers online yet</div>`
 }
 
+// decks ARE teams now — picking a deck means picking which team's full
+// roster to browse. MLB kicks off its live fetch the first time this
+// view is ever shown (not on boot — no reason to hit the network before
+// anyone's actually browsing decks); NFL's vendored file loads the same
+// lazy way.
+function teamGrid(teams, sport, loadingLabel) {
+  if (!teams) return `<div class="ss-empty">${loadingLabel}</div>`
+  return `<div class="ss-deck-grid">${teams.map((t, i) => `<button class="ss-deck-card" data-open-deck="${sport}:${i}">${esc(t.name)}</button>`).join('')}</div>`
+}
+
 function deckListView() {
+  ensureMlbLoaded()
+  ensureNflLoaded()
   return `
     <div class="ss-deck-picker">
-      <h3>Decks</h3>
-      <div class="ss-deck-grid">
-        ${Object.entries(DECKS).map(([key, deck]) => `<button class="ss-deck-card" data-open-deck="${key}">${deck.label}</button>`).join('')}
-      </div>
+      <h3>⚾ MLB Teams (live)</h3>
+      ${teamGrid(MLB_TEAMS, 'MLB', 'loading live MLB rosters…')}
+      <h3>🏈 NFL Teams (2025 season)</h3>
+      ${teamGrid(NFL_TEAMS, 'NFL', 'loading NFL rosters…')}
     </div>`
 }
 
-function handView(deckKey, stagedCardIdx) {
-  const deck = DECKS[deckKey]
-  const staged = stagedCardIdx != null ? deck.cards[stagedCardIdx] : null
+function handView(activeDeck, stagedCardIdx) {
+  const team = deckTeams(activeDeck.sport)?.[activeDeck.teamIdx]
+  if (!team) return `<div class="ss-empty">team not loaded</div>`
+  const cards = team.roster
+  const staged = stagedCardIdx != null ? cards[stagedCardIdx] : null
   return `
     <div class="ss-hand">
       <div class="ss-hand-header">
         <button class="ss-back-btn" data-back-to-decks>← Back</button>
-        <span class="ss-hand-title">${deck.label}</span>
+        <span class="ss-hand-title">${esc(team.name)}</span>
       </div>
       <div class="ss-card-list">
-        ${deck.cards.map((c, i) => `
+        ${cards.map((c, i) => `
           <button class="ss-card-row ${i === stagedCardIdx ? '-selected' : ''}" data-select-card="${i}">
             <span class="ss-card-name">${esc(c.name)}</span>
-            <span class="ss-card-meta">${esc(c.team)} · ${esc(c.position)}</span>
+            <span class="ss-card-meta">${esc(c.position)}</span>
           </button>`).join('')}
       </div>
       <div class="ss-staging">
         ${staged ? `
           <div class="ss-staged-preview">
             <div class="ss-staged-name">${esc(staged.name)}</div>
-            <div class="ss-staged-lines">${cardLines(staged).map(l => `<span>${esc(l)}</span>`).join(' · ')}</div>
+            <div class="ss-staged-lines">${cardLines(staged, activeDeck.sport).map(l => `<span>${esc(l)}</span>`).join(' · ')}</div>
           </div>
           <div class="ss-send-row">
             <button class="ss-send-btn" data-send="left">Send Left</button>
@@ -442,7 +554,10 @@ $.when('click', '[data-show-reconnect]', e => {
 })
 $.when('click', '[data-close-modal]', () => $.whisper({ modalReceiverId: null }))
 $.when('click', '[data-toggle-setup]', () => $.whisper({ showSetup: !$.learn().showSetup }))
-$.when('click', '[data-open-deck]', e => $.whisper({ activeDeck: e.target.closest('[data-open-deck]').dataset.openDeck, stagedCardIdx: null }))
+$.when('click', '[data-open-deck]', e => {
+  const [sport, teamIdx] = e.target.closest('[data-open-deck]').dataset.openDeck.split(':')
+  $.whisper({ activeDeck: { sport, teamIdx: Number(teamIdx) }, stagedCardIdx: null })
+})
 $.when('click', '[data-back-to-decks]', () => $.whisper({ activeDeck: null, stagedCardIdx: null }))
 $.when('click', '[data-select-card]', e => $.whisper({ stagedCardIdx: Number(e.target.closest('[data-select-card]').dataset.selectCard) }))
 $.when('click', '[data-send]', e => castTo(e.target.closest('[data-send]').dataset.send))
@@ -469,8 +584,8 @@ $.style(`
   & .ss-edit-name { background: none; border: none; color: inherit; opacity: .7; cursor: pointer; }
   & .ss-edit-name:hover { opacity: 1; }
   & .ss-deck-picker { border-top: 1px solid rgba(255,255,255,.12); padding-top: .8rem; }
-  & .ss-deck-grid { display: flex; gap: .6rem; flex-wrap: wrap; }
-  & .ss-deck-card { flex: 1; min-width: 8rem; font-size: 1rem; font-weight: 700; padding: 1rem; border-radius: .6rem; border: none; background: lemonchiffon; color: #222; cursor: pointer; }
+  & .ss-deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: .5rem; max-height: 9rem; overflow-y: auto; }
+  & .ss-deck-card { font-size: .92rem; font-weight: 700; padding: .7rem .5rem; border-radius: .6rem; border: none; background: lemonchiffon; color: #222; cursor: pointer; }
   & .ss-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 50; }
   & .ss-modal { background: #182432; border-radius: .6rem; padding: 1.2rem; display: flex; flex-direction: column; align-items: center; gap: .6rem; max-height: 90vh; overflow-y: auto; }
 

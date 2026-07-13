@@ -172,3 +172,62 @@ real step up is a genuine ingestion slice (a team's full roster, or a
 position group) rather than one-off players fetched by hand.
 
 ---
+
+## 2026-07-12 — full position coverage + the real ETL: one live, one vendored
+
+Before the full pipeline: expanded sports-engine.js from the original
+representative slice (Pitcher/Catcher/QB/RB/WR/TE) to real, full position
+coverage — MLB gets FirstBaseman/SecondBaseman/ThirdBaseman/ShortStop/
+Outfielder/DesignatedHitter (sharing a common battingLine/fieldingLine),
+Pitcher gained a `role` field (SP/RP/CL, one cast not three, since a
+starter and a closer share the same stat shape); NFL gained Kicker,
+Punter, TeamDefense, and IDP positions (LineBacker, DefensiveLineman,
+DefensiveBack). Offensive linemen still resolve identity-only — genuinely
+no individual fantasy stat line exists for them in any format, not a gap.
+22 unit tests total now, including one confirming a truly unknown MLB
+position code is the only case that falls through to the generic Batter
+fallback (every real position has its own cast).
+
+**Checked CORS before deciding architecture, not assumed:**
+- MLB Stats API sends `access-control-allow-origin: *` — genuinely
+  fetchable live, straight from the browser, no proxy needed.
+- ESPN's site API sends NO CORS headers at all — a direct browser fetch
+  would be blocked by the browser itself, not just rate-limited. Live NFL
+  from ESPN would need a server-side proxy route, which wasn't built
+  (a deliberate scope line, not an oversight).
+
+Decision, confirmed with tychi: MLB goes **live** (fetched fresh, full
+30 teams + full active rosters + batch-hydrated season stats, straight
+from the browser, no vendoring at all). NFL goes **vendored** (nflverse,
+periodic pull, committed as JSON) — "one of each" as a deliberate pattern
+demo, not an inconsistency.
+
+**NFL ETL, and a real mistake caught before shipping:** first pulled
+nflverse's well-known `player_stats.csv` release — 0 rows for the 2025
+season. Almost concluded the season simply wasn't published yet (which
+would've been a reasonable guess, given the 2026 NFL season situation
+already logged above). Checked the actual row contents instead of
+guessing: that release is STALE, capped at 2024, apparently abandoned
+without ever being updated. A *different*, more recent release tag in
+the same repo — `stats_player` (not `player_stats`) — has the real
+current data, confirmed by fetching `stats_player_week_2025.csv`
+directly and checking its rows. That file also turned out to have full
+defensive and kicking columns the older one never had — good, since
+sports-engine.js had *just* grown Kicker/Punter/IDP casts with nothing
+real to populate them yet.
+
+**Result:** `client/public/cdn/nfl/teams.json` — all 32 teams, 2019
+distinct players who recorded a real stat in the 2025 regular season,
+aggregated from weekly rows into season totals, cast through the real
+entity functions. Cross-checked against the earlier hand-pulled ESPN
+numbers for Josh Allen — both sources agree exactly (3668 pass yds, 25
+pass TD, 10 INT, 579 rush yds, 14 rush TD), independent confirmation the
+aggregation logic is right. Full sourcing, known gaps (no extra-points-
+made column in this file; TeamDefense/DST needs team-level game logs
+this source doesn't have) logged in `client/public/cdn/nfl/ATTRIBUTION.md`.
+
+MLB's live path needed no ETL script at all — batch-hydration + CORS
+means the browser can just ask MLB Stats API directly, every time,
+always current. Two working data patterns in one app, on purpose.
+
+---

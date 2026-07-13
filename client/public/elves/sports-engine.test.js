@@ -1,8 +1,8 @@
 // sports-engine.test.js — run with: deno test --allow-read client/public/elves/sports-engine.test.js
 import { assert, assertEquals, assertThrows } from 'jsr:@std/assert'
 import {
-  Pitcher, Catcher, Batter, BaseballTeam,
-  QuarterBack, RunningBack, WideReceiver, TightEnd, AmericanFootballTeam,
+  Pitcher, Catcher, FirstBaseman, SecondBaseman, ThirdBaseman, ShortStop, Outfielder, DesignatedHitter, Batter, BaseballTeam,
+  QuarterBack, RunningBack, WideReceiver, TightEnd, Kicker, Punter, TeamDefense, LineBacker, DefensiveLineman, DefensiveBack, AmericanFootballTeam,
   Team, SPORT_TEAM_CAST,
 } from './sports-engine.js'
 
@@ -49,6 +49,40 @@ Deno.test('Pitcher: missing numeric fields default to 0, not NaN', () => {
   assertEquals(p.saves, 0)
 })
 
+Deno.test('Pitcher: role defaults to SP, but a reliever shares the exact same cast', () => {
+  const starter = Pitcher({ name: 'x', wins: 15, qualityStarts: 20 })
+  const closer = Pitcher({ name: 'y', role: 'CL', saves: 35, holds: 0 })
+  assertEquals(starter.role, 'SP')
+  assertEquals(closer.role, 'CL')
+  assertEquals(closer.saves, 35)
+  assertEquals(Object.keys(starter).sort(), Object.keys(closer).sort()) // same shape either way
+})
+
+Deno.test('infield/outfield positions share the same batting+fielding line, tagged with their own position', () => {
+  const first = FirstBaseman({ name: 'a', homeRuns: '30', errors: '4' })
+  const short = ShortStop({ name: 'b', avg: '.270', fieldingPct: '.980' })
+  const of = Outfielder({ name: 'c', position: 'CF', outfieldAssists: '5' })
+  assertEquals(first.position, '1B')
+  assertEquals(first.homeRuns, 30)
+  assertEquals(first.errors, 4)
+  assertEquals(short.position, 'SS')
+  assertEquals(short.fieldingPct, 0.98)
+  assertEquals(of.position, 'CF')
+  assertEquals(of.outfieldAssists, 5)
+})
+
+Deno.test('SecondBaseman/ThirdBaseman: distinct positions, same shape', () => {
+  assertEquals(SecondBaseman({ name: 'a' }).position, '2B')
+  assertEquals(ThirdBaseman({ name: 'a' }).position, '3B')
+})
+
+Deno.test('DesignatedHitter: has a batting line but no fielding line (nothing to field)', () => {
+  const dh = DesignatedHitter({ name: 'x', homeRuns: '40' })
+  assertEquals(dh.position, 'DH')
+  assertEquals(dh.homeRuns, 40)
+  assertEquals(dh.errors, undefined)
+})
+
 Deno.test('Catcher: coerces batting + catching-specific fields, tags position C', () => {
   const c = Catcher({ name: 'Yadi', avg: '.285', homeRuns: '12', caughtStealingPct: '.42' })
   assertEquals(c.position, 'C')
@@ -65,22 +99,30 @@ Deno.test('Batter: keeps whatever position it was given otherwise', () => {
   assertEquals(Batter({ name: 'x', position: '1B' }).position, '1B')
 })
 
-Deno.test('BaseballTeam: dispatches each roster slot to the right position cast', () => {
+Deno.test('BaseballTeam: dispatches every roster slot to its real position cast, not a generic fallback', () => {
   const team = BaseballTeam({
     name: 'Red Sox', league: 'AL', division: 'East',
     roster: [
       { name: 'Cy Young', position: 'P', era: '2.0' },
       { name: 'Yadi', position: 'C', avg: '.280' },
       { name: 'Some 1B', position: '1B', homeRuns: '30' },
+      { name: 'Some SS', position: 'SS', fieldingPct: '.975' },
+      { name: 'Some OF', position: 'RF', outfieldAssists: '8' },
+      { name: 'Some DH', position: 'DH' },
+      { name: 'Mystery player', position: 'ZZ' }, // unknown code — the one real fallback case
     ],
   })
   assertEquals(team.league, 'AL')
-  assertEquals(team.roster.length, 3)
+  assertEquals(team.roster.length, 7)
   assertEquals(team.roster[0].position, 'P')
   assertEquals(team.roster[0].era, 2.0)
   assertEquals(team.roster[1].position, 'C')
-  assertEquals(team.roster[2].position, '1B') // fell through to Batter, kept its own position
+  assertEquals(team.roster[2].position, '1B')
   assertEquals(team.roster[2].homeRuns, 30)
+  assertEquals(team.roster[3].fieldingPct, 0.975)
+  assertEquals(team.roster[4].outfieldAssists, 8)
+  assertEquals(team.roster[5].position, 'DH')
+  assertEquals(team.roster[6].position, 'ZZ') // only THIS one actually fell through to Batter
 })
 
 // === NFL casts ===
@@ -100,18 +142,46 @@ Deno.test('TightEnd: reuses WideReceiver\'s shape but overrides position to TE',
   assertEquals(te.receivingYards, 900)
 })
 
-Deno.test('AmericanFootballTeam: dispatches skill positions, keeps others identity-only', () => {
+Deno.test('Kicker/Punter/TeamDefense: the non-skill-position fantasy-scored roles', () => {
+  const k = Kicker({ name: 'x', fieldGoalsMade: '28', fieldGoalAttempts: '31' })
+  const p = Punter({ name: 'y', puntYards: '4000' })
+  const dst = TeamDefense({ name: 'Ravens D/ST', sacks: '45', defensiveTouchdowns: '3' })
+  assertEquals(k.position, 'K')
+  assertEquals(k.fieldGoalsMade, 28)
+  assertEquals(p.position, 'P')
+  assertEquals(p.puntYards, 4000)
+  assertEquals(dst.position, 'DST')
+  assertEquals(dst.sacks, 45)
+  assertEquals(dst.defensiveTouchdowns, 3)
+})
+
+Deno.test('IDP positions (LB/DL/DB) are real casts now, not identity-only fallbacks', () => {
+  const lb = LineBacker({ name: 'x', tackles: '120', sacks: '3.5' })
+  const dl = DefensiveLineman({ name: 'y', position: 'DE', sacks: '12' })
+  const db = DefensiveBack({ name: 'z', position: 'CB', interceptions: '5' })
+  assertEquals(lb.position, 'LB')
+  assertEquals(lb.tackles, 120)
+  assertEquals(dl.position, 'DE')
+  assertEquals(dl.sacks, 12)
+  assertEquals(db.position, 'CB')
+  assertEquals(db.interceptions, 5)
+})
+
+Deno.test('AmericanFootballTeam: dispatches skill AND defensive positions, keeps true non-stat positions (O-line) identity-only', () => {
   const team = AmericanFootballTeam({
     name: 'Patriots', conference: 'AFC', division: 'East',
     roster: [
       { name: 'a QB', position: 'QB', passYards: '3000' },
-      { name: 'a LB', position: 'LB' }, // no stat shape yet — identity only
+      { name: 'a LB', position: 'LB', tackles: '100' },
+      { name: 'a tackle', position: 'T' }, // genuinely no stat line — identity only
     ],
   })
   assertEquals(team.roster[0].position, 'QB')
   assertEquals(team.roster[0].passYards, 3000)
   assertEquals(team.roster[1].position, 'LB')
-  assertEquals(team.roster[1].passYards, undefined) // confirms it did NOT fall through to a skill-position shape
+  assertEquals(team.roster[1].tackles, 100)
+  assertEquals(team.roster[2].position, 'T')
+  assertEquals(team.roster[2].passYards, undefined) // confirms it did NOT fall through to a skill-position shape
 })
 
 // === the scaling seam ===
