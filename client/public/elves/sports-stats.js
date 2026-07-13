@@ -671,7 +671,14 @@ $.style(`
   & .ss-cast-name { font-size: 1.4rem; }
   & .ss-cast-meta { opacity: .6; font-size: .85rem; margin-top: .2rem; text-transform: uppercase; letter-spacing: .04em; }
   & .ss-cast-lines { margin-top: .6rem; display: flex; flex-direction: column; gap: .2rem; font-size: 1rem; }
-  & .ss-corner-btn { position: absolute; top: .8rem; right: .8rem; background: white; color: black; border: 1px solid black; width: 2.2rem; height: 2.2rem; cursor: pointer; font-size: 1.1rem; }
+  /* hidden in the clean broadcast feed by default — this is the layer
+     OBS/a TV actually captures, so a visible gear icon sitting on top of
+     it isn't acceptable at rest. Only reveals on hover/focus, for the
+     operator checking it in a real browser tab; a pure capture surface
+     (OBS browser source, no cursor) never triggers either, so it stays
+     invisible there permanently. */
+  & .ss-corner-btn { position: absolute; top: .8rem; right: .8rem; background: white; color: black; border: 1px solid black; width: 2.2rem; height: 2.2rem; cursor: pointer; font-size: 1.1rem; opacity: 0; transition: opacity .15s; }
+  & .ss-live:hover .ss-corner-btn, & .ss-corner-btn:focus { opacity: 1; }
 
   /* === transmitter: deck browsing + hand + staging ===
      the panel itself is the only scroll box (see &, overflow: auto,
