@@ -20,6 +20,7 @@
 //          2025 regular season (the completed season — 2026 NFL hadn't
 //          started at pull time).
 import Self, { linkState, broadcastElf } from '@plan98/elf'
+import lunr from 'lunr'
 import { ROLE_TIMEOUT_MS, mintRoleId, joinUrl, parseJoinParam, ROOM_MERGE } from './sports-stats-engine.js'
 import { BaseballTeam } from './sports-engine.js'
 
@@ -98,6 +99,7 @@ async function ensureMlbLoaded() {
     _mlbLoadStarted = false
     return
   }
+  rebuildSportsIndex()
   redraw()
 }
 
@@ -105,8 +107,49 @@ async function ensureNflLoaded() {
   if (NFL_TEAMS) return
   try {
     NFL_TEAMS = await fetch('/cdn/nfl/teams.json').then(r => r.json())
+    rebuildSportsIndex()
     redraw()
   } catch (e) { console.error('sports-stats: NFL vendor load failed', e) }
+}
+
+// a global "find any player, from any loaded team, and jump straight to
+// staging them" index — separate from the site-wide search-manifest.json
+// (that manifest is a build-time walk of static files/pages; this data is
+// per-session, half live-fetched, so it's built at runtime here instead,
+// same shape blog-search.js/drop-saga.js already use for their own
+// manifests: this.ref('ref') + this.field('name', boosted) + a flat
+// docs array to map hits back to full records, since lunr search() only
+// returns {ref, score}.
+let _sportsIndex = null
+let _sportsDocs = null
+function rebuildSportsIndex() {
+  const docs = []
+  for (const [sport, teams] of [['MLB', MLB_TEAMS], ['NFL', NFL_TEAMS]]) {
+    if (!teams) continue
+    teams.forEach((team, ti) => team.roster.forEach((card, ci) => {
+      docs.push({ ref: `${sport}:${ti}:${ci}`, sport, teamIdx: ti, cardIdx: ci, name: card.name, team: card.team, position: card.position, keywords: `${card.team} ${card.position}` })
+    }))
+  }
+  _sportsDocs = docs
+  _sportsIndex = lunr(function () {
+    this.ref('ref')
+    this.field('name', { boost: 10 })
+    this.field('keywords')
+    docs.forEach(d => this.add(d))
+  })
+}
+
+// same defensive shape as blog-search.js: lunr throws on malformed query
+// syntax mid-keystroke (a bare `+`, a trailing `~`), so a bad query just
+// falls back to a plain substring match instead of blanking the results.
+function searchSportsIndex(query) {
+  if (!query || !_sportsIndex || !_sportsDocs) return []
+  try {
+    return _sportsIndex.search(query).map(h => _sportsDocs.find(d => d.ref === h.ref)).filter(Boolean)
+  } catch {
+    const q = query.toLowerCase()
+    return _sportsDocs.filter(d => d.name.toLowerCase().includes(q))
+  }
 }
 
 // scoped per sport ON PURPOSE, not one shared switch on card.position —
@@ -177,6 +220,8 @@ const $ = Self(tag, {
   stagedCardIdx: null,   // local-only — index into the active deck's cards
   targetReceiverId: null, // local-only — which receiver Send acts on
   showSetup: false,       // local-only — receiver's setup/recovery overlay
+  deckSearch: '',         // local-only — top-level "find any player" box
+  cardSearch: '',         // local-only — filters the currently open roster
 })
 
 function commit(patch) {
@@ -444,9 +489,21 @@ function sliceGrid(teams, sport, slices, loadingLabel) {
   return `<div class="ss-deck-grid">${slices.map(s => `<button class="ss-deck-card" data-open-deck="${sport}:slice:${s.key}">${esc(s.label)}</button>`).join('')}</div>`
 }
 
-function deckListView() {
+// each search-result row jumps straight to the player's real team roster
+// and pre-stages them — a slice deck is a flattened, virtual view, so the
+// canonical place to land is always the team deck itself.
+function searchResultRow(d) {
+  return `
+    <button class="ss-card-row" data-jump-to-card="${d.ref}">
+      <span class="ss-card-name">${esc(d.name)}</span>
+      <span class="ss-card-meta">${esc(d.sport)} · ${esc(d.team)} · ${esc(d.position)}</span>
+    </button>`
+}
+
+function deckListView(deckSearch) {
   ensureMlbLoaded()
   ensureNflLoaded()
+  const q = (deckSearch || '').trim()
   return `
     <div class="ss-deck-picker">
       <h3>⚾ MLB — quick slices</h3>
@@ -457,6 +514,10 @@ function deckListView() {
       ${sliceGrid(NFL_TEAMS, 'NFL', NFL_SLICES, 'loading NFL rosters…')}
       <h3>🏈 NFL Teams (2025 season)</h3>
       ${teamGrid(NFL_TEAMS, 'NFL', 'loading NFL rosters…')}
+      <div class="ss-search">
+        <input type="text" class="ss-search-input" data-deck-search placeholder="find any player, any team…" value="${esc(deckSearch)}">
+        ${q ? `<div class="ss-card-list">${searchSportsIndex(q).map(searchResultRow).join('') || `<div class="ss-empty">no match</div>`}</div>` : ''}
+      </div>
     </div>`
 }
 
@@ -464,11 +525,19 @@ function deckListView() {
 // of the ONE scrolling box the whole panel already is — the roster list
 // just flows underneath it in normal document flow, not a second nested
 // scroll container of its own.
-function handView(activeDeck, stagedCardIdx) {
+function handView(activeDeck, stagedCardIdx, cardSearch) {
   const deck = resolveDeck(activeDeck)
   if (!deck) return `<div class="ss-empty">team not loaded</div>`
   const cards = deck.roster
   const staged = stagedCardIdx != null ? cards[stagedCardIdx] : null
+  // filters the roster already in hand — small array, already in memory,
+  // so a plain substring match is plenty; the lunr index is reserved for
+  // the cross-team "find any player" box below, where fuzzy/ranked search
+  // actually earns its keep.
+  const q = (cardSearch || '').trim().toLowerCase()
+  const rows = cards
+    .map((c, i) => [c, i])
+    .filter(([c]) => !q || `${c.name} ${c.team} ${c.position}`.toLowerCase().includes(q))
   return `
     <div class="ss-hand">
       <div class="ss-hand-sticky">
@@ -490,11 +559,14 @@ function handView(activeDeck, stagedCardIdx) {
         </div>
       </div>
       <div class="ss-card-list">
-        ${cards.map((c, i) => `
+        ${rows.map(([c, i]) => `
           <button class="ss-card-row ${i === stagedCardIdx ? '-selected' : ''}" data-select-card="${i}">
             <span class="ss-card-name">${esc(c.name)}</span>
             <span class="ss-card-meta">${esc(c.team)} · ${esc(c.position)}</span>
-          </button>`).join('')}
+          </button>`).join('') || `<div class="ss-empty">no match</div>`}
+      </div>
+      <div class="ss-search">
+        <input type="text" class="ss-search-input" data-card-search placeholder="filter this roster…" value="${esc(cardSearch)}">
       </div>
     </div>`
 }
@@ -503,13 +575,13 @@ function handView(activeDeck, stagedCardIdx) {
 // top-level-only — once a deck is open the screen is just back + staging
 // + roster, nothing else competing for the sticky header's space.
 function transmitterView() {
-  const { receivers, transmitters, activeDeck, stagedCardIdx, targetReceiverId } = $.learn()
+  const { receivers, transmitters, activeDeck, stagedCardIdx, targetReceiverId, deckSearch, cardSearch } = $.learn()
   if (receivers[_pendingReceiverInvite]) _pendingReceiverInvite = mintRoleId()
 
   if (activeDeck) {
     return `
       <div class="ss-shell -transmitter">
-        <div class="ss-panel">${handView(activeDeck, stagedCardIdx)}</div>
+        <div class="ss-panel">${handView(activeDeck, stagedCardIdx, cardSearch)}</div>
       </div>`
   }
 
@@ -526,7 +598,7 @@ function transmitterView() {
         </div>
         <h3>Casting to</h3>
         <div class="ss-role-list">${receiverListRows(receivers, effectiveTarget)}</div>
-        ${deckListView()}
+        ${deckListView(deckSearch)}
         <details class="ss-recover" data-acc-key="transmitter-recover" ${accordionOpenAttr('transmitter-recover')}>
           <summary>Pass the torch (share my control)</summary>
           <div class="ss-qr-block -small">
@@ -618,12 +690,18 @@ $.when('click', '[data-close-modal]', () => $.whisper({ modalReceiverId: null })
 $.when('click', '[data-toggle-setup]', () => $.whisper({ showSetup: !$.learn().showSetup }))
 $.when('click', '[data-open-deck]', e => {
   const [sport, mode, key] = e.target.closest('[data-open-deck]').dataset.openDeck.split(':')
-  $.whisper({ activeDeck: { sport, mode, key: mode === 'team' ? Number(key) : key }, stagedCardIdx: null })
+  $.whisper({ activeDeck: { sport, mode, key: mode === 'team' ? Number(key) : key }, stagedCardIdx: null, cardSearch: '' })
 })
-$.when('click', '[data-back-to-decks]', () => $.whisper({ activeDeck: null, stagedCardIdx: null }))
+$.when('click', '[data-back-to-decks]', () => $.whisper({ activeDeck: null, stagedCardIdx: null, cardSearch: '' }))
 $.when('click', '[data-select-card]', e => $.whisper({ stagedCardIdx: Number(e.target.closest('[data-select-card]').dataset.selectCard) }))
 $.when('click', '[data-send]', e => castTo(e.target.closest('[data-send]').dataset.send))
 $.when('click', '[data-pick-receiver]', e => $.whisper({ targetReceiverId: e.target.closest('[data-pick-receiver]').dataset.pickReceiver }))
+$.when('input', '[data-deck-search]', e => $.whisper({ deckSearch: e.target.value }))
+$.when('input', '[data-card-search]', e => $.whisper({ cardSearch: e.target.value }))
+$.when('click', '[data-jump-to-card]', e => {
+  const [sport, teamIdx, cardIdx] = e.target.closest('[data-jump-to-card]').dataset.jumpToCard.split(':')
+  $.whisper({ activeDeck: { sport, mode: 'team', key: Number(teamIdx) }, stagedCardIdx: Number(cardIdx), deckSearch: '' })
+})
 
 // black, white, Courier New — same base accessibility-mode already uses
 // (plain text, thin black rules, no color doing the work of hierarchy).
@@ -704,4 +782,11 @@ $.style(`
   & .ss-send-btn:hover { background: black; color: white; }
   & .ss-send-btn.-full { background: black; color: white; }
   & .ss-send-btn.-full:hover { background: white; color: black; }
+
+  /* === search: bottom-of-list filter, both the cross-team lunr box and
+     the plain in-roster filter share this look === */
+  & .ss-search { margin-top: .8rem; padding-top: .8rem; border-top: 1px solid black; display: flex; flex-direction: column; gap: .5rem; }
+  & .ss-search-input { width: 100%; box-sizing: border-box; font-family: inherit; font-size: .95rem; padding: .5rem .7rem; border: 1px solid black; background: white; color: black; }
+  & .ss-search-input:focus { outline: 2px solid black; outline-offset: -1px; }
+  & .ss-search .ss-card-list { margin-top: .2rem; }
 `)
