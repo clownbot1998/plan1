@@ -415,11 +415,14 @@ const CORNER_CLASS = ['-tl', '-tr', '-br', '-bl']
 function seatStatus(seat) { return !seat ? 'red' : seat.ready ? 'green' : 'yellow' }
 function statusDot(seat) { return `<span class="h-dot -${seatStatus(seat)}"></span>` }
 
+// a claim QR is never written into the diffed template string — see
+// afterUpdate's own comment for why. this only builds the mount point;
+// the actual <qr-code> element is created once per seat and moved into
+// place imperatively.
 function seatCorner(seat) {
   const s = $.learn().seats[seat]
   if (!s) {
-    const url = `${location.origin}/app/${$.link}?id=${gameId}&claim=${seat}`
-    return `<div class="h-corner ${CORNER_CLASS[seat]}"><qr-code src="${esc(url)}"></qr-code><div class="h-corner-label">Seat ${seat + 1}</div></div>`
+    return `<div class="h-corner ${CORNER_CLASS[seat]}"><div class="h-qr-mount" data-qr-mount="${seat}"></div><div class="h-corner-label">Seat ${seat + 1}</div></div>`
   }
   const { turn, tricksWon } = $.learn()
   return `
@@ -586,13 +589,40 @@ function renderApp() {
   return `<div class="h-empty">loading…</div>`
 }
 
+// four persistent <qr-code> elements, one per seat, created once and
+// moved into place rather than re-created from a template string. this
+// is the same fix lore-game already needed for embedding bulletin-board:
+// diffHTML has no explicit key mechanism, so when the corners' shapes
+// change out from under it (a seat claims, a seat gets released by
+// maybeReleaseStaleSeats — both far more frequent now that every claimed
+// seat heartbeats every 2s), it can match up same-tag elements by
+// position rather than by which seat they actually belonged to — the
+// qr-code DOM node that visually sits in "seat 3's corner" could get
+// reassigned to seat 4's src attribute while still showing seat 3's
+// already-rendered (and now stale) QR bitmap. Naming the tag in the
+// diffed string at all is what invites that; keeping the mount points
+// empty and wiring each qr-code's src directly, by seat index, in JS
+// removes the ambiguity instead of hoping the reconciler guesses right.
+const _qrElements = [null, null, null, null]
+function afterUpdate(target) {
+  for (let seat = 0; seat < 4; seat++) {
+    const mount = target.querySelector(`[data-qr-mount="${seat}"]`)
+    if (!mount) continue
+    if (!_qrElements[seat]) _qrElements[seat] = document.createElement('qr-code')
+    const el = _qrElements[seat]
+    const url = `${location.origin}/app/${$.link}?id=${gameId}&claim=${seat}`
+    if (el.getAttribute('src') !== url) el.setAttribute('src', url)
+    if (mount.firstElementChild !== el) mount.appendChild(el)
+  }
+}
+
 $.draw(() => {
   syncPrivateState()
   try { return renderApp() } catch (e) {
     console.error('hearts render error:', e)
     return `<div class="h-empty">render error — ${esc(e.message)}</div>`
   }
-})
+}, { afterUpdate })
 
 export default $
 
@@ -681,7 +711,8 @@ $.style(`
   }
 
   & .h-corner { position: absolute; width: 8rem; display: flex; flex-direction: column; align-items: center; gap: .3rem; color: lemonchiffon; }
-  & .h-corner qr-code { width: 6rem; height: 6rem; border-radius: .6rem; overflow: hidden; }
+  & .h-qr-mount { width: 6rem; height: 6rem; }
+  & .h-qr-mount qr-code { width: 6rem; height: 6rem; border-radius: .6rem; overflow: hidden; display: block; }
   & .h-corner-label { font-size: .8rem; opacity: .8; }
   & .h-corner-name { font-weight: 700; display: flex; align-items: center; gap: .35rem; }
   & .h-dot { width: .65rem; height: .65rem; border-radius: 50%; display: inline-block; flex: none; }
