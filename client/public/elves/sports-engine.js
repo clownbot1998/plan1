@@ -28,10 +28,15 @@ function Text(x = '') { return x.toString() }
 // Wikidata QID — the cross-source foreign key discussed for the eventual
 // graph: our own id is what everything internal points to, qid is how we
 // bridge out to enrich a record without owning a heavy ingestion pipeline.
+// sourceIds is a SEPARATE, generic bag for whatever source-native id got
+// us here in the first place (an MLB Advanced Media playerId, an ESPN
+// athlete id) — real and useful for re-fetching a record, but not a
+// Wikidata QID, so it doesn't get to pretend to be one under that name.
 function identity(data) {
   return {
     id: Text(data.id) || crypto.randomUUID(),
     qid: data.qid ? Text(data.qid) : null,
+    sourceIds: data.sourceIds || {},
     name: Text(data.name),
     team: Text(data.team),
   }

@@ -21,6 +21,13 @@ Deno.test('identity: keeps a supplied id and qid rather than minting', () => {
   assertEquals(p.qid, 'Q123')
 })
 
+Deno.test('identity: sourceIds is a separate bag from qid, empty object when absent', () => {
+  assertEquals(Pitcher({ name: 'x' }).sourceIds, {})
+  const p = Pitcher({ name: 'x', sourceIds: { mlb: '675911' } })
+  assertEquals(p.sourceIds, { mlb: '675911' })
+  assertEquals(p.qid, null) // a source-native id is not a Wikidata QID — never conflated
+})
+
 Deno.test('identity: qid is null, not undefined, when absent', () => {
   assertEquals(Pitcher({ name: 'x' }).qid, null)
 })

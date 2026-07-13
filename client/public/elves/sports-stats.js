@@ -9,10 +9,14 @@
 // that exact role and continues it.
 //
 // decks/staging/casting are wired now too — see plans/sports-stats/
-// data-research-log.md for where the real-data side stands. THESE CARDS
-// ARE PLACEHOLDER FICTIONAL STAT LINES, not vendored real data — that's
-// still the next step. What's real here is the entity shape (they're
-// built through the actual sports-engine.js casts, not ad hoc objects).
+// data-research-log.md for where the real-data side stands. THIS DECK IS
+// REAL DATA, pulled directly (curl, not paraphrased) from the MLB Stats
+// API and ESPN's athlete API on 2026-07-12 — logged there with sources,
+// player IDs, and exact query params. MLB numbers are 2026 season-to-date
+// (mid-season, live); NFL numbers are the completed 2025 season, since
+// the 2026 NFL season hadn't started yet at pull time (real off-season,
+// not a bug). This is still a hand-picked slice of 7 players, not a full
+// roster/team pipeline — that's the next step up from here.
 import Self, { linkState, broadcastElf } from '@plan98/elf'
 import { ROLE_TIMEOUT_MS, mintRoleId, joinUrl, parseJoinParam, ROOM_MERGE } from './sports-stats-engine.js'
 import { Pitcher, Catcher, Batter, QuarterBack, RunningBack, WideReceiver, TightEnd } from './sports-engine.js'
@@ -29,18 +33,18 @@ const DECKS = {
   baseball: {
     label: '⚾ Baseball',
     cards: [
-      Pitcher({ name: 'Spencer Strider', team: 'ATL', era: 3.86, whip: 1.09, wins: 5, strikeouts: 122 }),
-      Catcher({ name: 'Will Smith', team: 'LAD', avg: 0.262, homeRuns: 18, rbi: 58 }),
-      Batter({ name: 'Freddie Freeman', team: 'LAD', position: '1B', avg: 0.282, homeRuns: 16, rbi: 55 }),
+      Pitcher({ sourceIds: { mlb: '675911' }, name: 'Spencer Strider', team: 'ATL', era: 5.31, whip: 1.36, wins: 4, losses: 2, strikeouts: 46 }),
+      Catcher({ sourceIds: { mlb: '669257' }, name: 'Will Smith', team: 'LAD', avg: 0.249, homeRuns: 6, rbi: 23 }),
+      Batter({ sourceIds: { mlb: '518692' }, name: 'Freddie Freeman', team: 'LAD', position: '1B', avg: 0.290, homeRuns: 15, rbi: 49 }),
     ],
   },
   football: {
     label: '🏈 Football',
     cards: [
-      QuarterBack({ name: 'Josh Allen', team: 'BUF', passYards: 2450, passTouchdowns: 20, rushYards: 300 }),
-      RunningBack({ name: 'Bijan Robinson', team: 'ATL', rushYards: 700, rushTouchdowns: 6, receptions: 30 }),
-      WideReceiver({ name: 'CeeDee Lamb', team: 'DAL', receptions: 60, receivingYards: 780, receivingTouchdowns: 5 }),
-      TightEnd({ name: 'Sam LaPorta', team: 'DET', receptions: 45, receivingYards: 520, receivingTouchdowns: 4 }),
+      QuarterBack({ sourceIds: { espn: '3918298' }, name: 'Josh Allen', team: 'BUF', passYards: 3668, passTouchdowns: 25, interceptions: 10, rushYards: 579, rushTouchdowns: 14 }),
+      RunningBack({ sourceIds: { espn: '4430807' }, name: 'Bijan Robinson', team: 'ATL', rushYards: 1478, rushTouchdowns: 7, receptions: 79 }),
+      WideReceiver({ sourceIds: { espn: '4241389' }, name: 'CeeDee Lamb', team: 'DAL', receptions: 75, receivingYards: 1077, receivingTouchdowns: 3 }),
+      TightEnd({ sourceIds: { espn: '4430027' }, name: 'Sam LaPorta', team: 'DET', receptions: 40, receivingYards: 489, receivingTouchdowns: 3 }),
     ],
   },
 }

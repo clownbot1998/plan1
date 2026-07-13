@@ -127,3 +127,48 @@ under fair-use-for-commentary norms, decided separately, not defaulted
 into.
 
 ---
+
+## 2026-07-12 — first real data pull: 7 players, direct API, no paraphrasing
+
+Replaced the fictional placeholder stat lines in sports-stats.js's demo
+decks with real numbers, pulled via `curl` directly against the two
+sources scoped earlier (MLB Stats API, ESPN's hidden API) — not through
+an AI-summarized fetch, so the figures are exact, not paraphrased.
+
+**MLB (`statsapi.mlb.com`) — 2026 season-to-date (mid-season, live):**
+- Spencer Strider (P, ATL, `people/675911`): ERA 5.31, WHIP 1.36, 4-2, 46 K
+- Will Smith (C, LAD, `people/669257`): .249/6 HR/23 RBI
+- Freddie Freeman (1B, LAD, `people/518692`): .290/15 HR/49 RBI
+
+Query shape: `people/{id}/stats?stats=season&group=pitching|hitting&season=2026`.
+
+**NFL (ESPN hidden API) — completed 2025 season, not 2026:** the 2026 NFL
+season hadn't started at pull time (confirmed via the athlete search
+response itself: `season.type.name: "Off Season"`, 2025 marked as the
+current/most recent season) — this is real off-season, not a bug in the
+pull. Logging it plainly so nobody mistakes a 2025 stat line for a stale
+2026 one later.
+- Josh Allen (QB, BUF, ESPN athlete `3918298`): 3668 pass yds, 25 pass TD,
+  10 INT, 579 rush yds, 14 rush TD
+- Bijan Robinson (RB, ATL, ESPN athlete `4430807`): 1478 rush yds, 7 rush
+  TD, 79 rec
+- CeeDee Lamb (WR, DAL, ESPN athlete `4241389`): 75 rec, 1077 rec yds, 3
+  rec TD
+- Sam LaPorta (TE, DET, ESPN athlete `4430027`): 40 rec, 489 rec yds, 3
+  rec TD
+
+Query shape: `common/v3/sports/football/nfl/athletes/{id}/stats`.
+
+**Identity note:** these source-native ids (MLB `people` id, ESPN athlete
+id) are stored on each card's new `sourceIds` field, NOT `qid` — `qid` is
+reserved specifically for a real Wikidata QID, which none of these have
+yet. Conflating "an id from somewhere" with "the Wikidata anchor" would
+have been exactly the kind of quiet mislabeling this log exists to avoid.
+
+**Scope, said plainly:** this is 7 hand-picked players, not a roster or
+team pipeline. Confirms the entity-cast layer and the receiver/
+transmitter/staging flow all work end-to-end on real numbers — the next
+real step up is a genuine ingestion slice (a team's full roster, or a
+position group) rather than one-off players fetched by hand.
+
+---
