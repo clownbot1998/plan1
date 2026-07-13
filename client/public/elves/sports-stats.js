@@ -124,6 +124,16 @@ function roleRow(id, role, actions = '') {
   return `<div class="ss-role-row"><span class="ss-role-name">${esc(role.name)}</span>${actions}</div>`
 }
 
+// which <details> accordions are open, tracked OUTSIDE $ state on purpose
+// — same fix lore-game already needed for its own accordions. re-rendering
+// the template (heartbeat alone does this every 2s) regenerates a plain
+// <details> with no memory of whether it was open, snapping it shut on
+// every tick. <details>'s own `toggle` event doesn't bubble, so it can't
+// go through the usual delegated $.when(...) click handling either —
+// afterUpdate attaches a direct .ontoggle per element instead.
+const openAccordions = new Set()
+function accordionOpenAttr(key) { return openAccordions.has(key) ? 'open' : '' }
+
 // this receiver's own always-live invite for new transmitters to join the
 // trust pool — regenerated fresh once the CURRENT pending one gets
 // claimed, so there's always exactly one open invite on screen, forever.
@@ -146,7 +156,7 @@ function receiverView() {
         </div>
         <h3>Connected transmitters</h3>
         <div class="ss-role-list">${transmitterRows}</div>
-        <details class="ss-recover">
+        <details class="ss-recover" data-acc-key="receiver-recover" ${accordionOpenAttr('receiver-recover')}>
           <summary>Recover / add another receiver</summary>
           <div class="ss-qr-block -small">
             <div class="ss-qr-mount" data-qr-mount="reconnect-self"></div>
@@ -184,7 +194,7 @@ function transmitterView() {
         </div>
         <h3>Receivers</h3>
         <div class="ss-role-list">${receiverRows}</div>
-        <details class="ss-recover">
+        <details class="ss-recover" data-acc-key="transmitter-recover" ${accordionOpenAttr('transmitter-recover')}>
           <summary>Pass the torch (share my control)</summary>
           <div class="ss-qr-block -small">
             <div class="ss-qr-mount" data-qr-mount="reconnect-self"></div>
@@ -244,6 +254,14 @@ function mountQr(target, key, url) {
 }
 
 function afterUpdate(target) {
+  target.querySelectorAll('details[data-acc-key]').forEach(d => {
+    d.ontoggle = () => {
+      const key = d.dataset.accKey
+      if (d.open) openAccordions.add(key)
+      else openAccordions.delete(key)
+    }
+  })
+
   const origin = location.origin
   if (myKind === 'receiver') {
     mountQr(target, 'invite-transmitter', joinUrl(origin, tag, gameId, 'transmitter', _pendingTransmitterInvite))
