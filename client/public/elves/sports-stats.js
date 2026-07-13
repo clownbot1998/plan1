@@ -567,6 +567,9 @@ function handView(activeDeck, stagedCardIdx, cardSearch) {
           <button class="ss-back-btn" data-back-to-decks>← Back</button>
           <span class="ss-hand-title">${esc(deck.name)}</span>
         </div>
+        <div class="ss-search -in-hand">
+          <input type="text" class="ss-search-input" data-card-search placeholder="filter this roster…" value="${esc(cardSearch)}">
+        </div>
         <div class="ss-staging">
           ${staged ? `
             <div class="ss-staged-preview">
@@ -579,9 +582,6 @@ function handView(activeDeck, stagedCardIdx, cardSearch) {
               <button class="ss-send-btn" data-send="right">Send Right</button>
             </div>` : `<div class="ss-empty">tap a card to stage it</div>`}
         </div>
-      </div>
-      <div class="ss-search">
-        <input type="text" class="ss-search-input" data-card-search placeholder="filter this roster…" value="${esc(cardSearch)}">
       </div>
       <div class="ss-card-list">
         ${rows.map(([c, i]) => `
@@ -816,6 +816,7 @@ $.style(`
   & .ss-search-input::placeholder { color: rgba(255,255,255,.55); }
   & .ss-search-input:focus { outline: 2px solid black; outline-offset: 2px; }
   & .ss-search.-hero { margin-bottom: .8rem; padding-bottom: .8rem; border-bottom: 1px solid black; }
+  & .ss-search.-in-hand { margin-bottom: 1rem; }
   & .ss-search-status { font-size: .78rem; opacity: .6; }
   & .ss-search .ss-card-list { margin-top: .2rem; }
 `)
