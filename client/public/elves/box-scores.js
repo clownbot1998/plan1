@@ -254,8 +254,19 @@ function sideRecap(side, abbr) {
     </div>`
 }
 
-function battingRecap(awaySide, homeSide, awayAbbr, homeAbbr) {
-  return `<div class="bs-box-grid">${sideRecap(awaySide, awayAbbr)}${sideRecap(homeSide, homeAbbr)}</div>`
+// team is the outer grouping, not stat-type — each column is one team's
+// whole story (batting, recap, pitching) stacked together. Three separate
+// away|home grids in sequence read fine on desktop (columns stay side by
+// side top to bottom) but on mobile each one collapses to a single
+// column independently, so the old order striped away/home/away/home/
+// away/home instead of reading as two coherent team blocks.
+function teamColumn(side, abbr) {
+  return `
+    <div class="bs-team-col">
+      ${battingTable(side, abbr)}
+      ${sideRecap(side, abbr)}
+      ${pitchingTable(side, abbr)}
+    </div>`
 }
 
 function boxscoreDetail(game) {
@@ -268,13 +279,8 @@ function boxscoreDetail(game) {
   return `
     <div class="bs-box-detail">
       <div class="bs-box-grid">
-        ${battingTable(away, awayAbbr)}
-        ${battingTable(home, homeAbbr)}
-      </div>
-      ${battingRecap(away, home, awayAbbr, homeAbbr)}
-      <div class="bs-box-grid">
-        ${pitchingTable(away, awayAbbr)}
-        ${pitchingTable(home, homeAbbr)}
+        ${teamColumn(away, awayAbbr)}
+        ${teamColumn(home, homeAbbr)}
       </div>
     </div>`
 }
@@ -379,7 +385,8 @@ $.style(`
   /* === expandable batting/pitching, standard newspaper box score === */
   & .bs-box-empty { margin-top: .6rem; opacity: .55; font-size: .8em; }
   & .bs-box-detail { margin-top: .6rem; display: flex; flex-direction: column; gap: .6rem; }
-  & .bs-box-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .6rem; }
+  & .bs-box-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .6rem; align-items: start; }
+  & .bs-team-col { display: flex; flex-direction: column; gap: .6rem; }
   & .bs-boxtable { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .76em; }
   & .bs-boxtable caption { text-align: left; font-size: .7em; text-transform: uppercase; letter-spacing: .04em; opacity: .6; padding-bottom: .2rem; caption-side: top; }
   & .bs-boxtable th, & .bs-boxtable td { border: 1px solid black; padding: .15rem .3rem; text-align: center; }
