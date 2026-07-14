@@ -108,37 +108,44 @@ function linescoreTable(game) {
   const innings = ls?.innings || []
   const away = game.teams.away, home = game.teams.home
   const totals = ls?.teams || {}
+  const isFinal = game.status.abstractGameState === 'Final'
+  // a home team that's already ahead going into the bottom of the last
+  // inning never bats it — real box scores mark that cell "X" rather
+  // than leaving it looking like a missed/unplayed frame.
   const cell = (side, i) => {
     const inn = innings[i]
     const v = inn?.[side]?.runs
+    if (v == null && side === 'home' && i === innings.length - 1 && isFinal) return 'X'
     return v == null ? '' : v
   }
   return `
+    <div class="bs-table-scroll">
     <table class="bs-linescore">
       <thead>
         <tr>
-          <th class="bs-team-col"></th>
-          ${innings.map((_, i) => `<th>${i + 1}</th>`).join('')}
+          <th class="bs-team-col">TM</th>
+          ${innings.map((_, i) => `<th class="bs-inning-col">${i + 1}</th>`).join('')}
           <th class="bs-rhe">R</th><th class="bs-rhe">H</th><th class="bs-rhe">E</th>
         </tr>
       </thead>
       <tbody>
         <tr>
           <td class="bs-team-col">${esc(away.team.abbreviation || away.team.teamCode?.toUpperCase() || away.team.name)}</td>
-          ${innings.map((_, i) => `<td>${cell('away', i)}</td>`).join('')}
+          ${innings.map((_, i) => `<td class="bs-inning-col">${cell('away', i)}</td>`).join('')}
           <td class="bs-rhe">${totals.away?.runs ?? away.score ?? ''}</td>
           <td class="bs-rhe">${totals.away?.hits ?? ''}</td>
           <td class="bs-rhe">${totals.away?.errors ?? ''}</td>
         </tr>
         <tr>
           <td class="bs-team-col">${esc(home.team.abbreviation || home.team.teamCode?.toUpperCase() || home.team.name)}</td>
-          ${innings.map((_, i) => `<td>${cell('home', i)}</td>`).join('')}
+          ${innings.map((_, i) => `<td class="bs-inning-col">${cell('home', i)}</td>`).join('')}
           <td class="bs-rhe">${totals.home?.runs ?? home.score ?? ''}</td>
           <td class="bs-rhe">${totals.home?.hits ?? ''}</td>
           <td class="bs-rhe">${totals.home?.errors ?? ''}</td>
         </tr>
       </tbody>
-    </table>`
+    </table>
+    </div>`
 }
 
 // a game with no innings played yet (Scheduled/Preview/Postponed) has no
@@ -173,53 +180,96 @@ function battingTable(side, abbr) {
     .filter(p => p && p.stats?.batting && Object.keys(p.stats.batting).length)
   const t = side.teamStats?.batting || {}
   return `
+    <div class="bs-table-scroll">
     <table class="bs-boxtable">
       <caption>${esc(abbr)} batting</caption>
-      <thead><tr><th class="bs-name-col"></th><th>AB</th><th>R</th><th>H</th><th>RBI</th><th>BB</th><th>SO</th></tr></thead>
+      <thead><tr><th class="bs-name-col">Batters</th><th class="bs-num-col">AB</th><th class="bs-num-col">R</th><th class="bs-num-col">H</th><th class="bs-num-col">RBI</th><th class="bs-num-col">BB</th><th class="bs-num-col">SO</th><th class="bs-avg-col">AVG</th></tr></thead>
       <tbody>
         ${rows.map(p => `
           <tr>
             <td class="bs-name-col" title="${esc(p.person.fullName)}">${esc(p.person.boxscoreName)} <span class="bs-pos">${esc(p.position.abbreviation)}</span></td>
-            <td>${p.stats.batting.atBats ?? 0}</td>
-            <td>${p.stats.batting.runs ?? 0}</td>
-            <td>${p.stats.batting.hits ?? 0}</td>
-            <td>${p.stats.batting.rbi ?? 0}</td>
-            <td>${p.stats.batting.baseOnBalls ?? 0}</td>
-            <td>${p.stats.batting.strikeOuts ?? 0}</td>
+            <td class="bs-num-col">${p.stats.batting.atBats ?? 0}</td>
+            <td class="bs-num-col">${p.stats.batting.runs ?? 0}</td>
+            <td class="bs-num-col">${p.stats.batting.hits ?? 0}</td>
+            <td class="bs-num-col">${p.stats.batting.rbi ?? 0}</td>
+            <td class="bs-num-col">${p.stats.batting.baseOnBalls ?? 0}</td>
+            <td class="bs-num-col">${p.stats.batting.strikeOuts ?? 0}</td>
+            <td class="bs-avg-col">${esc(p.stats.batting.avg ?? p.seasonStats?.batting?.avg ?? '')}</td>
           </tr>`).join('')}
         <tr class="bs-totals">
           <td class="bs-name-col">Totals</td>
-          <td>${t.atBats ?? ''}</td><td>${t.runs ?? ''}</td><td>${t.hits ?? ''}</td>
-          <td>${t.rbi ?? ''}</td><td>${t.baseOnBalls ?? ''}</td><td>${t.strikeOuts ?? ''}</td>
+          <td class="bs-num-col">${t.atBats ?? ''}</td><td class="bs-num-col">${t.runs ?? ''}</td><td class="bs-num-col">${t.hits ?? ''}</td>
+          <td class="bs-num-col">${t.rbi ?? ''}</td><td class="bs-num-col">${t.baseOnBalls ?? ''}</td><td class="bs-num-col">${t.strikeOuts ?? ''}</td>
+          <td class="bs-avg-col"></td>
         </tr>
       </tbody>
-    </table>`
+    </table>
+    </div>`
+}
+
+// ERA replaces the Pit/Str columns in the table proper — workload
+// (pitches/strikes) reads as a "Name (pitches/strikes)" line underneath
+// instead, same shape AP box scores use for the pitch-count line.
+function fmtEra(era) {
+  const n = parseFloat(era)
+  return Number.isFinite(n) ? n.toFixed(2) : (era ?? '')
+}
+
+// person.boxscoreName from the API is normally just a last name
+// ("Gasser") but switches to "Last, F" when two players share a last
+// name that day ("Wilson, B") — an inconsistent shape across a single
+// table. fullName is always present, so build a consistent "F. Last"
+// form from it instead rather than relying on the API's own formatting.
+function shortName(person) {
+  const parts = (person.fullName || '').trim().split(/\s+/)
+  return parts.length < 2 ? (person.fullName || '') : `${parts[0][0]}. ${parts.slice(1).join(' ')}`
+}
+
+function pitchingRows(side) {
+  return (side.pitchers || [])
+    .map(id => side.players[`ID${id}`])
+    .filter(p => p && p.stats?.pitching && Object.keys(p.stats.pitching).length)
 }
 
 function pitchingTable(side, abbr) {
-  const rows = (side.pitchers || [])
-    .map(id => side.players[`ID${id}`])
-    .filter(p => p && p.stats?.pitching && Object.keys(p.stats.pitching).length)
+  const rows = pitchingRows(side)
   return `
+    <div class="bs-table-scroll">
     <table class="bs-boxtable">
       <caption>${esc(abbr)} pitching</caption>
-      <thead><tr><th class="bs-name-col"></th><th class="bs-ip-col">IP</th><th>H</th><th>R</th><th>ER</th><th>BB</th><th>K</th><th>HR</th><th>Pit</th><th>Str</th></tr></thead>
+      <thead><tr><th class="bs-name-col">Pitchers</th><th class="bs-ip-col">IP</th><th class="bs-num-col">H</th><th class="bs-num-col">R</th><th class="bs-num-col">ER</th><th class="bs-num-col">BB</th><th class="bs-num-col">K</th><th class="bs-num-col">HR</th><th class="bs-avg-col">ERA</th></tr></thead>
       <tbody>
         ${rows.map(p => `
           <tr>
-            <td class="bs-name-col" title="${esc(p.person.fullName)}">${esc(p.person.boxscoreName)}${p.stats.pitching.note ? ` <span class="bs-decision">${esc(p.stats.pitching.note)}</span>` : ''}</td>
-            <td>${p.stats.pitching.inningsPitched ?? ''}</td>
-            <td>${p.stats.pitching.hits ?? 0}</td>
-            <td>${p.stats.pitching.runs ?? 0}</td>
-            <td>${p.stats.pitching.earnedRuns ?? 0}</td>
-            <td>${p.stats.pitching.baseOnBalls ?? 0}</td>
-            <td>${p.stats.pitching.strikeOuts ?? 0}</td>
-            <td>${p.stats.pitching.homeRuns ?? 0}</td>
-            <td>${p.stats.pitching.numberOfPitches ?? p.stats.pitching.pitchesThrown ?? ''}</td>
-            <td>${p.stats.pitching.strikes ?? ''}</td>
+            <td class="bs-name-col" title="${esc(p.person.fullName)}">${esc(shortName(p.person))}${p.stats.pitching.note ? ` <span class="bs-decision">${esc(p.stats.pitching.note)}</span>` : ''}</td>
+            <td class="bs-ip-col">${p.stats.pitching.inningsPitched ?? ''}</td>
+            <td class="bs-num-col">${p.stats.pitching.hits ?? 0}</td>
+            <td class="bs-num-col">${p.stats.pitching.runs ?? 0}</td>
+            <td class="bs-num-col">${p.stats.pitching.earnedRuns ?? 0}</td>
+            <td class="bs-num-col">${p.stats.pitching.baseOnBalls ?? 0}</td>
+            <td class="bs-num-col">${p.stats.pitching.strikeOuts ?? 0}</td>
+            <td class="bs-num-col">${p.stats.pitching.homeRuns ?? 0}</td>
+            <td class="bs-avg-col">${fmtEra(p.stats.pitching.era ?? p.seasonStats?.pitching?.era)}</td>
           </tr>`).join('')}
       </tbody>
-    </table>`
+    </table>
+    </div>`
+}
+
+// its own row-balanced section, separate from the pitching table — kept
+// inside pitchingTable's own cell before, it inherited that cell's
+// stretched height without syncing to the *other* team's list, so the
+// list itself could start higher or lower than the other side's.
+function pitchCounts(side) {
+  const rows = pitchingRows(side)
+  return `
+    <div class="bs-pitch-counts">
+      ${rows.map(p => {
+        const pit = p.stats.pitching.numberOfPitches ?? p.stats.pitching.pitchesThrown
+        const str = p.stats.pitching.strikes
+        return pit == null && str == null ? '' : `<div>${esc(shortName(p.person))} (${pit ?? '–'}/${str ?? '–'})</div>`
+      }).join('')}
+    </div>`
 }
 
 // classic box-score recap line — "2B: Yelich (MIL); HR: Suzuki (PIT)" —
@@ -254,19 +304,21 @@ function sideRecap(side, abbr) {
     </div>`
 }
 
-// team is the outer grouping, not stat-type — each column is one team's
-// whole story (batting, recap, pitching) stacked together. Three separate
-// away|home grids in sequence read fine on desktop (columns stay side by
-// side top to bottom) but on mobile each one collapses to a single
-// column independently, so the old order striped away/home/away/home/
-// away/home instead of reading as two coherent team blocks.
-function teamColumn(side, abbr) {
+// team is the grouping that matters on mobile, stat-type is the grouping
+// that matters on desktop — DOM order stays team-grouped (away's 3
+// sections, then home's 3), which is already the correct single-column
+// mobile stack with zero CSS and no striping. Above the two-column
+// breakpoint, plain grid + `order` reshuffles the same 6 sections into
+// stat-type rows (batting/batting, recap/recap, pitching/pitching) — no
+// nesting, so a plain grid row just auto-sizes to its tallest item and
+// both teams' sections land on the same line instead of drifting once
+// one side has an extra row.
+function teamColumn(side, abbr, team) {
   return `
-    <div class="bs-team-col">
-      ${battingTable(side, abbr)}
-      ${sideRecap(side, abbr)}
-      ${pitchingTable(side, abbr)}
-    </div>`
+    <div class="bs-sec bs-sec-batting bs-sec-${team}">${battingTable(side, abbr)}</div>
+    <div class="bs-sec bs-sec-recap bs-sec-${team}">${sideRecap(side, abbr)}</div>
+    <div class="bs-sec bs-sec-pitching bs-sec-${team}">${pitchingTable(side, abbr)}</div>
+    <div class="bs-sec bs-sec-pitchcounts bs-sec-${team}">${pitchCounts(side)}</div>`
 }
 
 function boxscoreDetail(game) {
@@ -279,8 +331,8 @@ function boxscoreDetail(game) {
   return `
     <div class="bs-box-detail">
       <div class="bs-box-grid">
-        ${teamColumn(away, awayAbbr)}
-        ${teamColumn(home, homeAbbr)}
+        ${teamColumn(away, awayAbbr, 'away')}
+        ${teamColumn(home, homeAbbr, 'home')}
       </div>
     </div>`
 }
@@ -349,7 +401,10 @@ $.when('click', '[data-go-today]', () => goToDate(todayStr()))
 // — a monospace grid is also just the right tool for aligning inning
 // columns, not only a style match.
 $.style(`
-  & { display: block; height: 100%; width: 100%; overflow: auto; font-family: Courier, 'Courier New', monospace; background: white; color: black; }
+  /* vertical scroll only at the page level — any horizontal overflow is
+     handled by the individual table's own .bs-table-scroll wrapper, so a
+     too-narrow viewport never drags the whole page sideways. */
+  & { display: block; height: 100%; width: 100%; overflow-x: hidden; overflow-y: auto; font-family: Courier, 'Courier New', monospace; background: white; color: black; }
   & .bs-shell { padding: 1.2rem; box-sizing: border-box; max-width: 64rem; margin: 0 auto; }
   & .bs-masthead { display: flex; align-items: baseline; gap: 1rem; border-bottom: 2px solid black; padding-bottom: .6rem; margin-bottom: 1rem; flex-wrap: wrap; }
   & h1 { margin: 0; font-size: 1.6em; font-weight: normal; letter-spacing: .08em; text-transform: uppercase; }
@@ -372,30 +427,58 @@ $.style(`
   /* table-layout: fixed on purpose — with the default auto layout, each
      game's own column widths shift with its own content (a team
      abbreviation, a decision note, a number of innings), so nothing
-     lines up game to game or team to team. Fixed ignores content width
-     entirely: one column gets an explicit width, the rest split the
-     remainder evenly, so every table reads as the same clean grid. */
+     lines up game to game or team to team. width:100% keeps the table
+     full width like before; each column also gets its own explicit
+     min-width so it can't get squeezed below a readable floor, and
+     .bs-table-scroll is the release valve on the rare viewport where
+     that floor is wider than the screen. */
+  & .bs-table-scroll { overflow-x: auto; max-width: 100%; }
   & .bs-linescore { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .82em; }
   & .bs-linescore th, & .bs-linescore td { border: 1px solid black; padding: .2rem .35rem; text-align: center; }
-  & .bs-linescore .bs-team-col { width: 3.6em; text-align: left; font-weight: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  & .bs-linescore .bs-rhe { width: 1.8em; font-weight: bold; }
+  & .bs-linescore .bs-team-col { width: 3.6em; min-width: 3.6em; text-align: left; font-weight: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .bs-linescore .bs-inning-col { width: 1.5em; min-width: 1.2em; }
+  & .bs-linescore .bs-rhe { width: 1.8em; min-width: 1.5em; font-weight: bold; }
   & .bs-linescore thead th { font-weight: normal; opacity: .6; }
   & .bs-status { margin-top: .5rem; font-size: .8em; opacity: .6; text-transform: uppercase; letter-spacing: .04em; }
 
   /* === expandable batting/pitching, standard newspaper box score === */
   & .bs-box-empty { margin-top: .6rem; opacity: .55; font-size: .8em; }
   & .bs-box-detail { margin-top: .6rem; display: flex; flex-direction: column; gap: .6rem; }
-  & .bs-box-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .6rem; align-items: start; }
-  & .bs-team-col { display: flex; flex-direction: column; gap: .6rem; }
+  /* mobile default: the 6 sections are already in team-grouped DOM order
+     (away batting/recap/pitching, then home's), so a plain stack reads
+     as two coherent team blocks with no CSS needed. */
+  & .bs-box-grid { display: flex; flex-direction: column; gap: .6rem; }
+  & .bs-sec { min-width: 0; }
+  /* above this width there's room for two real columns — switch to a
+     2-column grid and reorder the same 6 sections into stat-type rows
+     (batting/batting, recap/recap, pitching/pitching). A plain grid row
+     auto-sizes to its tallest item, so the taller side's table sets the
+     row height for both sides and the next section starts on the same
+     line — no subgrid, just the CSS "order" property on top-level
+     siblings. */
+  @media (min-width: 30rem) {
+    & .bs-box-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; align-items: start; }
+    & .bs-sec-batting.bs-sec-away { order: 1; }
+    & .bs-sec-batting.bs-sec-home { order: 2; }
+    & .bs-sec-recap.bs-sec-away { order: 3; }
+    & .bs-sec-recap.bs-sec-home { order: 4; }
+    & .bs-sec-pitching.bs-sec-away { order: 5; }
+    & .bs-sec-pitching.bs-sec-home { order: 6; }
+    & .bs-sec-pitchcounts.bs-sec-away { order: 7; }
+    & .bs-sec-pitchcounts.bs-sec-home { order: 8; }
+  }
   & .bs-boxtable { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .76em; }
   & .bs-boxtable caption { text-align: left; font-size: .7em; text-transform: uppercase; letter-spacing: .04em; opacity: .6; padding-bottom: .2rem; caption-side: top; }
   & .bs-boxtable th, & .bs-boxtable td { border: 1px solid black; padding: .15rem .3rem; text-align: center; }
   & .bs-boxtable thead th { font-weight: normal; opacity: .6; }
-  & .bs-boxtable .bs-name-col { width: 40%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  & .bs-boxtable .bs-ip-col { width: 3.4em; }
+  & .bs-boxtable .bs-name-col { width: 8.2em; min-width: 6em; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .bs-boxtable .bs-num-col { width: 1.8em; min-width: 1.4em; }
+  & .bs-boxtable .bs-avg-col { width: 2.6em; min-width: 2.6em; }
+  & .bs-boxtable .bs-ip-col { width: 2.2em; min-width: 1.8em; }
   & .bs-boxtable .bs-pos { opacity: .55; font-size: .9em; }
   & .bs-boxtable .bs-decision { opacity: .6; font-size: .9em; }
   & .bs-boxtable .bs-totals { font-weight: bold; }
   & .bs-notes { font-size: .76em; opacity: .75; display: flex; flex-direction: column; gap: .1rem; }
   & .bs-notes-caption { font-size: .92em; text-transform: uppercase; letter-spacing: .04em; opacity: .8; margin-bottom: .1rem; }
+  & .bs-pitch-counts { font-size: .7em; opacity: .6; margin-top: .2rem; display: flex; flex-direction: column; gap: .05rem; }
 `)
