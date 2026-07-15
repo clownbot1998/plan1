@@ -433,11 +433,11 @@ $.style(`
      .bs-table-scroll is the release valve on the rare viewport where
      that floor is wider than the screen. */
   & .bs-table-scroll { overflow-x: auto; max-width: 100%; }
-  & .bs-linescore { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .82em; }
+  & .bs-linescore { width: 100%; border-collapse: collapse; table-layout: auto; font-size: .82em; }
   & .bs-linescore th, & .bs-linescore td { border: 1px solid rgba(0,0,0,.1); padding: .2rem .35rem; text-align: center; }
   & .bs-linescore .bs-team-col { width: 3.6em; min-width: 3.6em; text-align: center; font-weight: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  & .bs-linescore .bs-inning-col { width: 1.5em; min-width: 1.2em; }
-  & .bs-linescore .bs-rhe { width: 1.8em; min-width: 1.5em; font-weight: bold; }
+  & .bs-linescore .bs-inning-col { min-width: 1.2em; }
+  & .bs-linescore .bs-rhe { min-width: 1.5em; font-weight: bold; }
   & .bs-linescore thead th { font-weight: bold; opacity: .6; }
   & .bs-status { margin-top: .5rem; font-size: .8em; opacity: .6; text-transform: uppercase; letter-spacing: .04em; }
 
