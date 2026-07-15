@@ -183,11 +183,12 @@ function battingTable(side, abbr) {
     <div class="bs-table-scroll">
     <table class="bs-boxtable">
       <caption>${esc(abbr)} batting</caption>
-      <thead><tr><th class="bs-name-col">Batters</th><th class="bs-num-col">AB</th><th class="bs-num-col">R</th><th class="bs-num-col">H</th><th class="bs-num-col">RBI</th><th class="bs-num-col">BB</th><th class="bs-num-col">SO</th><th class="bs-avg-col">AVG</th></tr></thead>
+      <thead><tr><th class="bs-name-col">Batters</th><th class="bs-pos-col">POS</th><th class="bs-num-col">AB</th><th class="bs-num-col">R</th><th class="bs-num-col">H</th><th class="bs-num-col">RBI</th><th class="bs-num-col">BB</th><th class="bs-num-col">SO</th><th class="bs-avg-col">AVG</th></tr></thead>
       <tbody>
         ${rows.map(p => `
           <tr>
-            <td class="bs-name-col" title="${esc(p.person.fullName)}">${esc(p.person.boxscoreName)} <span class="bs-pos">${esc(p.position.abbreviation)}</span></td>
+            <td class="bs-name-col" title="${esc(p.person.fullName)}">${esc(shortName(p.person))}</td>
+            <td class="bs-pos-col">${esc(p.position.abbreviation)}</td>
             <td class="bs-num-col">${p.stats.batting.atBats ?? 0}</td>
             <td class="bs-num-col">${p.stats.batting.runs ?? 0}</td>
             <td class="bs-num-col">${p.stats.batting.hits ?? 0}</td>
@@ -198,6 +199,7 @@ function battingTable(side, abbr) {
           </tr>`).join('')}
         <tr class="bs-totals">
           <td class="bs-name-col">Totals</td>
+          <td class="bs-pos-col"></td>
           <td class="bs-num-col">${t.atBats ?? ''}</td><td class="bs-num-col">${t.runs ?? ''}</td><td class="bs-num-col">${t.hits ?? ''}</td>
           <td class="bs-num-col">${t.rbi ?? ''}</td><td class="bs-num-col">${t.baseOnBalls ?? ''}</td><td class="bs-num-col">${t.strikeOuts ?? ''}</td>
           <td class="bs-avg-col"></td>
@@ -262,14 +264,12 @@ function pitchingTable(side, abbr) {
 // list itself could start higher or lower than the other side's.
 function pitchCounts(side) {
   const rows = pitchingRows(side)
-  return `
-    <div class="bs-pitch-counts">
-      ${rows.map(p => {
-        const pit = p.stats.pitching.numberOfPitches ?? p.stats.pitching.pitchesThrown
-        const str = p.stats.pitching.strikes
-        return pit == null && str == null ? '' : `<div>${esc(shortName(p.person))} (${pit ?? '–'}/${str ?? '–'})</div>`
-      }).join('')}
-    </div>`
+  const entries = rows.map(p => {
+    const pit = p.stats.pitching.numberOfPitches ?? p.stats.pitching.pitchesThrown
+    const str = p.stats.pitching.strikes
+    return pit == null && str == null ? '' : `<b>${esc(shortName(p.person))}</b> (${pit ?? '–'}/${str ?? '–'})`
+  }).filter(Boolean)
+  return `<div class="bs-pitch-counts">${entries.join(', ')}</div>`
 }
 
 // classic box-score recap line — "2B: Yelich (MIL); HR: Suzuki (PIT)" —
@@ -292,10 +292,10 @@ function sideRecap(side, abbr) {
         // the name — real box scores do this for HR especially ("his
         // 14th of the season"), applied here to all five recap groups.
         const season = p?.seasonStats?.batting?.[statKey]
-        names.push(`${p.person.boxscoreName}${n > 1 ? ` ${n}` : ''}${season != null ? ` (${season})` : ''}`)
+        names.push(`<b>${esc(shortName(p.person))}</b>${n > 1 ? ` ${n}` : ''}${season != null ? ` (${season})` : ''}`)
       }
     }
-    return names.length ? `<div><b>${label}:</b> ${names.map(esc).join(', ')}</div>` : ''
+    return names.length ? `<div><b>${label}:</b> ${names.join(', ')}</div>` : ''
   }).filter(Boolean)
   return `
     <div class="bs-notes">
@@ -421,7 +421,7 @@ $.style(`
   & .bs-refresh:disabled { opacity: .5; cursor: default; background: white; color: black; }
   & .bs-empty { opacity: .55; font-size: .9em; padding: 1rem 0; }
   & .bs-grid { display: flex; flex-direction: column; gap: 1.4rem; }
-  & .bs-game { border: 1px solid black; padding: .7rem; }
+  & .bs-game { border-left: 1px solid rgba(0,0,0,.1); padding: .7rem; }
   & .bs-matchup { display: flex; justify-content: space-between; gap: .5rem; font-size: .95em; margin-bottom: .5rem; }
   & .bs-at { opacity: .5; }
   /* table-layout: fixed on purpose — with the default auto layout, each
@@ -434,11 +434,11 @@ $.style(`
      that floor is wider than the screen. */
   & .bs-table-scroll { overflow-x: auto; max-width: 100%; }
   & .bs-linescore { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .82em; }
-  & .bs-linescore th, & .bs-linescore td { border: 1px solid black; padding: .2rem .35rem; text-align: center; }
-  & .bs-linescore .bs-team-col { width: 3.6em; min-width: 3.6em; text-align: left; font-weight: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .bs-linescore th, & .bs-linescore td { border: 1px solid rgba(0,0,0,.1); padding: .2rem .35rem; text-align: center; }
+  & .bs-linescore .bs-team-col { width: 3.6em; min-width: 3.6em; text-align: center; font-weight: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & .bs-linescore .bs-inning-col { width: 1.5em; min-width: 1.2em; }
   & .bs-linescore .bs-rhe { width: 1.8em; min-width: 1.5em; font-weight: bold; }
-  & .bs-linescore thead th { font-weight: normal; opacity: .6; }
+  & .bs-linescore thead th { font-weight: bold; opacity: .6; }
   & .bs-status { margin-top: .5rem; font-size: .8em; opacity: .6; text-transform: uppercase; letter-spacing: .04em; }
 
   /* === expandable batting/pitching, standard newspaper box score === */
@@ -469,16 +469,16 @@ $.style(`
   }
   & .bs-boxtable { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .76em; }
   & .bs-boxtable caption { text-align: left; font-size: .7em; text-transform: uppercase; letter-spacing: .04em; opacity: .6; padding-bottom: .2rem; caption-side: top; }
-  & .bs-boxtable th, & .bs-boxtable td { border: 1px solid black; padding: .15rem .3rem; text-align: center; }
-  & .bs-boxtable thead th { font-weight: normal; opacity: .6; }
-  & .bs-boxtable .bs-name-col { width: 8.2em; min-width: 6em; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .bs-boxtable th, & .bs-boxtable td { border: none; border-bottom: 1px solid rgba(0,0,0,.1); padding: .15rem .3rem; text-align: center; }
+  & .bs-boxtable thead th { font-weight: bold; opacity: .6; }
+  & .bs-boxtable .bs-name-col { width: 8.2em; min-width: 6em; text-align: left; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & .bs-boxtable .bs-num-col { width: 1.8em; min-width: 1.4em; }
   & .bs-boxtable .bs-avg-col { width: 2.6em; min-width: 2.6em; }
   & .bs-boxtable .bs-ip-col { width: 2.2em; min-width: 1.8em; }
-  & .bs-boxtable .bs-pos { opacity: .55; font-size: .9em; }
+  & .bs-boxtable .bs-pos-col { width: 2em; min-width: 1.8em; }
   & .bs-boxtable .bs-decision { opacity: .6; font-size: .9em; }
   & .bs-boxtable .bs-totals { font-weight: bold; }
   & .bs-notes { font-size: .76em; opacity: .75; display: flex; flex-direction: column; gap: .1rem; }
   & .bs-notes-caption { font-size: .92em; text-transform: uppercase; letter-spacing: .04em; opacity: .8; margin-bottom: .1rem; }
-  & .bs-pitch-counts { font-size: .7em; opacity: .6; margin-top: .2rem; display: flex; flex-direction: column; gap: .05rem; }
+  & .bs-pitch-counts { font-size: .7em; opacity: .6; margin-top: .2rem; }
 `)
