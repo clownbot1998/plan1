@@ -48,7 +48,21 @@ const $ = Self(tag, {
   error: null,
   boxscores: {},  // { [gamePk]: data | 'loading' | 'error' } — always visible, no tap-to-open
   zoom: 1,        // local-only text-size multiplier — this elf's own root em, not the page's rem
+  chatOn: false,  // mounts <board-call> as a floating layer — off by default, no realtime
+                  // cost until someone opts in
 })
+
+// board-call reads its own room id straight off the page URL (?id=), same
+// mechanism bulletin-board uses. box-scores has no room concept of its own
+// on purpose (see file header) — reusing that same query param means two
+// people who put the same ?id= on a bulletin-board URL and a box-scores URL
+// land in the same call, with zero bridge code. No default room: with none
+// picked, chat has nothing to join, so the toggle stays disabled instead of
+// silently landing everyone in board-call's own 'default' room (which is
+// also whatever bulletin-board board has no ?id= of its own).
+function callRoomId() {
+  return new URLSearchParams(window.location.search).get('id')
+}
 
 function bumpZoom(delta) {
   const next = Math.round(($.learn().zoom + delta) * 100) / 100
@@ -354,8 +368,9 @@ function gameCard(game) {
 }
 
 function renderApp() {
-  const { date, games, loading, error, zoom } = $.learn()
+  const { date, games, loading, error, zoom, chatOn } = $.learn()
   const isToday = date === todayStr()
+  const roomId = callRoomId()
   return `
     <div class="bs-shell" style="font-size: ${zoom}em">
       <div class="bs-masthead">
@@ -370,12 +385,14 @@ function renderApp() {
           <button class="bs-nav-btn" data-shift-date="1" title="Next day">→</button>
           ${isToday ? '' : '<button class="bs-nav-btn -today" data-go-today>Today</button>'}
         </div>
+        <button class="bs-nav-btn" data-toggle-chat ${roomId ? '' : 'disabled'} title="${roomId ? '' : 'add ?id=<room> to the URL to enable chat'}">${chatOn ? 'Chat On' : 'Chat Off'}</button>
         <button class="bs-refresh" data-refresh ${loading ? 'disabled' : ''}>${loading ? 'loading…' : 'Refresh'}</button>
       </div>
       ${error ? `<div class="bs-empty">couldn't load games for ${esc(date)} — ${esc(error)}</div>` : ''}
       ${!error && games === null ? `<div class="bs-empty">loading games for ${esc(date)}…</div>` : ''}
       ${!error && games && games.length === 0 ? `<div class="bs-empty">no MLB games scheduled for ${esc(date)}</div>` : ''}
       ${games && games.length ? `<div class="bs-grid">${games.map(gameCard).join('')}</div>` : ''}
+      ${chatOn && roomId ? '<board-call></board-call>' : ''}
     </div>`
 }
 
@@ -396,6 +413,10 @@ $.when('click', '[data-shift-date]', e => {
   goToDate(shiftDate($.learn().date, delta))
 })
 $.when('click', '[data-go-today]', () => goToDate(todayStr()))
+$.when('click', '[data-toggle-chat]', () => {
+  if (!callRoomId()) return
+  $.teach({ chatOn: !$.learn().chatOn })
+})
 
 // same black/white/Courier New base as sports-stats.js/accessibility-mode
 // — a monospace grid is also just the right tool for aligning inning
@@ -405,7 +426,7 @@ $.style(`
      handled by the individual table's own .bs-table-scroll wrapper, so a
      too-narrow viewport never drags the whole page sideways. */
   & { display: block; height: 100%; width: 100%; overflow-x: hidden; overflow-y: auto; font-family: Courier, 'Courier New', monospace; background: white; color: black; }
-  & .bs-shell { padding: 1.2rem; box-sizing: border-box; max-width: 64rem; margin: 0 auto; }
+  & .bs-shell { position: relative; padding: 1.2rem; box-sizing: border-box; max-width: 64rem; margin: 0 auto; }
   & .bs-masthead { display: flex; align-items: baseline; gap: 1rem; border-bottom: 2px solid black; padding-bottom: .6rem; margin-bottom: 1rem; flex-wrap: wrap; }
   & h1 { margin: 0; font-size: 1.6em; font-weight: normal; letter-spacing: .08em; text-transform: uppercase; }
   & .bs-zoom { display: flex; gap: .3rem; }

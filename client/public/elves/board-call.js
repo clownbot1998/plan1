@@ -2,7 +2,7 @@ import { Self, PLAN98_NODE_ID, linkState, broadcastElf } from '@plan98/types'
 import { learn } from '@plan98/elf'
 
 const tag = 'board-call'
-const $ = Self(tag, { muted: true, cameraOn: false, nearbyCount: 0, activeSpeaker: null, expanded: false, devicePicker: null })
+const $ = Self(tag, { muted: true, cameraOn: false, nearbyCount: 0, activeSpeaker: null, expanded: false, settingsOpen: false, volume: 1 })
 
 const SPREAD = 1.5
 const MAX_PEERS = 6
@@ -102,17 +102,21 @@ function videoConstraints() {
 
 let _audioDevices = []
 let _videoDevices = []
+let _audioOutputDevices = []
 let _selectedAudioId = null
 let _selectedVideoId = null
-let _holdTimer = null
+let _selectedAudioOutputId = null
 
 async function enumerateDevices() {
   try {
     const all = await navigator.mediaDevices.enumerateDevices()
     _audioDevices = all.filter(d => d.kind === 'audioinput')
     _videoDevices = all.filter(d => d.kind === 'videoinput')
+    _audioOutputDevices = all.filter(d => d.kind === 'audiooutput')
   } catch {}
 }
+
+function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) }
 
 async function getLocalStream(withVideo) {
   const audio = _selectedAudioId
@@ -130,6 +134,27 @@ async function getLocalStream(withVideo) {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: AUDIO_CONSTRAINTS }).catch(() => null)
     if (stream) await enumerateDevices()
     return stream
+  }
+}
+
+// every peer's panner routes through one shared gain node instead of
+// straight to destination, so the volume slider is one number instead of
+// N per-peer knobs.
+let _masterGain = null
+
+function setVolume(v) {
+  $.teach({ volume: v })
+  if (_masterGain) _masterGain.gain.value = v
+}
+
+// AudioContext.setSinkId is a newer (Chromium-only, as of this writing)
+// spec addition — everything here already routes audio through Web Audio
+// nodes rather than a <video>/<audio> element, so a per-element setSinkId
+// wouldn't reach it anyway. Feature-detected; silently a no-op elsewhere.
+async function setAudioOutput(deviceId) {
+  _selectedAudioOutputId = deviceId
+  if (_audioCtx?.setSinkId) {
+    try { await _audioCtx.setSinkId(deviceId) } catch {}
   }
 }
 
@@ -205,7 +230,12 @@ function createPc(peerId) {
   }
 
   pc.ontrack = (e) => {
-    if (!_audioCtx) _audioCtx = new AudioContext()
+    if (!_audioCtx) {
+      _audioCtx = new AudioContext()
+      _masterGain = _audioCtx.createGain()
+      _masterGain.gain.value = $.learn().volume
+      _masterGain.connect(_audioCtx.destination)
+    }
     const stream = e.streams[0]
     // only set up audio graph once per peer
     if (!_connections[peerId]?.analyser) {
@@ -219,7 +249,7 @@ function createPc(peerId) {
       panner.maxDistance = 8000
       source.connect(analyser)
       analyser.connect(panner)
-      panner.connect(_audioCtx.destination)
+      panner.connect(_masterGain)
       _connections[peerId] = { ..._connections[peerId], pc, stream, analyser, panner }
     } else {
       _connections[peerId] = { ..._connections[peerId], stream }
@@ -428,7 +458,7 @@ $.draw(target => {
 }, { afterUpdate })
 
 function afterUpdate(target) {
-  const { muted, cameraOn, nearbyCount, activeSpeaker, expanded, devicePicker } = $.learn()
+  const { muted, cameraOn, nearbyCount, activeSpeaker, expanded, settingsOpen } = $.learn()
   const hud = target.querySelector('.hud')
   const bar = target.querySelector('.bar')
   if (!hud || !bar) return
@@ -451,35 +481,25 @@ function afterUpdate(target) {
   applyHudPos(target)
 
   // expanded controls + peer tiles
-  let muteBtn = bar.querySelector('[data-mute]')
-  let camBtn = bar.querySelector('[data-cam]')
+  let settingsBtn = bar.querySelector('[data-settings]')
   let countEl = bar.querySelector('.count')
   let dotEl = bar.querySelector('.dot')
 
   if (expanded) {
-    if (!muteBtn) {
-      muteBtn = document.createElement('button')
-      muteBtn.dataset.mute = ''
-      const micIcon = document.createElement('sl-icon')
-      micIcon.setAttribute('name', 'mic')
-      micIcon.style.pointerEvents = 'none'
-      muteBtn.appendChild(micIcon)
-      bar.appendChild(muteBtn)
+    if (!settingsBtn) {
+      settingsBtn = document.createElement('button')
+      settingsBtn.dataset.settings = ''
+      const gearIcon = document.createElement('sl-icon')
+      gearIcon.setAttribute('name', 'gear')
+      gearIcon.style.pointerEvents = 'none'
+      settingsBtn.appendChild(gearIcon)
+      bar.appendChild(settingsBtn)
     }
-    muteBtn.className = muted ? 'off' : 'on'
-    muteBtn.title = muted ? 'unmute' : 'mute'
-
-    if (!camBtn) {
-      camBtn = document.createElement('button')
-      camBtn.dataset.cam = ''
-      const camIcon = document.createElement('sl-icon')
-      camIcon.setAttribute('name', 'camera')
-      camIcon.style.pointerEvents = 'none'
-      camBtn.appendChild(camIcon)
-      bar.appendChild(camBtn)
-    }
-    camBtn.className = cameraOn ? 'on' : 'off'
-    camBtn.title = cameraOn ? 'camera off' : 'camera on'
+    // dimmed when muted — the one at-a-glance signal left now that mute
+    // lives inside the settings panel instead of its own always-visible
+    // button.
+    settingsBtn.className = muted ? 'off' : 'on'
+    settingsBtn.title = 'call settings'
 
     if (nearbyCount > 0) {
       if (!countEl) { countEl = document.createElement('span'); countEl.className = 'count'; bar.appendChild(countEl) }
@@ -512,7 +532,7 @@ function afterUpdate(target) {
       if (v && conn.stream && v.srcObject !== conn.stream) v.srcObject = conn.stream
     }
   } else {
-    muteBtn?.remove(); camBtn?.remove(); countEl?.remove(); dotEl?.remove()
+    settingsBtn?.remove(); countEl?.remove(); dotEl?.remove()
     bar.querySelectorAll('[data-peer]').forEach(el => el.remove())
   }
 
@@ -527,29 +547,60 @@ function afterUpdate(target) {
     }
   }
 
-  // device picker popover
-  let picker = hud.querySelector('.device-picker')
-  if (devicePicker) {
-    const devices = devicePicker === 'audio' ? _audioDevices : _videoDevices
-    const selectedId = devicePicker === 'audio' ? _selectedAudioId : _selectedVideoId
-    if (!picker) {
-      picker = document.createElement('div')
-      picker.className = 'device-picker'
-      hud.appendChild(picker)
+  // settings panel — mute/camera toggles, device selects, volume. left
+  // labels, right controls, one row per setting.
+  let panel = hud.querySelector('.settings-panel')
+  if (settingsOpen) {
+    if (!panel) {
+      panel = document.createElement('div')
+      panel.className = 'settings-panel'
+      hud.appendChild(panel)
     }
-    picker.innerHTML = `
-      <button data-picker-close class="picker-close"><sl-icon name="x-lg"></sl-icon></button>
-      <div class="picker-list">
-        ${devices.length
-          ? devices.map(d => `<button data-device-id="${d.deviceId}" data-device-kind="${d.kind}"
-              class="picker-item${d.deviceId === selectedId ? ' active' : ''}"
-            >${d.label || (devicePicker === 'audio' ? 'Microphone' : 'Camera')}</button>`).join('')
-          : `<span class="picker-empty">${devicePicker === 'audio' ? 'no mics found' : 'no cameras found'}</span>`}
-      </div>
-    `
-  } else if (picker) {
-    picker.remove()
+    panel.innerHTML = settingsPanelHtml()
+  } else if (panel) {
+    panel.remove()
   }
+}
+
+// AudioContext.prototype.setSinkId is a recent, Chromium-only addition —
+// feature-detected so the speaker row only appears where it could
+// actually do anything.
+const CAN_SET_SINK = typeof AudioContext !== 'undefined' && typeof AudioContext.prototype.setSinkId === 'function'
+
+function settingsPanelHtml() {
+  const { muted, cameraOn, volume } = $.learn()
+  const deviceOptions = (devices, selectedId, emptyLabel, fallbackLabel) => devices.length
+    ? devices.map(d => `<option value="${escHtml(d.deviceId)}" ${d.deviceId === selectedId ? 'selected' : ''}>${escHtml(d.label || fallbackLabel)}</option>`).join('')
+    : `<option value="">${emptyLabel}</option>`
+
+  return `
+    <button data-picker-close class="picker-close"><sl-icon name="x-lg"></sl-icon></button>
+    <div class="settings-row">
+      <span class="settings-label">Mic</span>
+      <button data-mute class="settings-toggle ${muted ? 'off' : 'on'}">${muted ? 'Unmute' : 'Mute'}</button>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Microphone</span>
+      <select data-audioinput ${_audioDevices.length ? '' : 'disabled'}>${deviceOptions(_audioDevices, _selectedAudioId, 'no mics found', 'Microphone')}</select>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Camera</span>
+      <button data-cam class="settings-toggle ${cameraOn ? 'on' : 'off'}">${cameraOn ? 'Turn off' : 'Turn on'}</button>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Camera device</span>
+      <select data-videoinput ${_videoDevices.length ? '' : 'disabled'}>${deviceOptions(_videoDevices, _selectedVideoId, 'no cameras found', 'Camera')}</select>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Volume</span>
+      <input type="range" data-volume min="0" max="1" step="0.05" value="${volume}">
+    </div>
+    ${CAN_SET_SINK ? `
+    <div class="settings-row">
+      <span class="settings-label">Speaker</span>
+      <select data-audiooutput ${_audioOutputDevices.length ? '' : 'disabled'}>${deviceOptions(_audioOutputDevices, _selectedAudioOutputId, 'no speakers found', 'Speaker')}</select>
+    </div>` : ''}
+  `
 }
 
 // ── controls ──────────────────────────────────────────────────────────────────
@@ -566,13 +617,14 @@ $.when('click', '[data-toggle]', () => {
   $.teach({ expanded: !$.learn().expanded })
 })
 
-$.when('pointerdown', '[data-mute]', () => {
-  _holdTimer = setTimeout(() => { _holdTimer = null; $.teach({ devicePicker: 'audio' }) }, 500)
+$.when('click', '[data-settings]', async () => {
+  const next = !$.learn().settingsOpen
+  if (next) await enumerateDevices()  // labels only populate post-permission — refresh on open
+  $.teach({ settingsOpen: next })
 })
-$.when('pointerup', '[data-mute]', () => { clearTimeout(_holdTimer); _holdTimer = null })
+$.when('click', '[data-picker-close]', () => $.teach({ settingsOpen: false }))
 
 $.when('click', '[data-mute]', async () => {
-  if ($.learn().devicePicker) return
   const next = !$.learn().muted
   if (!next && !_localStream) {
     _localStream = await getLocalStream($.learn().cameraOn)
@@ -586,23 +638,20 @@ $.when('click', '[data-mute]', async () => {
   if (_localStream) _localStream.getAudioTracks().forEach(t => { t.enabled = !next })
 })
 
-$.when('pointerdown', '[data-cam]', () => {
-  _holdTimer = setTimeout(() => { _holdTimer = null; $.teach({ devicePicker: 'video' }) }, 500)
-})
-$.when('pointerup', '[data-cam]', () => { clearTimeout(_holdTimer); _holdTimer = null })
-
 $.when('click', '[data-cam]', (e) => {
-  if ($.learn().devicePicker) return
   toggleCamera(e.target.closest(tag))
 })
 
-$.when('click', '[data-device-id]', async e => {
-  const btn = e.target.closest('[data-device-id]')
-  await switchDevice(btn.dataset.deviceKind, btn.dataset.deviceId)
-  $.teach({ devicePicker: null })
+$.when('change', '[data-audioinput]', async e => {
+  if (e.target.value) await switchDevice('audioinput', e.target.value)
 })
-
-$.when('click', '[data-picker-close]', () => $.teach({ devicePicker: null }))
+$.when('change', '[data-videoinput]', async e => {
+  if (e.target.value) await switchDevice('videoinput', e.target.value)
+})
+$.when('change', '[data-audiooutput]', async e => {
+  if (e.target.value) await setAudioOutput(e.target.value)
+})
+$.when('input', '[data-volume]', e => setVolume(parseFloat(e.target.value)))
 
 // ── styles ────────────────────────────────────────────────────────────────────
 
@@ -708,15 +757,15 @@ $.style(`
     50% { opacity: 0.2; }
   }
 
-  & .device-picker {
+  & .settings-panel {
     position: absolute;
     top: calc(100% + 0.4rem);
     left: 0;
     background: lemonchiffon;
     border-radius: 2px;
     padding: 0.5rem 0.65rem 0.65rem;
-    min-width: 200px;
-    max-width: 280px;
+    min-width: 220px;
+    max-width: 300px;
     box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 3px 8px rgba(0,0,0,.08), 0 6px 20px rgba(0,0,0,.06);
     z-index: 10;
   }
@@ -738,35 +787,47 @@ $.style(`
     line-height: 1;
   }
   & .picker-close:hover { color: rgba(0,0,0,.7); }
-  & .picker-list {
+
+  /* left label, right control — one row per setting */
+  & .settings-row {
     display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
     margin-top: 0.5rem;
   }
-  & .picker-item {
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: dodgerblue;
+  & .settings-label {
+    color: rgba(0,0,0,.6);
     font-family: monospace;
     font-size: 0.72rem;
-    padding: 0.2rem 0.1rem;
-    text-align: left;
+    white-space: nowrap;
+  }
+  & .settings-row select,
+  & .settings-row .settings-toggle {
+    font-family: monospace;
+    font-size: 0.72rem;
+    max-width: 150px;
+  }
+  & .settings-row select {
+    background: white;
+    border: 1px solid rgba(0,0,0,.2);
+    border-radius: 2px;
+    color: black;
+    padding: 0.1rem 0.2rem;
+  }
+  & .settings-toggle {
+    background: white;
+    border: 1px solid rgba(0,0,0,.2);
+    border-radius: 2px;
+    color: dodgerblue;
+    cursor: pointer;
     width: auto;
     height: auto;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    border-radius: 2px;
+    padding: 0.1rem 0.5rem;
   }
-  & .picker-item:hover { text-decoration: underline; }
-  & .picker-item.active { font-weight: bold; }
-  & .picker-empty {
-    color: rgba(0,0,0,.4);
-    font-family: monospace;
-    font-size: 0.7rem;
-    padding: 0.2rem 0.1rem;
+  & .settings-toggle:hover { text-decoration: underline; }
+  & .settings-row input[type="range"] {
+    width: 110px;
   }
 
   & .spotlight {
