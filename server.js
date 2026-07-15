@@ -208,6 +208,18 @@ function injectApp(html, tag, attrs = '') {
   );
 }
 
+// per-app page titles for /app/<tag> — everything else keeps index.html's
+// shared default title.
+const APP_TITLES = {
+  'box-scores': "CCs Desperados Box Scores",
+};
+
+function injectTitle(html, tag) {
+  const title = APP_TITLES[tag];
+  if (!title) return html;
+  return html.replace(/<title>[\s\S]*?<\/title>/, `<title>${title}</title>`);
+}
+
 // /admin/ — the ticket booth.
 // Knowing PLAN1_PASSPHRASE lets you scan the QR, decrypt the root keycard,
 // and import it into plan98-wallet. The keycard grants write access to the
@@ -1137,7 +1149,7 @@ async function handleRequest(request) {
     }
     const isAdmin = checkAuth(request);
     const html = await getBaseHTML();
-    return new Response(injectEnv(injectApp(html, tag, attrs), isAdmin), {
+    return new Response(injectEnv(injectTitle(injectApp(html, tag, attrs), tag), isAdmin), {
       headers: { 'content-type': 'text/html; charset=utf-8' },
     });
   }
