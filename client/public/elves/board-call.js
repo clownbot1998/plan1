@@ -145,6 +145,22 @@ async function getLocalStream(withVideo) {
 // N per-peer knobs.
 let _masterGain = null
 
+// _audioCtx also gets lazily created by localAnalyser() (the mic-level
+// meter) whenever settings opens before any peer has connected — gating
+// _masterGain's creation on "_audioCtx doesn't exist yet" missed that
+// case, leaving _masterGain null and panner.connect(_masterGain) throwing
+// the moment a real peer's track arrived. gate on _masterGain itself
+// instead, and share this between both callers.
+function ensureAudioGraph() {
+  if (!_audioCtx) _audioCtx = new AudioContext()
+  if (!_masterGain) {
+    _masterGain = _audioCtx.createGain()
+    _masterGain.gain.value = $.learn().volume
+    _masterGain.connect(_audioCtx.destination)
+  }
+  return _audioCtx
+}
+
 function setVolume(v) {
   $.teach({ volume: v })
   if (_masterGain) _masterGain.gain.value = v
@@ -181,7 +197,7 @@ function localAnalyser() {
   const track = _localStream?.getAudioTracks()[0]
   if (!track) return null
   if (_localAnalyser?.track === track) return _localAnalyser.analyser
-  if (!_audioCtx) _audioCtx = new AudioContext()
+  ensureAudioGraph()
   const source = _audioCtx.createMediaStreamSource(_localStream)
   const analyser = _audioCtx.createAnalyser()
   analyser.fftSize = 256
@@ -306,12 +322,7 @@ function createPc(peerId) {
   }
 
   pc.ontrack = (e) => {
-    if (!_audioCtx) {
-      _audioCtx = new AudioContext()
-      _masterGain = _audioCtx.createGain()
-      _masterGain.gain.value = $.learn().volume
-      _masterGain.connect(_audioCtx.destination)
-    }
+    ensureAudioGraph()
     const stream = e.streams[0]
     // only set up audio graph once per peer
     if (!_connections[peerId]?.analyser) {
@@ -543,10 +554,13 @@ function afterUpdate(target) {
   // hud visibility
   hud.classList.toggle('visible', nearbyCount > 0 || cameraOn)
 
-  // local tile: minimized → show spotlight stream; expanded → show self
+  // local tile always prefers the active speaker's video over your own —
+  // previously that only held while minimized, so expanding/collapsing
+  // swapped the tile from a peer's video straight to the camera-off icon
+  // mid-toggle even though nothing about the call itself changed.
   const localVideo = target.querySelector('.local-video')
   const localIcon = target.querySelector('.cam-placeholder')
-  const spotlightStream = !expanded && activeSpeaker ? (_connections[activeSpeaker]?.stream ?? null) : null
+  const spotlightStream = activeSpeaker ? (_connections[activeSpeaker]?.stream ?? null) : null
   const showFeed = cameraOn && !!_localStream
   const tileStream = spotlightStream ?? (showFeed ? _localStream : null)
   if (localVideo) {
@@ -714,6 +728,12 @@ function settingsPanelHtml() {
 // ── controls ──────────────────────────────────────────────────────────────────
 
 $.when('pointerdown', '[data-toggle]', e => {
+  // no preventDefault meant a drag over any host page's text (box-scores'
+  // game grid, say) fired the browser's own text-selection instead of
+  // just moving the tile — invisible on bulletin-board's own canvas
+  // (nothing to select there) but obvious the moment this mounts
+  // somewhere with real text underneath.
+  e.preventDefault()
   _dragActive = true
   _dragMoved = false
   _dragStartX = e.clientX
@@ -807,6 +827,8 @@ $.style(`
     cursor: grab;
     outline: 2px solid rgba(255,255,255,.3);
     outline-offset: -2px;
+    user-select: none;
+    touch-action: none;
   }
   & .tile.local:active { cursor: grabbing; }
   & .tile.local > * {
