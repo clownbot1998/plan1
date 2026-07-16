@@ -639,10 +639,19 @@ function afterUpdate(target) {
     bar.querySelectorAll('[data-peer]').forEach(el => el.remove())
   }
 
-  // spotlight
+  // spotlight — clickable the same way a peer tile is: it's just a bigger
+  // video of whoever's currently loudest, so it reuses the same
+  // [data-focus] handler rather than a second pin mechanism.
   const spotlightEl = target.querySelector('.spotlight')
   if (spotlightEl) {
     spotlightEl.style.display = expanded ? 'block' : 'none'
+    if (activeSpeaker) {
+      spotlightEl.dataset.focus = activeSpeaker
+      spotlightEl.classList.add('clickable')
+    } else {
+      delete spotlightEl.dataset.focus
+      spotlightEl.classList.remove('clickable')
+    }
     const sv = spotlightEl.querySelector('.spotlight-video')
     if (sv) {
       const stream = activeSpeaker ? (_connections[activeSpeaker]?.stream ?? null) : null
@@ -744,7 +753,7 @@ function settingsPanelHtml() {
         <span class="settings-label">Camera device</span>
         <select class="standard-input -small" data-videoinput>${deviceOptions(_videoDevices, _selectedVideoId, 'no cameras found', 'Camera')}</select>
       </div>
-      <div class="camera-preview-row">
+      <div class="camera-preview-row ${cameraOn ? '' : '-empty'}">
         <video class="camera-preview" data-camera-preview autoplay playsinline muted></video>
         ${cameraOn ? '' : '<div class="camera-preview-empty">camera off</div>'}
       </div>
@@ -1022,19 +1031,28 @@ $.style(`
   & .mic-level .seg.lit.seg-yellow { background: goldenrod; }
   & .mic-level .seg.lit.seg-red    { background: firebrick; }
 
+  /* no fixed aspect-ratio while a stream is live — a hardcoded 16:9 box
+     around, say, a phone's portrait camera left dead space below the
+     actual frame (cover crops instead of leaving gaps, but the box
+     itself was still the wrong shape to begin with). letting the video
+     set its own height means the container is always exactly the
+     stream's real aspect ratio, whatever that turns out to be. only the
+     no-camera placeholder needs a fixed shape, since there's no real
+     video to take that job. */
   & .camera-preview-row {
     position: relative;
     margin-top: 0.75rem;
     width: 100%;
-    aspect-ratio: 16 / 9;
     background: rgba(0,0,0,.08);
     border-radius: 0.5rem;
     overflow: hidden;
   }
+  & .camera-preview-row.-empty {
+    aspect-ratio: 16 / 9;
+  }
   & .camera-preview {
     width: 100%;
-    height: 100%;
-    object-fit: cover;
+    height: auto;
     display: block;
   }
   & .camera-preview-empty {
@@ -1059,6 +1077,14 @@ $.style(`
     height: 100%;
     object-fit: cover;
     display: block;
+    /* $.when delegates by matching the literal event.target, not
+       closest() — same reason the tile videos are pointer-events: none —
+       so a click always lands on .spotlight (which carries data-focus)
+       instead of being swallowed by this child. */
+    pointer-events: none;
+  }
+  & .spotlight.clickable {
+    cursor: pointer;
   }
 `)
 
