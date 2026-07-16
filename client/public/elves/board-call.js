@@ -2,7 +2,7 @@ import { Self, PLAN98_NODE_ID, linkState, broadcastElf } from '@plan98/types'
 import { learn } from '@plan98/elf'
 
 const tag = 'board-call'
-const $ = Self(tag, { muted: true, cameraOn: false, nearbyCount: 0, activeSpeaker: null, expanded: false, settingsOpen: false, volume: 1 })
+const $ = Self(tag, { muted: true, cameraOn: false, nearbyCount: 0, activeSpeaker: null, expanded: false, settingsOpen: false, volume: 1, pinned: null })
 
 const SPREAD = 1.5
 const MAX_PEERS = 6
@@ -296,7 +296,7 @@ function teardownCall() {
   if (_audioCtx) { _audioCtx.close().catch(() => {}); _audioCtx = null }
   _masterGain = null
   _roomPeers.clear()
-  $.teach({ muted: true, cameraOn: false, nearbyCount: 0, activeSpeaker: null, expanded: false, settingsOpen: false })
+  $.teach({ muted: true, cameraOn: false, nearbyCount: 0, activeSpeaker: null, expanded: false, settingsOpen: false, pinned: null })
 }
 
 function signal(to, type, data) {
@@ -546,7 +546,14 @@ $.draw(target => {
 }, { afterUpdate })
 
 function afterUpdate(target) {
-  const { muted, cameraOn, nearbyCount, activeSpeaker, expanded, settingsOpen } = $.learn()
+  let { muted, cameraOn, nearbyCount, activeSpeaker, expanded, settingsOpen, pinned } = $.learn()
+
+  // the pinned peer left the call — nothing to show fullscreen anymore
+  if (pinned && !_connections[pinned]) {
+    pinned = null
+    $.teach({ pinned: null })
+  }
+
   const hud = target.querySelector('.hud')
   const bar = target.querySelector('.bar')
   if (!hud || !bar) return
@@ -601,17 +608,22 @@ function afterUpdate(target) {
       if (!dotEl) { dotEl = document.createElement('span'); dotEl.className = 'dot'; bar.appendChild(dotEl) }
     } else if (dotEl) dotEl.remove()
 
-    // peer tiles — add missing, remove departed
+    // peer tiles — add missing, remove departed. the pinned peer is left
+    // out of this row entirely — it's already showing fullscreen behind
+    // the hud, no need to show it twice.
     const peerIds = new Set(Object.keys(_connections))
     bar.querySelectorAll('[data-peer]').forEach(el => {
-      if (!peerIds.has(el.dataset.peer)) el.remove()
+      if (!peerIds.has(el.dataset.peer) || el.dataset.peer === pinned) el.remove()
     })
     for (const [id, conn] of Object.entries(_connections)) {
+      if (id === pinned) continue
       let tile = bar.querySelector(`[data-peer="${id}"]`)
       if (!tile) {
         tile = document.createElement('div')
         tile.className = 'tile'
         tile.dataset.peer = id
+        tile.dataset.focus = id
+        tile.title = 'view fullscreen'
         const v = document.createElement('video')
         v.dataset.peerVideo = id
         v.autoplay = true; v.playsInline = true; v.muted = true
@@ -636,6 +648,30 @@ function afterUpdate(target) {
       const stream = activeSpeaker ? (_connections[activeSpeaker]?.stream ?? null) : null
       if (sv.srcObject !== stream) sv.srcObject = stream
     }
+  }
+
+  // pinned tile — fullscreen behind the hud. lower z-index than .hud (the
+  // & host itself sits at 9000) so the bar/controls/spotlight stay usable
+  // on top of it; that same peer is excluded from the small bar row above
+  // so it isn't shown twice.
+  let pinnedEl = target.querySelector('.pinned-overlay')
+  if (pinned && _connections[pinned]) {
+    if (!pinnedEl) {
+      pinnedEl = document.createElement('div')
+      pinnedEl.className = 'pinned-overlay'
+      pinnedEl.dataset.unpin = ''
+      const v = document.createElement('video')
+      v.className = 'pinned-video'
+      v.autoplay = true; v.playsInline = true; v.muted = true
+      v.style.pointerEvents = 'none'
+      pinnedEl.appendChild(v)
+      target.appendChild(pinnedEl)
+    }
+    const v = pinnedEl.querySelector('video')
+    const stream = _connections[pinned]?.stream ?? null
+    if (v && v.srcObject !== stream) v.srcObject = stream
+  } else if (pinnedEl) {
+    pinnedEl.remove()
   }
 
   // settings modal — a real full-screen overlay, mounted on target (not
@@ -752,6 +788,12 @@ $.when('click', '[data-settings]', async () => {
 })
 $.when('click', '[data-picker-close]', () => $.teach({ settingsOpen: false }))
 
+$.when('click', '[data-focus]', e => {
+  const id = e.target.closest('[data-focus]').dataset.focus
+  $.teach({ pinned: $.learn().pinned === id ? null : id })
+})
+$.when('click', '[data-unpin]', () => $.teach({ pinned: null }))
+
 $.when('click', '[data-mute]', async () => {
   const next = !$.learn().muted
   if (!next && !_localStream) {
@@ -802,6 +844,11 @@ $.style(`
     gap: 0.5rem;
     pointer-events: auto;
     position: relative;
+    /* explicit, not auto — .pinned-overlay is a sibling with its own
+       explicit (lower) z-index, and an auto-z-index positioned element
+       stacks in the base "0" layer regardless of a sibling's explicit
+       number, which would put the pinned video on TOP of the hud. */
+    z-index: 1;
   }
   & .hud.visible { display: flex; }
 
@@ -844,6 +891,25 @@ $.style(`
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+  & .tile[data-focus] {
+    cursor: pointer;
+  }
+
+  /* fullscreen behind the hud — see the afterUpdate comment on why this
+     sits below .hud's z-index instead of above it. */
+  & .pinned-overlay {
+    position: fixed;
+    inset: 0;
+    background: black;
+    z-index: 0;
+    pointer-events: auto;
+    cursor: zoom-out;
+  }
+  & .pinned-video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
   }
 
   & button {
