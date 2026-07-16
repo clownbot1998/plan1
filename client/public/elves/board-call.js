@@ -22,6 +22,9 @@ let _audioCtx = null
 let _roomPeers = new Set()
 let _connections = {}   // peerId → { pc, stream, analyser, panner }
 let _reconnectAt = {}   // peerId → cooldown timestamp
+let _proximityTimer = null
+let _speakerTimer = null
+let _torndown = false   // true once the DOM node backing this call has been removed
 
 // ── hud drag ──────────────────────────────────────────────────────────────────
 let _hudX = 0, _hudY = 0
@@ -158,6 +161,56 @@ async function setAudioOutput(deviceId) {
   }
 }
 
+// ── mic level meter — a settings-panel-only readout, not the call's own
+// speaker-detection analyser (that one's per-peer, this one's local) ──────────
+
+const METER_SEGMENTS = 10
+const METER_GREEN_SEGS = 6    // 0-5 green, 6-7 yellow, 8-9 red (clipping zone)
+const METER_YELLOW_SEGS = 8
+
+function meterSegClass(i) {
+  if (i < METER_GREEN_SEGS) return 'seg-green'
+  if (i < METER_YELLOW_SEGS) return 'seg-yellow'
+  return 'seg-red'
+}
+
+let _localAnalyser = null   // { analyser, track } — rebuilt if the mic track changes
+let _micMeterTimer = null
+
+function localAnalyser() {
+  const track = _localStream?.getAudioTracks()[0]
+  if (!track) return null
+  if (_localAnalyser?.track === track) return _localAnalyser.analyser
+  if (!_audioCtx) _audioCtx = new AudioContext()
+  const source = _audioCtx.createMediaStreamSource(_localStream)
+  const analyser = _audioCtx.createAnalyser()
+  analyser.fftSize = 256
+  source.connect(analyser)  // analyser as a terminal node is enough to read data — no need to reach destination
+  _localAnalyser = { analyser, track }
+  return analyser
+}
+
+function startMicMeter(target) {
+  stopMicMeter()
+  const buf = new Uint8Array(128)
+  _micMeterTimer = setInterval(() => {
+    const el = target.querySelector('[data-mic-level]')
+    if (!el) return
+    const analyser = localAnalyser()
+    const segs = el.querySelectorAll('.seg')
+    if (!analyser) { segs.forEach(s => s.classList.remove('lit')); return }
+    analyser.getByteFrequencyData(buf)
+    const vol = buf.reduce((s, v) => s + v, 0) / buf.length / 255
+    const lit = Math.round(Math.min(1, vol * 1.6) * METER_SEGMENTS)
+    segs.forEach((s, i) => s.classList.toggle('lit', i < lit))
+  }, 80)
+}
+
+function stopMicMeter() {
+  clearInterval(_micMeterTimer)
+  _micMeterTimer = null
+}
+
 async function switchDevice(kind, deviceId) {
   if (kind === 'audioinput') _selectedAudioId = deviceId
   else _selectedVideoId = deviceId
@@ -204,7 +257,30 @@ function connectSignal() {
     else if (type === 'ice')    { _connections[from]?.pc?.addIceCandidate(data).catch(() => {}) }
   }
 
-  _ws.onclose = () => setTimeout(connectSignal, 3000)
+  // reconnect after an unexpected drop — but not after teardownCall()'s own
+  // intentional close, which nulls this handler out first so it never fires.
+  _ws.onclose = () => { if (!_torndown) setTimeout(connectSignal, 3000) }
+}
+
+// real teardown, not just "stop rendering" — nothing here calls this
+// automatically (plan98's elf framework has no unmount hook of its own),
+// so it's wired to a real disconnectedCallback below. Without it, toggling
+// a mounting elf (e.g. box-scores' chat button) off just removes the DOM
+// node while the signaling socket, every peer connection, the mic/camera
+// tracks, and both polling intervals kept running invisibly.
+function teardownCall() {
+  _torndown = true
+  clearInterval(_proximityTimer); _proximityTimer = null
+  clearInterval(_speakerTimer); _speakerTimer = null
+  stopMicMeter()
+  _localAnalyser = null
+  if (_ws) { _ws.onclose = null; _ws.close(); _ws = null }
+  for (const id of Object.keys(_connections)) closePeer(id)
+  if (_localStream) { _localStream.getTracks().forEach(t => t.stop()); _localStream = null }
+  if (_audioCtx) { _audioCtx.close().catch(() => {}); _audioCtx = null }
+  _masterGain = null
+  _roomPeers.clear()
+  $.teach({ muted: true, cameraOn: false, nearbyCount: 0, activeSpeaker: null, expanded: false, settingsOpen: false })
 }
 
 function signal(to, type, data) {
@@ -409,10 +485,11 @@ async function toggleCamera(target) {
 // ── init ──────────────────────────────────────────────────────────────────────
 
 async function init(target) {
+  _torndown = false
   connectSignal()
   linkState(tag, _boardId)
-  setInterval(updateProximity, 2000)
-  setInterval(updateSpeaker, 100)
+  _proximityTimer = setInterval(updateProximity, 2000)
+  _speakerTimer = setInterval(updateSpeaker, 100)
   initDrag(target)
 }
 
@@ -547,18 +624,35 @@ function afterUpdate(target) {
     }
   }
 
-  // settings panel — mute/camera toggles, device selects, volume. left
-  // labels, right controls, one row per setting.
-  let panel = hud.querySelector('.settings-panel')
+  // settings modal — a real full-screen overlay, mounted on target (not
+  // inside hud) so it isn't at the mercy of the hud's own visible/hidden
+  // gate once it's open.
+  let overlay = target.querySelector('.settings-overlay')
   if (settingsOpen) {
-    if (!panel) {
-      panel = document.createElement('div')
-      panel.className = 'settings-panel'
-      hud.appendChild(panel)
+    if (!overlay) {
+      overlay = document.createElement('div')
+      overlay.className = 'settings-overlay'
+      overlay.dataset.pickerClose = ''
+      target.appendChild(overlay)
     }
-    panel.innerHTML = settingsPanelHtml()
-  } else if (panel) {
-    panel.remove()
+    overlay.innerHTML = settingsPanelHtml()
+
+    // camera preview — live local feed so picking a device is a "yes,
+    // that one" rather than a guess from a label string.
+    const preview = overlay.querySelector('[data-camera-preview]')
+    if (preview) {
+      const stream = cameraOn ? _localStream : null
+      if (preview.srcObject !== stream) preview.srcObject = stream
+    }
+
+    // mic level meter only runs while the panel is actually open — no
+    // point polling an analyser nobody can see. afterUpdate fires on
+    // every $.teach in the whole elf (e.g. updateSpeaker's 100ms poll),
+    // not just settings changes, so only (re)start it once per open.
+    if (!_micMeterTimer) startMicMeter(overlay)
+  } else if (overlay) {
+    stopMicMeter()
+    overlay.remove()
   }
 }
 
@@ -574,32 +668,46 @@ function settingsPanelHtml() {
     : `<option value="">${emptyLabel}</option>`
 
   return `
-    <button data-picker-close class="picker-close"><sl-icon name="x-lg"></sl-icon></button>
-    <div class="settings-row">
-      <span class="settings-label">Mic</span>
-      <button data-mute class="settings-toggle ${muted ? 'off' : 'on'}">${muted ? 'Unmute' : 'Mute'}</button>
+    <div class="settings-modal">
+      <div class="action-wrapper">
+        <button data-picker-close class="standard-button bias-generic -small -round" type="button"><sl-icon name="x-lg"></sl-icon></button>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Microphone</span>
+        <button data-mute class="standard-toggle -small ${muted ? '' : 'active'}">${muted ? 'Off' : 'On'}</button>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Level</span>
+        <div class="mic-level" data-mic-level>
+          ${Array.from({ length: METER_SEGMENTS }, (_, i) => `<span class="seg ${meterSegClass(i)}"></span>`).join('')}
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Mic device</span>
+        <select class="standard-input -small" data-audioinput>${deviceOptions(_audioDevices, _selectedAudioId, 'no mics found', 'Microphone')}</select>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Camera</span>
+        <button data-cam class="standard-toggle -small ${cameraOn ? 'active' : ''}">${cameraOn ? 'On' : 'Off'}</button>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Camera device</span>
+        <select class="standard-input -small" data-videoinput>${deviceOptions(_videoDevices, _selectedVideoId, 'no cameras found', 'Camera')}</select>
+      </div>
+      <div class="camera-preview-row">
+        <video class="camera-preview" data-camera-preview autoplay playsinline muted></video>
+        ${cameraOn ? '' : '<div class="camera-preview-empty">camera off</div>'}
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Volume</span>
+        <input class="standard-input -small" type="range" data-volume min="0" max="1" step="0.05" value="${volume}">
+      </div>
+      ${CAN_SET_SINK ? `
+      <div class="settings-row">
+        <span class="settings-label">Speaker</span>
+        <select class="standard-input -small" data-audiooutput>${deviceOptions(_audioOutputDevices, _selectedAudioOutputId, 'no speakers found', 'Speaker')}</select>
+      </div>` : ''}
     </div>
-    <div class="settings-row">
-      <span class="settings-label">Microphone</span>
-      <select data-audioinput ${_audioDevices.length ? '' : 'disabled'}>${deviceOptions(_audioDevices, _selectedAudioId, 'no mics found', 'Microphone')}</select>
-    </div>
-    <div class="settings-row">
-      <span class="settings-label">Camera</span>
-      <button data-cam class="settings-toggle ${cameraOn ? 'on' : 'off'}">${cameraOn ? 'Turn off' : 'Turn on'}</button>
-    </div>
-    <div class="settings-row">
-      <span class="settings-label">Camera device</span>
-      <select data-videoinput ${_videoDevices.length ? '' : 'disabled'}>${deviceOptions(_videoDevices, _selectedVideoId, 'no cameras found', 'Camera')}</select>
-    </div>
-    <div class="settings-row">
-      <span class="settings-label">Volume</span>
-      <input type="range" data-volume min="0" max="1" step="0.05" value="${volume}">
-    </div>
-    ${CAN_SET_SINK ? `
-    <div class="settings-row">
-      <span class="settings-label">Speaker</span>
-      <select data-audiooutput ${_audioOutputDevices.length ? '' : 'disabled'}>${deviceOptions(_audioOutputDevices, _selectedAudioOutputId, 'no speakers found', 'Speaker')}</select>
-    </div>` : ''}
   `
 }
 
@@ -757,77 +865,98 @@ $.style(`
     50% { opacity: 0.2; }
   }
 
-  & .settings-panel {
-    position: absolute;
-    top: calc(100% + 0.4rem);
-    left: 0;
-    background: lemonchiffon;
-    border-radius: 2px;
-    padding: 0.5rem 0.65rem 0.65rem;
-    min-width: 220px;
-    max-width: 300px;
-    box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 3px 8px rgba(0,0,0,.08), 0 6px 20px rgba(0,0,0,.06);
-    z-index: 10;
-  }
-  & .picker-close {
-    position: absolute;
-    top: 0.3rem;
-    right: 0.3rem;
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: rgba(0,0,0,.35);
-    font-size: 0.65rem;
-    padding: 0.15rem 0.25rem;
-    width: auto;
-    height: auto;
-    border-radius: 2px;
+  /* full-screen modal, not an anchored popover — pointer-events: auto
+     since the & host is pointer-events: none by default (same reason
+     .hud.visible needs it). position: fixed escapes the host's own
+     position: absolute so this covers the real viewport regardless of
+     where board-call itself is mounted. */
+  & .settings-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.85);
     display: flex;
     align-items: center;
-    line-height: 1;
+    justify-content: center;
+    pointer-events: auto;
+    z-index: 9500;
   }
-  & .picker-close:hover { color: rgba(0,0,0,.7); }
+  & .settings-modal {
+    position: relative;
+    background: rgba(255,255,255,1);
+    border-radius: 1rem;
+    padding: 2.25rem 1rem 1rem;
+    min-width: 240px;
+    max-width: 320px;
+    width: 90vw;
+  }
+  /* same wrapper plan98-modal's own close button uses (@plan98/modal —
+     top:0/right:0, button itself unstyled beyond the shared
+     standard-button look) rather than a bespoke close-button class. */
+  & .action-wrapper {
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding: 0.5rem;
+    z-index: 2;
+  }
 
   /* left label, right control — one row per setting */
   & .settings-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.6rem;
-    margin-top: 0.5rem;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
   }
+  & .settings-row:first-of-type { margin-top: 0; }
   & .settings-label {
-    color: rgba(0,0,0,.6);
-    font-family: monospace;
-    font-size: 0.72rem;
-    white-space: nowrap;
+    color: rgba(0,0,0,.7);
+    font-size: 0.85rem;
   }
   & .settings-row select,
-  & .settings-row .settings-toggle {
-    font-family: monospace;
-    font-size: 0.72rem;
+  & .settings-row input,
+  & .settings-row .standard-toggle {
     max-width: 150px;
   }
-  & .settings-row select {
-    background: white;
-    border: 1px solid rgba(0,0,0,.2);
-    border-radius: 2px;
-    color: black;
-    padding: 0.1rem 0.2rem;
+
+  & .mic-level {
+    display: flex;
+    gap: 2px;
+    width: 150px;
   }
-  & .settings-toggle {
-    background: white;
-    border: 1px solid rgba(0,0,0,.2);
-    border-radius: 2px;
-    color: dodgerblue;
-    cursor: pointer;
-    width: auto;
-    height: auto;
-    padding: 0.1rem 0.5rem;
+  & .mic-level .seg {
+    flex: 1;
+    height: 10px;
+    border-radius: 1px;
+    background: rgba(0,0,0,.12);
   }
-  & .settings-toggle:hover { text-decoration: underline; }
-  & .settings-row input[type="range"] {
-    width: 110px;
+  & .mic-level .seg.lit.seg-green  { background: mediumseagreen; }
+  & .mic-level .seg.lit.seg-yellow { background: goldenrod; }
+  & .mic-level .seg.lit.seg-red    { background: firebrick; }
+
+  & .camera-preview-row {
+    position: relative;
+    margin-top: 0.75rem;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: rgba(0,0,0,.08);
+    border-radius: 0.5rem;
+    overflow: hidden;
+  }
+  & .camera-preview {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  & .camera-preview-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(0,0,0,.4);
+    font-size: 0.8rem;
   }
 
   & .spotlight {
@@ -844,3 +973,14 @@ $.style(`
     display: block;
   }
 `)
+
+// plan98's own elf framework has no unmount/disconnect hook (confirmed by
+// reading plan98.js — it only watches for nodes being ADDED via
+// MutationObserver, never removed). The rest of this codebase's answer to
+// that gap (was-video.js, v-log.js, plan98-camera.js) is a plain
+// customElements.define alongside the elf, purely for a real
+// disconnectedCallback — plan98's own draw()/afterUpdate machinery is
+// untouched, this only adds real teardown when the tag leaves the DOM.
+customElements.define(tag, class extends HTMLElement {
+  disconnectedCallback() { teardownCall() }
+})

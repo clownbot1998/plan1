@@ -1262,6 +1262,7 @@ sillonious-brand > xml-html {
 .field select,
 .standard-button,
 .standard-input,
+.standard-toggle,
 ::part(button) {
   background: linear-gradient(rgba(255,255,255,1) 0%, rgba(255,255,255,.5) 100%), var(--root-theme, mediumseagreen);
   pointer-events: all;
@@ -1295,6 +1296,8 @@ sillonious-brand > xml-html {
 .field select:active,
 .standard-button:active,
 .standard-button.active,
+.standard-toggle:active,
+.standard-toggle.active,
 .standard-input:active {
   border-top: 3px solid rgba(255,255,255,.25);
   border-bottom: none;
@@ -1330,23 +1333,42 @@ sillonious-brand > xml-html {
 
 
 .standard-button:link,
-.standard-button:visited {
+.standard-button:visited,
+.standard-toggle:link,
+.standard-toggle:visited {
   color: rgba(0,0,0,.85);
 }
 
 .standard-button:hover,
 .standard-button:focus,
 .standard-button.active,
-.standard-button:active {
+.standard-button:active,
+.standard-toggle:hover,
+.standard-toggle:focus,
+.standard-toggle.active,
+.standard-toggle:active {
   color: rgba(255,255,255,.85);
   background: linear-gradient(rgba(255,255,255,.5) 0%, rgba(0,0,0,.25) 100%), var(--root-theme, mediumseagreen);
 }
 
 .standard-button.active,
-.standard-button:active {
+.standard-button:active,
+.standard-toggle.active,
+.standard-toggle:active {
   color: rgba(0,0,0,.85);
   background: linear-gradient(rgba(255,255,255,.85) 0%, rgba(255,255,255,.85) 100%), var(--root-theme, mediumseagreen);
   border-color: rgba(0,0,0,.85);
+}
+
+/* .standard-toggle is .standard-button's click-to-toggle sibling — same
+   look, .active means "on" instead of "currently pressed". Defaults to
+   the --root-theme green; give it the neutral gray bias-generic uses so
+   an "off" toggle doesn't read as a call-to-action button. */
+.standard-toggle {
+  --root-theme: dimgray;
+}
+.standard-toggle.active {
+  --root-theme: var(--green, mediumseagreen);
 }
 
 .standard-input:active {
@@ -1381,7 +1403,8 @@ sillonious-brand > xml-html {
 }
 
 .standard-input.-small,
-.standard-button.-small {
+.standard-button.-small,
+.standard-toggle.-small {
   padding: .25rem .5rem;
   font-size: 1rem;
 }
