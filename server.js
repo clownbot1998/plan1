@@ -212,6 +212,7 @@ function injectApp(html, tag, attrs = '') {
 // shared default title.
 const APP_TITLES = {
   'box-scores': "CCs Desperados Box Scores",
+  'meet-me': "Meet Me",
 };
 
 function injectTitle(html, tag) {
