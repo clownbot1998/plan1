@@ -1,0 +1,288 @@
+<a
+href: /app/elf-jo
+text: View as E-Book
+
+
+# Chapter 1: Jo
+
+Jo is a tiny elf that likes coding and coffee.
+
+Every morning Jo wakes up with a cup of Joe writing jo.
+
+Jo made a whole computer in jo. Jo wants to teach you jo.
+
+This is the Book of Jo.
+
+# Chapter 2: undefined
+
+Before Jo built a computer, that computer did not exist.
+
+That computer before being defined was undefined.
+
+The first word Jo put into the computer was
+
+undefined
+
+And the undefined computer was defined and it was good.
+
+# Chapter 3: null
+
+While the computer was technically defined as undefined it was empty.
+
+Jo defined this not undefined, but empty computer as
+
+null
+
+The computer exists, but it is empty.
+
+# Chapter 4: 0
+
+While Jo was building the tiny computer, it was clear that null was four bytes.
+
+Jo found it a little silly that something that was nothing was 4.
+
+So Jo created a system of integers and made 0 nothing, stored as 1 byte.
+
+# Chapter 5: false
+
+Everyone watching Jo build the computer said, "Everything is wrong!"
+
+And Jo said, "False!" because undefined, null, and 0 were not wrong.
+
+They just evaluated to false.
+
+Jo realized there was a misunderstanding about his computer.
+
+The absolute beauty of mathematics was lost on natural language speakers.
+
+Jo decided to infuse the computer with natural language.
+
+# Chapter 6: true
+
+Jo realized the power of a computer was in the facts. The truth.
+
+To get uncover the truth, Jo decided to build back up to it using jo.
+
+Jo gave jo true to stand in stark opposition to undefined, null, 0, false, and the ilk.
+
+true is joined in positivity by everything else yet to come, as well as the non-zero integers.
+
+# Chapter 7: function
+
+Once Jo had enough of reality defined, it was time to expand it.
+
+Jo made a new word: function.
+
+The function of the function is to function.
+
+A function may return a value from the void.
+
+function hello() {
+  return "Hello"
+}
+
+Jo wrote a function to say, "Hello".
+
+hello() will return "Hello".
+
+# Chapter 8: if/else
+
+Jo realized the computer needed to key off of reality for dynamic interaction.
+
+To test this with everything Jo built so far, Jo wanted a program.
+
+This program would say "Hello" to positivity and "Goodbye" to negativity.
+
+function socialHelper(vibe) {
+  if(vibe) {
+    return "Hello"
+  } else {
+    return "Goodbye"
+  }
+}
+
+# Chapter 9: Math
+
+Jo quickly realized a calculator was needed to bridge the math with language.
+
+Jo wrote a file: calculator.js and exported the fundamental formulas.
+
+export function Add(a, b) {
+  return a + b
+}
+
+export function Subtract(a, b) {
+  return a - b
+}
+
+export function Multiply(a, b) {
+  return a * b
+}
+
+export function Divide(a, b) {
+  return a / b
+}
+
+export function Modulo(a, b) {
+  return a % b
+}
+
+# Chapter 10: Errors
+
+Jo realized while writing jo, that not all programs would be perfect.
+
+Errors needed to be accounted for. Jo would throw.
+
+function bad(data) {
+  return data.error
+}
+
+function validate(data) {
+  if(!data) {
+    throw new Error("No data!")
+  }
+
+  if(bad(data)) {
+    throw new Error(data.error)
+  }
+
+  return data
+}
+
+# Chapter 11: Error Handling
+
+Jo crashed the computer by throwing exceptions without handling them.
+
+function boot(data) {
+  security(data)
+}
+
+function security(data) {
+  try {
+    validate(data)
+    main(data)
+  } catch(error) {
+    console.error(error)
+  }
+}
+
+# Chapter 12: Main Street
+
+Jo built jo based on other languages. 
+
+Most langauges have a "main" paradigm-- the "main" function is the root function.
+
+function main(data) {
+  // now in the main jo program, we can assume we have error-free data to play.
+}
+
+With enough of the core concepts of jo established, jo is ready for you.
+
+# Chapter 13: The Infinite Reality
+
+Jo wants you to know, every program in all reality ever started as main()
+
+One little function that grew and grew and grew, day after day after day.
+
+Like music and mathemetics, programming is an art and a practice.
+
+Gaining fluency gains competency gains agency gains mastery.
+
+At this point in time, the only limit to your own imagination is you.
+
+Jo will not leave you there though. Continue with Jo into the great unknown?
+
+[yes] [no]
+
+# Chapter 14: The Finite Reality
+
+Jo made the reality function to keep up with an ever evolving world.
+
+To define a reality, give it an initial state and a callback for updates.
+
+Data can be read via get() and Jo can write data with set(), surgically.
+
+function reality(initialState = {}, callback = () => null) {
+  let state = {
+    ...initialState
+  };
+
+  const defaultMerge = (s, p) => ({...s,...p})
+
+  return {
+    set: function(key, data, merge = defaultMerge) {
+      const current = state[key] || {}
+      const latest = merge(current, data);
+
+      state = {
+        ...state,
+        [key]: latest
+      };
+
+      callback(key);
+    },
+
+    get: function(key) {
+      return state[key];
+    }
+  }
+}
+
+# Chapter 15: Reactive Programming
+
+Callbacks are what Jo used to take at the phone company.
+
+Jo ran all around town giving out fictional reality business cards.
+
+When someone wanted to buy, they just set their data in the fictional reality.
+
+Jo would get a callback automatically to get back to them ASAP for that M-O-N-E-Y.
+
+const callbacks = []
+
+function callback(key) {
+  callbacks.forEach(callback => {
+    callback(key)
+  })
+}
+
+const fiction = reality({}, callback)
+
+callbacks.push((key) => console.log(fiction.get(key))
+
+fiction.set('test', { hello: 'world' })
+fiction.set('test', { type: 'type' })
+fiction.set('test', { name: 'jo' })
+fiction.set('test', { beverage: 'jo' })
+fiction.set('test', { language: 'jo' })
+
+# Chapter 16: Irreverant Systems
+
+function update(target, compositor) {
+  const html = compositor.call(this, target)
+  if(html) target.innerHTML = html
+}
+
+function connect(target, initialState = {}, compositor) {
+  try {
+    if(!target.id) target.id = self.crypto.randomUUID()
+  } catch(e) {
+    if(!target.id) target.id = uuidv4()
+  }
+
+  fiction.set(target.id, initialState)
+
+  function view(link) {
+    const draw = update.bind(this, target, compositor)
+    reactiveFunctions[link] = draw
+    draw()
+  }
+
+  return {
+    link: target.id,
+
+    model: fiction.get.bind(this, target.id),
+    view: view.bind(this, targret.id),
+    controller: fiction.set.bind(this, target.id),
+  }
+}
