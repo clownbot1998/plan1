@@ -648,10 +648,12 @@ function afterUpdate(target) {
   // [data-focus] handler rather than a second pin mechanism.
   const spotlightEl = target.querySelector('.spotlight')
   if (spotlightEl) {
-    // hidden while something's pinned — a pinned peer is already
+    // hidden while something's pinned (a pinned peer is already
     // fullscreen behind the hud, showing the spotlight on top of that
-    // would just be a second, smaller instance of the same idea.
-    spotlightEl.style.display = (expanded && !pinned) ? 'block' : 'none'
+    // would just be a second, smaller instance of the same idea) and
+    // hidden while there's nobody to spotlight — an empty placeholder
+    // box has nothing useful to show while you're alone in a room.
+    spotlightEl.style.display = (expanded && !pinned && activeSpeaker) ? 'block' : 'none'
     if (activeSpeaker) {
       spotlightEl.dataset.focus = activeSpeaker
       spotlightEl.classList.add('clickable')
