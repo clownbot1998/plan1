@@ -931,8 +931,10 @@ $.style(`
     color: white;
     opacity: 1;
     transition: opacity 0.15s;
-    width: 32px;
-    height: 32px;
+    /* 44x44 meets Apple/Google's minimum comfortable tap target — this
+       used to be 32x32, fine on a trackpad but tight on a phone. */
+    width: 44px;
+    height: 44px;
     border-radius: 0.5rem;
     display: flex;
     align-items: center;
@@ -985,6 +987,12 @@ $.style(`
     min-width: 240px;
     max-width: 320px;
     width: 90vw;
+    /* a portrait phone camera's intrinsic-aspect preview (~9:16 at 320px
+       wide) runs the modal past a phone's viewport height with nothing
+       below it to scroll to — cap it and let the modal itself scroll
+       rather than clipping the close button or the last row. */
+    max-height: 85vh;
+    overflow-y: auto;
   }
   /* same wrapper plan98-modal's own close button uses (@plan98/modal —
      top:0/right:0, button itself unstyled beyond the shared
@@ -995,6 +1003,15 @@ $.style(`
     right: 0;
     padding: 0.5rem;
     z-index: 2;
+  }
+  /* the shared -small standard-toggle/standard-button classes are 32x32
+     everywhere else on purpose (dense desktop UI) — bumped only inside
+     this modal, where they're the only interactive control on a touch
+     screen and 32px falls short of a comfortable tap target. */
+  & .action-wrapper button,
+  & .settings-row .standard-toggle {
+    width: 44px;
+    height: 44px;
   }
 
   /* left label, right control — one row per setting */
