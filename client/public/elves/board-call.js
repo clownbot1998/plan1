@@ -608,15 +608,19 @@ function afterUpdate(target) {
       if (!dotEl) { dotEl = document.createElement('span'); dotEl.className = 'dot'; bar.appendChild(dotEl) }
     } else if (dotEl) dotEl.remove()
 
-    // peer tiles — add missing, remove departed. the pinned peer is left
-    // out of this row entirely — it's already showing fullscreen behind
-    // the hud, no need to show it twice.
+    // peer tiles — add missing, remove departed. the pinned peer is
+    // always left out (already shown fullscreen behind the hud). the
+    // active speaker is only left out while the spotlight is actually
+    // showing them — pinning someone hides the spotlight (no point
+    // featuring two things fullscreen at once), so once that happens the
+    // active speaker goes back to being a normal tile in the bar.
+    const spotlightVisible = !pinned
     const peerIds = new Set(Object.keys(_connections))
     bar.querySelectorAll('[data-peer]').forEach(el => {
-      if (!peerIds.has(el.dataset.peer) || el.dataset.peer === pinned) el.remove()
+      if (!peerIds.has(el.dataset.peer) || el.dataset.peer === pinned || (spotlightVisible && el.dataset.peer === activeSpeaker)) el.remove()
     })
     for (const [id, conn] of Object.entries(_connections)) {
-      if (id === pinned) continue
+      if (id === pinned || (spotlightVisible && id === activeSpeaker)) continue
       let tile = bar.querySelector(`[data-peer="${id}"]`)
       if (!tile) {
         tile = document.createElement('div')
@@ -644,7 +648,10 @@ function afterUpdate(target) {
   // [data-focus] handler rather than a second pin mechanism.
   const spotlightEl = target.querySelector('.spotlight')
   if (spotlightEl) {
-    spotlightEl.style.display = expanded ? 'block' : 'none'
+    // hidden while something's pinned — a pinned peer is already
+    // fullscreen behind the hud, showing the spotlight on top of that
+    // would just be a second, smaller instance of the same idea.
+    spotlightEl.style.display = (expanded && !pinned) ? 'block' : 'none'
     if (activeSpeaker) {
       spotlightEl.dataset.focus = activeSpeaker
       spotlightEl.classList.add('clickable')
@@ -653,10 +660,13 @@ function afterUpdate(target) {
       spotlightEl.classList.remove('clickable')
     }
     const sv = spotlightEl.querySelector('.spotlight-video')
-    if (sv) {
-      const stream = activeSpeaker ? (_connections[activeSpeaker]?.stream ?? null) : null
-      if (sv.srcObject !== stream) sv.srcObject = stream
-    }
+    const stream = activeSpeaker ? (_connections[activeSpeaker]?.stream ?? null) : null
+    if (sv && sv.srcObject !== stream) sv.srcObject = stream
+    // same intrinsic-aspect fix as the camera preview — a fixed
+    // min-height left a gap between the video and the box bottom
+    // whenever the stream's real aspect didn't reach it. only the empty
+    // (no active speaker) state needs a fixed shape now.
+    spotlightEl.classList.toggle('-empty', !stream)
   }
 
   // pinned tile — fullscreen behind the hud. lower z-index than .hud (the
@@ -1086,13 +1096,15 @@ $.style(`
     background: rgba(0,0,0,.6);
     border-radius: 0.5rem;
     overflow: hidden;
-    min-height: 120px;
     width: calc(56px * 3 + 0.5rem * 2);
+  }
+  & .spotlight.-empty {
+    min-height: 120px;
+    aspect-ratio: 16 / 9;
   }
   & .spotlight-video {
     width: 100%;
-    height: 100%;
-    object-fit: cover;
+    height: auto;
     display: block;
     /* $.when delegates by matching the literal event.target, not
        closest() — same reason the tile videos are pointer-events: none —
